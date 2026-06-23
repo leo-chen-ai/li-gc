@@ -65,6 +65,7 @@ deploy/k3s/deploy-local.sh --auto --dry-run
 - 默认使用当前 Docker Buildx builder；如果要指定 builder，可设置 `BUILDX_BUILDER=desktop-linux`。
 - 本地 Docker BuildKit 缓存在 `~/.cache/shanhuai-gc/buildkit/`，重复构建会快一些。
 - 后端部署会构建 `shanhuai-api` 和 `shanhuai-migrate`，先导入镜像，再跑迁移 Job，最后滚动更新 API。
+- 跑迁移前会检查 `shanhuai-app-secret` 中的 `DATABASE_URL` 是否可解析；如果密码包含特殊字符，会自动按 URL 规则编码并 patch secret。
 - 前端部署会用 `PUBLIC_WEB_URL` 作为 `VITE_API_URL`，默认是 `http://36.151.143.235:30081`。
 - 发布完成后会验证 `http://36.151.143.235:30081/` 和 `/health`。
 

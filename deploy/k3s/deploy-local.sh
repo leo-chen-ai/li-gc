@@ -309,6 +309,112 @@ ensure_manifests() {
   fi
 }
 
+repair_database_url_secret() {
+  echo "Checking DATABASE_URL encoding in $NAMESPACE/shanhuai-app-secret..."
+  ssh "${SSH_OPTS[@]}" "$REMOTE" "SHANHUAI_K3S_NAMESPACE='$NAMESPACE' python3 -" <<'PY'
+import base64
+import os
+import pathlib
+import subprocess
+import sys
+import urllib.parse
+
+namespace = os.environ["SHANHUAI_K3S_NAMESPACE"]
+infra_env = pathlib.Path("/srv/shanhuai/secrets/infra.env")
+
+
+def kubectl_secret_url() -> str:
+    encoded = subprocess.check_output(
+        [
+            "k3s",
+            "kubectl",
+            "-n",
+            namespace,
+            "get",
+            "secret",
+            "shanhuai-app-secret",
+            "-o",
+            "jsonpath={.data.DATABASE_URL}",
+        ],
+        text=True,
+    )
+    return base64.b64decode(encoded).decode()
+
+
+def parse_env(path: pathlib.Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for line in path.read_text().splitlines():
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key] = value
+    return values
+
+
+def patch_secret(url: str) -> None:
+    encoded = base64.b64encode(url.encode()).decode()
+    patch = '[{"op":"replace","path":"/data/DATABASE_URL","value":"' + encoded + '"}]'
+    subprocess.run(
+        [
+            "k3s",
+            "kubectl",
+            "-n",
+            namespace,
+            "patch",
+            "secret",
+            "shanhuai-app-secret",
+            "--type=json",
+            "-p",
+            patch,
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+    )
+
+
+try:
+    current_url = kubectl_secret_url()
+    parsed = urllib.parse.urlparse(current_url)
+    _ = parsed.port
+    if parsed.scheme and parsed.hostname and parsed.path:
+        print("DATABASE_URL is parseable.")
+        sys.exit(0)
+except Exception:
+    pass
+
+if not infra_env.exists():
+    print("DATABASE_URL is not parseable and /srv/shanhuai/secrets/infra.env is missing.", file=sys.stderr)
+    sys.exit(1)
+
+values = parse_env(infra_env)
+required = ["POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB"]
+missing = [key for key in required if key not in values]
+if missing:
+    print("Missing keys in /srv/shanhuai/secrets/infra.env: " + ", ".join(missing), file=sys.stderr)
+    sys.exit(1)
+
+encoded_password = urllib.parse.quote(values["POSTGRES_PASSWORD"], safe="")
+fixed_url = (
+    f"postgres://{values['POSTGRES_USER']}:{encoded_password}"
+    f"@postgresql.shanhuai-infra.svc.cluster.local:5432/{values['POSTGRES_DB']}"
+)
+
+lines = []
+seen = False
+for line in infra_env.read_text().splitlines():
+    if line.startswith("DATABASE_URL="):
+        lines.append("DATABASE_URL=" + fixed_url)
+        seen = True
+    else:
+        lines.append(line)
+if not seen:
+    lines.append("DATABASE_URL=" + fixed_url)
+infra_env.write_text("\n".join(lines) + "\n")
+patch_secret(fixed_url)
+print("DATABASE_URL was URL-encoded and patched.")
+PY
+}
+
 run_migrations() {
   local job="shanhuai-migrate-$(date +%Y%m%d%H%M%S)"
   echo "Running database migrations with $MIGRATE_IMAGE..."
@@ -401,6 +507,7 @@ if [ "$DEPLOY_API" = true ]; then
   import_image "$MIGRATE_IMAGE"
 
   if [ "$SKIP_MIGRATE" = false ]; then
+    repair_database_url_secret
     run_migrations
   fi
 
