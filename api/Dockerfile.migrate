@@ -1,5 +1,18 @@
 FROM rust:alpine
 
+ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
+RUN mkdir -p /usr/local/cargo \
+    && printf '%s\n' \
+        '[source.crates-io]' \
+        'replace-with = "rsproxy-sparse"' \
+        '' \
+        '[source.rsproxy-sparse]' \
+        'registry = "sparse+https://rsproxy.cn/index/"' \
+        '' \
+        '[net]' \
+        'git-fetch-with-cli = true' \
+        > /usr/local/cargo/config.toml
+
 RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static
 
 RUN cargo install sqlx-cli --no-default-features --features native-tls,postgres

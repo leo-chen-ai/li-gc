@@ -4,6 +4,18 @@
 FROM rust:1-bookworm AS chef
 ARG CARGO_BUILD_JOBS=1
 ENV CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS
+ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
+RUN mkdir -p /usr/local/cargo \
+    && printf '%s\n' \
+        '[source.crates-io]' \
+        'replace-with = "rsproxy-sparse"' \
+        '' \
+        '[source.rsproxy-sparse]' \
+        'registry = "sparse+https://rsproxy.cn/index/"' \
+        '' \
+        '[net]' \
+        'git-fetch-with-cli = true' \
+        > /usr/local/cargo/config.toml
 RUN cargo install cargo-chef --locked
 WORKDIR /app
 
