@@ -40,7 +40,7 @@ RUN cargo chef cook --release --recipe-path recipe.json
 
 # Build the actual binary
 COPY . .
-RUN cargo build --release --bin api
+RUN cargo build --release --bin quax
 
 # =============================================================================
 # Runtime — minimal image
@@ -53,7 +53,7 @@ RUN apt-get update \
     && apt-get install -y ca-certificates libssl3 curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /app/target/release/api .
+COPY --from=builder /app/target/release/quax ./api
 
 EXPOSE 8080
 
