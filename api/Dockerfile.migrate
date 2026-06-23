@@ -13,6 +13,8 @@ RUN mkdir -p /usr/local/cargo \
         'git-fetch-with-cli = true' \
         > /usr/local/cargo/config.toml
 
+RUN sed -i 's|https://dl-cdn.alpinelinux.org/alpine|https://mirrors.aliyun.com/alpine|g' /etc/apk/repositories
+
 RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static
 
 RUN cargo install sqlx-cli --no-default-features --features native-tls,postgres
