@@ -5,11 +5,11 @@ on:
     branches: [main]
     tags:
       - "v*"
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_BUILD_JOBS: "1"
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
@@ -19,7 +19,7 @@ jobs:
   # ============================================================================
   backend-fmt:
     name: Backend / Format
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, shanhuai-ci]
     defaults:
       run:
         working-directory: ./api
@@ -32,7 +32,7 @@ jobs:
 
   backend-clippy:
     name: Backend / Clippy
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, shanhuai-ci]
     defaults:
       run:
         working-directory: ./api
@@ -48,7 +48,7 @@ jobs:
 
   backend-test:
     name: Backend / Test
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, shanhuai-ci]
     defaults:
       run:
         working-directory: ./api
@@ -71,7 +71,7 @@ jobs:
   # ============================================================================
   frontend-lint:
     name: Frontend / Lint
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, shanhuai-ci]
     defaults:
       run:
         working-directory: ./ui
@@ -96,7 +96,7 @@ jobs:
 
   frontend-typecheck:
     name: Frontend / TypeCheck
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, shanhuai-ci]
     defaults:
       run:
         working-directory: ./ui
@@ -121,7 +121,7 @@ jobs:
 
   frontend-build:
     name: Frontend / Build
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, shanhuai-ci]
     defaults:
       run:
         working-directory: ./ui
@@ -155,7 +155,7 @@ jobs:
   # ============================================================================
   docker-build:
     name: Backend / Docker Build & Push
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, shanhuai-ci]
     needs: [backend-fmt, backend-clippy, backend-test]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
@@ -184,16 +184,24 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=sha,prefix=sha-
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Prepare local Docker cache
+        run: |
+          rm -rf /srv/shanhuai-ci/buildkit-cache/api-new
+          mkdir -p /srv/shanhuai-ci/buildkit-cache/api
 
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
+          builder: default
           context: ./api
           file: ./api/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=local,src=/srv/shanhuai-ci/buildkit-cache/api
+          cache-to: type=local,dest=/srv/shanhuai-ci/buildkit-cache/api-new,mode=max
+
+      - name: Promote local Docker cache
+        run: |
+          rm -rf /srv/shanhuai-ci/buildkit-cache/api
+          mv /srv/shanhuai-ci/buildkit-cache/api-new /srv/shanhuai-ci/buildkit-cache/api

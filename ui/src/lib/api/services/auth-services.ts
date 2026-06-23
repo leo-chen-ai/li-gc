@@ -11,7 +11,10 @@ export const authService = {
   login: async (credentials: LoginCredentials): Promise<AuthResponse> => {
     const response = await apiClient.post<ApiSuccess<AuthResponse>>(
       API_ENDPOINTS.AUTH.LOGIN,
-      credentials
+      {
+        email: credentials.account,
+        password: credentials.password,
+      }
     );
 
     const data = response.data.data;

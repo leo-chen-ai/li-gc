@@ -32,8 +32,8 @@ export function RegisterForm() {
   return (
     <div className="w-full max-w-[400px]">
       <div className="flex items-center justify-center gap-2 mb-10">
-        <img src="/favicon.svg" alt="Quax" className="w-10 h-10" />
-        <span className="text-2xl font-bold tracking-tight">Quax</span>
+        <img src="/favicon.svg" alt="山淮建设管理平台" className="w-10 h-10" />
+        <span className="text-2xl font-bold tracking-tight">山淮建设管理平台</span>
       </div>
 
       <div className="space-y-6">

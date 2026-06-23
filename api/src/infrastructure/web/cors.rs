@@ -13,7 +13,7 @@ pub fn build_cors_layer(config: &Config) -> CorsLayer {
         // Log warning and use permissive CORS (development only!)
         eprintln!("WARNING: CORS_ALLOWED_ORIGINS='*' with credentials enabled.");
         eprintln!("         This may cause issues in some browsers.");
-        eprintln!("         Set specific origin for production (e.g., http://localhost:5173)");
+        eprintln!("         Set specific origin for production (e.g., http://localhost:8073)");
     }
 
     let cors = CorsLayer::new()

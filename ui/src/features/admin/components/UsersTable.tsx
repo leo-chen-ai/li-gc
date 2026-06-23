@@ -55,6 +55,15 @@ import type { UserWithTimestamps } from "@/features/admin/types/admin-types";
 
 export type DialogType = "role" | "block" | "reset" | "delete" | null;
 
+const roleLabel = (role: string) => (role === "admin" ? "系统管理员" : "普通用户");
+
+const columnLabels: Record<string, string> = {
+  name: "用户",
+  email: "邮箱",
+  role: "角色",
+  created_at: "创建时间",
+};
+
 interface UsersTableProps {
   users: UserWithTimestamps[] | undefined;
   isLoading: boolean;
@@ -92,14 +101,14 @@ export function UsersTable({
             (table.getIsSomePageRowsSelected() && "indeterminate")
           }
           onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
-          aria-label="Select all"
+          aria-label="全选"
         />
       ),
       cell: ({ row }) => (
         <Checkbox
           checked={row.getIsSelected()}
           onCheckedChange={(value) => row.toggleSelected(!!value)}
-          aria-label="Select row"
+          aria-label="选择行"
         />
       ),
       enableSorting: false,
@@ -107,7 +116,7 @@ export function UsersTable({
     },
     {
       id: "no",
-      header: "No",
+      header: "序号",
       cell: ({ row, table }) => {
         const pageIndex = table.getState().pagination.pageIndex;
         const pageSize = table.getState().pagination.pageSize;
@@ -125,7 +134,7 @@ export function UsersTable({
           className="-ml-3 h-8"
           onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
         >
-          User
+          用户
           <ArrowUpDown className="ml-2 h-3 w-3" />
         </Button>
       ),
@@ -157,10 +166,18 @@ export function UsersTable({
           className="-ml-3 h-8"
           onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
         >
-          Email
+          邮箱
           <ArrowUpDown className="ml-2 h-3 w-3" />
         </Button>
       ),
+      cell: ({ row }) => {
+        const email = row.getValue("email") as string;
+        return email ? (
+          <span>{email}</span>
+        ) : (
+          <span className="text-muted-foreground">未填写</span>
+        );
+      },
     },
     {
       accessorKey: "role",
@@ -171,7 +188,7 @@ export function UsersTable({
           className="-ml-3 h-8"
           onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
         >
-          Role
+          角色
           <ArrowUpDown className="ml-2 h-3 w-3" />
         </Button>
       ),
@@ -180,7 +197,7 @@ export function UsersTable({
         return (
           <Badge variant={role === "admin" ? "destructive" : "default"} className="gap-1">
             {role === "admin" ? <Shield className="h-3 w-3" /> : <User className="h-3 w-3" />}
-            {role}
+            {roleLabel(role)}
           </Badge>
         );
       },
@@ -194,13 +211,13 @@ export function UsersTable({
           className="-ml-3 h-8"
           onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
         >
-          Joined
+          创建时间
           <ArrowUpDown className="ml-2 h-3 w-3" />
         </Button>
       ),
       cell: ({ row }) => {
         const date = row.getValue("created_at") as string;
-        return date ? new Date(date).toLocaleDateString() : "N/A";
+        return date ? new Date(date).toLocaleDateString("zh-CN") : "未记录";
       },
     },
     {
@@ -222,7 +239,7 @@ export function UsersTable({
                   onClick={() => onRoleChange(user, "admin")}
                 >
                   <Shield className="mr-2 h-4 w-4" />
-                  Promote to Admin
+                  设为系统管理员
                 </DropdownMenuItem>
               ) : (
                 <DropdownMenuItem
@@ -230,16 +247,16 @@ export function UsersTable({
                   disabled={isSelf}
                 >
                   <User className="mr-2 h-4 w-4" />
-                  {isSelf ? "Cannot demote yourself" : "Demote to User"}
+                  {isSelf ? "不能调整自己" : "设为普通用户"}
                 </DropdownMenuItem>
               )}
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={() => onResetPassword(user)}
-                disabled={isSelf}
+                disabled={isSelf || !user.email}
               >
                 <Key className="mr-2 h-4 w-4" />
-                Reset Password
+                {!user.email ? "未填写邮箱" : "重置密码"}
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => onBlockAccount(user)}
@@ -247,7 +264,7 @@ export function UsersTable({
                 className="text-amber-600"
               >
                 <Ban className="mr-2 h-4 w-4" />
-                Block Account
+                禁用账号
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
@@ -256,7 +273,7 @@ export function UsersTable({
                 className="text-destructive"
               >
                 <Trash2 className="mr-2 h-4 w-4" />
-                Delete Account
+                删除账号
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -302,13 +319,13 @@ export function UsersTable({
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between">
-          <CardTitle>All Users ({users?.length || 0})</CardTitle>
+          <CardTitle>全部用户（{users?.length || 0}）</CardTitle>
           <div className="flex items-center gap-2">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm" className="h-8">
                   <Settings2 className="mr-2 h-3.5 w-3.5" />
-                  View
+                  显示列
                   <ChevronDown className="ml-2 h-3.5 w-3.5" />
                 </Button>
               </DropdownMenuTrigger>
@@ -329,7 +346,7 @@ export function UsersTable({
                           column.toggleVisibility(!!value)
                         }
                       >
-                        {column.id === "no" ? "No" : column.id}
+                        {columnLabels[column.id] || column.id}
                       </DropdownMenuCheckboxItem>
                     );
                   })}
@@ -339,7 +356,7 @@ export function UsersTable({
             <div className="relative w-64">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Search users..."
+                placeholder="搜索用户..."
                 value={globalFilter}
                 onChange={(e) => setGlobalFilter(e.target.value)}
                 className="h-8 pl-8"
@@ -389,7 +406,7 @@ export function UsersTable({
                   ) : (
                     <TableRow>
                       <TableCell colSpan={columns.length} className="h-24 text-center">
-                        No users found.
+                        暂无用户数据。
                       </TableCell>
                     </TableRow>
                   )}
@@ -401,7 +418,7 @@ export function UsersTable({
               <div className="mt-4 flex items-center justify-between rounded-md border bg-muted/50 p-2 px-4 animate-in fade-in slide-in-from-bottom-2">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium">
-                    {selectedCount} row{selectedCount !== 1 ? "s" : ""} selected
+                    已选择 {selectedCount} 个用户
                   </span>
                   <Button
                     variant="ghost"
@@ -410,7 +427,7 @@ export function UsersTable({
                     onClick={() => table.toggleAllPageRowsSelected(false)}
                   >
                     <X className="mr-1 h-3 w-3" />
-                    Clear
+                    清除
                   </Button>
                 </div>
                 <div className="flex items-center gap-2">
@@ -421,7 +438,7 @@ export function UsersTable({
                     onClick={handleBulkBlock}
                   >
                     <Ban className="mr-1 h-3 w-3" />
-                    Block
+                    禁用
                   </Button>
                   <Button
                     variant="outline"
@@ -430,7 +447,7 @@ export function UsersTable({
                     onClick={handleBulkDelete}
                   >
                     <Trash2 className="mr-1 h-3 w-3" />
-                    Delete
+                    删除
                   </Button>
                 </div>
               </div>
@@ -438,8 +455,7 @@ export function UsersTable({
 
             <div className="flex items-center justify-between mt-4">
               <div className="text-sm text-muted-foreground">
-                Page {table.getState().pagination.pageIndex + 1} of{" "}
-                {table.getPageCount()}
+                第 {table.getState().pagination.pageIndex + 1} 页，共 {table.getPageCount()} 页
               </div>
               <div className="flex items-center gap-2">
                 <Button

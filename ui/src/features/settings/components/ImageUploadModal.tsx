@@ -38,8 +38,8 @@ export function ImageUploadModal({
   isOpen,
   onClose,
   onUpload,
-  title = "Upload Image",
-  description = "Select an image to upload. Maximum file size is 5MB.",
+  title = "上传图片",
+  description = "请选择要上传的图片，最大 5MB。",
   maxSizeMB = 5,
   acceptedTypes = ['image/jpeg', 'image/png', 'image/webp'],
   isAvatar = false,
@@ -58,10 +58,10 @@ export function ImageUploadModal({
 
   const validateFile = useCallback((file: File): string | null => {
     if (!acceptedTypes.includes(file.type)) {
-      return `Invalid file type. Accepted: ${acceptedExtensions}`;
+      return `文件类型不支持。支持格式：${acceptedExtensions}`;
     }
     if (file.size > maxSizeBytes) {
-      return `File too large. Maximum size: ${maxSizeMB}MB`;
+      return `文件过大，最大支持 ${maxSizeMB}MB`;
     }
     return null;
   }, [acceptedTypes, acceptedExtensions, maxSizeBytes, maxSizeMB]);
@@ -93,7 +93,7 @@ export function ImageUploadModal({
       setPreviewUrl(url);
       setStatus('preview');
     } catch {
-      setErrorMessage('Failed to preview image');
+      setErrorMessage('图片预览失败');
       if (!previewUrl) setStatus('idle');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -157,7 +157,7 @@ export function ImageUploadModal({
       }, 1500);
     } catch (error) {
       clearInterval(progressInterval);
-      setErrorMessage(error instanceof Error ? error.message : 'Upload failed');
+      setErrorMessage(error instanceof Error ? error.message : '上传失败');
       setStatus('preview');
     }
   };
@@ -217,7 +217,7 @@ export function ImageUploadModal({
                 >
                   <img
                     src={previewUrl}
-                    alt="Preview"
+                    alt="图片预览"
                     className="h-full w-full object-cover"
                   />
 
@@ -229,7 +229,7 @@ export function ImageUploadModal({
                     >
                       <div className="flex flex-col items-center gap-2">
                         <Pencil className="h-8 w-8" />
-                        <span className="text-sm font-medium">Change Photo</span>
+                        <span className="text-sm font-medium">更换图片</span>
                       </div>
                     </div>
                   )}
@@ -238,7 +238,7 @@ export function ImageUploadModal({
                 {/* Upload Progress Indicator beneath the image */}
                 {status === 'uploading' && (
                   <div className="w-full max-w-[12rem] space-y-2 mt-2">
-                    <p className="text-center text-sm font-medium animate-pulse">Uploading... {progress}%</p>
+                    <p className="text-center text-sm font-medium animate-pulse">上传中... {progress}%</p>
                     <Progress value={progress} className="h-2 w-full" />
                   </div>
                 )}
@@ -248,7 +248,7 @@ export function ImageUploadModal({
                   <div className="w-full flex-col items-center space-y-1 mt-2 animate-in zoom-in fade-in duration-300">
                     <div className="flex items-center justify-center gap-2 text-primary font-medium">
                       <CheckCircle2 className="h-5 w-5" />
-                      <span>Upload successful!</span>
+                      <span>上传成功</span>
                     </div>
                   </div>
                 )}
@@ -260,7 +260,7 @@ export function ImageUploadModal({
                   onClick={() => handleClose()}
                   disabled={status === 'uploading' || status === 'success'}
                 >
-                  Cancel
+                  取消
                 </Button>
                 <Button
                   onClick={handleUpload}
@@ -273,7 +273,7 @@ export function ImageUploadModal({
                   ) : (
                     <Upload className="mr-2 h-4 w-4" />
                   )}
-                  {status === 'uploading' ? 'Uploading...' : status === 'success' ? 'Success' : 'Upload'}
+                  {status === 'uploading' ? '上传中...' : status === 'success' ? '已完成' : '上传'}
                 </Button>
               </div>
             </div>
@@ -299,10 +299,10 @@ export function ImageUploadModal({
                 </div>
                 <div>
                   <p className="text-sm font-medium">
-                    Click to upload or drag and drop
+                    点击上传或拖拽图片到这里
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {acceptedExtensions.toUpperCase()} up to {maxSizeMB}MB
+                    支持 {acceptedExtensions.toUpperCase()}，最大 {maxSizeMB}MB
                   </p>
                 </div>
               </div>

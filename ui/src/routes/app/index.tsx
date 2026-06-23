@@ -25,7 +25,7 @@ function UserDashboard() {
     const [commandOpen, setCommandOpen] = useState(false);
 
     if (user?.role === "admin") {
-        navigate({ to: "/app/admin", replace: true });
+        navigate({ to: "/app/admin/projects", replace: true });
         return null;
     }
 
@@ -35,8 +35,8 @@ function UserDashboard() {
             <header className="sticky top-0 z-50 flex h-16 shrink-0 items-center justify-between gap-2 border-b bg-background/80 px-4 backdrop-blur-md">
                 <div className="flex items-center gap-2">
                     <Link to="/app" className="flex items-center gap-2">
-                        <img src="/favicon.svg" alt="Quax Logo" className="aspect-square size-8" />
-                        <span className="font-semibold hidden sm:inline-block">Quax</span>
+                        <img src="/favicon.svg" alt="山淮建设管理平台" className="aspect-square size-8" />
+                        <span className="font-semibold hidden sm:inline-block">山淮建设管理平台</span>
                     </Link>
                 </div>
 
@@ -52,11 +52,11 @@ function UserDashboard() {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-80">
                             <DropdownMenuLabel>
-                                <span>Notifications</span>
+                                <span>通知</span>
                             </DropdownMenuLabel>
                             <DropdownMenuSeparator />
                             <div className="py-4 text-center text-sm text-muted-foreground">
-                                No new notifications
+                                暂无新通知
                             </div>
                         </DropdownMenuContent>
                     </DropdownMenu>
@@ -68,16 +68,16 @@ function UserDashboard() {
             {/* Page Content */}
             <main className="flex-1 p-6 sm:p-10 max-w-7xl mx-auto w-full space-y-8">
                 <div>
-                    <h2 className="text-3xl font-bold tracking-tight">Dashboard</h2>
+                    <h2 className="text-3xl font-bold tracking-tight">工作台</h2>
                     <p className="text-muted-foreground mt-2 text-lg">
-                        Welcome back, {user?.name || user?.username || 'User'}!
+                        欢迎回来，{user?.name || user?.username || "用户"}。
                     </p>
                 </div>
 
                 <div className="rounded-xl border border-dashed bg-card/50 p-12 text-center shadow-sm flex flex-col items-center justify-center min-h-[400px]">
-                    <h3 className="text-xl font-semibold tracking-tight text-foreground/80">Features will be added in the future</h3>
+                    <h3 className="text-xl font-semibold tracking-tight text-foreground/80">功能正在完善中</h3>
                     <p className="text-muted-foreground mt-2 max-w-sm mx-auto">
-                        We are currently working on exciting new features for your dashboard. Stay tuned!
+                        后续会逐步补齐普通用户工作台能力。
                     </p>
                 </div>
             </main>

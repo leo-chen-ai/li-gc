@@ -51,4 +51,20 @@ impl StorageProvider for LocalStorage {
         let base = self.base_url.trim_end_matches('/');
         format!("{base}/{key}")
     }
+
+    fn driver(&self) -> &str {
+        "local"
+    }
+
+    fn bucket(&self) -> Option<&str> {
+        None
+    }
+
+    fn endpoint(&self) -> Option<&str> {
+        None
+    }
+
+    fn public_base_url(&self) -> &str {
+        &self.base_url
+    }
 }

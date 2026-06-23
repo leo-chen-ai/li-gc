@@ -83,6 +83,34 @@ async fn test_login_success() {
 }
 
 #[tokio::test]
+async fn test_login_success_with_username() {
+    let (app, _c) = build_test_app().await;
+
+    post_json(
+        app.clone(),
+        "/api/v1/auth/register",
+        &json!({
+            "email": "username-login@example.com",
+            "username": "username_login",
+            "name": "Username Login",
+            "password": "hunter2"
+        }),
+    )
+    .await;
+
+    let (status, body) = post_json(
+        app,
+        "/api/v1/auth/login",
+        &json!({ "email": "username_login", "password": "hunter2" }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(body["data"]["token"]["access_token"].is_string());
+    assert_eq!(body["data"]["user"]["username"], "username_login");
+}
+
+#[tokio::test]
 async fn test_login_wrong_password() {
     let (app, _c) = build_test_app().await;
 

@@ -49,7 +49,7 @@ cp .env.example .env
 bun run dev
 ```
 
-App available at `http://localhost:5173`
+App available at `http://localhost:8073`
 
 ## Project Structure
 

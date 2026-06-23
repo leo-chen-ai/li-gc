@@ -51,13 +51,18 @@ pub async fn update_user_role(
     Path(user_id): Path<Uuid>,
     Json(req): Json<UpdateUserRoleRequest>,
 ) -> ApiResult<AdminUserResponse> {
-    // Validate role
-    let role = req.role.to_lowercase();
-    if role != "admin" && role != "user" {
+    let role = req.role.trim().to_lowercase();
+    if state
+        .admin_role_repo
+        .find_by_code(state.db.pool(), &role)
+        .await
+        .map_err(|e| ApiError::default().log_only(e))?
+        .is_none()
+    {
         return Err(ApiError::default()
             .with_code(StatusCode::BAD_REQUEST)
             .with_error_code(generic::INVALID_INPUT)
-            .with_message("Role must be either 'admin' or 'user'"));
+            .with_message("Role does not exist"));
     }
 
     // Prevent changing own role

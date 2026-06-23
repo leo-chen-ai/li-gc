@@ -10,7 +10,7 @@ export function useUpdateUserRole() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ userId, role }: { userId: string; role: "admin" | "user" }) =>
+    mutationFn: ({ userId, role }: { userId: string; role: string }) =>
       adminService.updateUserRole(userId, role),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: adminKeys.users() });

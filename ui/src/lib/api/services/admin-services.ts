@@ -1,6 +1,11 @@
 import { apiClient, API_ENDPOINTS } from "@/lib/api";
 import type { ApiResponse } from "@/lib/api/types";
-import type { UserWithTimestamps } from "@/features/admin/types/admin-types";
+import type {
+  AdminRole,
+  AdminUploadFile,
+  CreateRoleRequest,
+  UserWithTimestamps,
+} from "@/features/admin/types/admin-types";
 
 export interface LogLevelRequest {
   level: "trace" | "debug" | "info" | "warn" | "error";
@@ -76,12 +81,75 @@ export const adminService = {
 
   updateUserRole: async (
     userId: string,
-    role: "admin" | "user"
+    role: string
   ): Promise<void> => {
     await apiClient.post<ApiResponse<void>>(
       API_ENDPOINTS.ADMIN.USER_ROLE(userId),
       { role }
     );
+  },
+
+  getRoles: async (): Promise<AdminRole[]> => {
+    const response = await apiClient.get<ApiResponse<AdminRole[]>>(
+      API_ENDPOINTS.ADMIN.ROLES
+    );
+
+    const data = response.data.data;
+    if (!data) {
+      throw new Error("Failed to get roles");
+    }
+
+    return data;
+  },
+
+  createRole: async (payload: CreateRoleRequest): Promise<AdminRole> => {
+    const response = await apiClient.post<ApiResponse<AdminRole>>(
+      API_ENDPOINTS.ADMIN.ROLES,
+      payload
+    );
+
+    const data = response.data.data;
+    if (!data) {
+      throw new Error("Failed to create role");
+    }
+
+    return data;
+  },
+
+  updateRoleMenus: async (
+    roleId: string,
+    menuKeys: string[]
+  ): Promise<AdminRole> => {
+    const response = await apiClient.put<ApiResponse<AdminRole>>(
+      API_ENDPOINTS.ADMIN.ROLE_MENUS(roleId),
+      { menu_keys: menuKeys }
+    );
+
+    const data = response.data.data;
+    if (!data) {
+      throw new Error("Failed to update role menus");
+    }
+
+    return data;
+  },
+
+  deleteRole: async (roleId: string): Promise<void> => {
+    await apiClient.delete<ApiResponse<void>>(
+      API_ENDPOINTS.ADMIN.ROLE_DELETE(roleId)
+    );
+  },
+
+  getUploads: async (): Promise<AdminUploadFile[]> => {
+    const response = await apiClient.get<ApiResponse<AdminUploadFile[]>>(
+      API_ENDPOINTS.ADMIN.UPLOADS
+    );
+
+    const data = response.data.data;
+    if (!data) {
+      throw new Error("Failed to get upload files");
+    }
+
+    return data;
   },
 
   getApiKeys: async (): Promise<ApiKey[]> => {

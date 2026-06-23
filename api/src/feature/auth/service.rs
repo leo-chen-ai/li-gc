@@ -149,17 +149,26 @@ impl AuthService {
     /// Login user with password
     pub async fn login(
         &self,
-        email: &str,
+        account: &str,
         password: &str,
         device_info: Option<&DeviceInfo>,
     ) -> Result<(AuthResponse, Cookie<'static>), AuthError> {
-        // 1. Find user by email
-        let user = self
+        // 1. Find user by email first, then by username.
+        let account = account.trim();
+        let user = match self
             .user_repo
-            .find_by_email(self.db.pool(), email)
+            .find_by_email(self.db.pool(), account)
             .await
             .map_err(|_| AuthError::Database(sqlx::Error::RowNotFound))?
-            .ok_or(AuthError::InvalidCredentials)?;
+        {
+            Some(user) => user,
+            None => self
+                .user_repo
+                .find_by_username(self.db.pool(), account)
+                .await
+                .map_err(|_| AuthError::Database(sqlx::Error::RowNotFound))?
+                .ok_or(AuthError::InvalidCredentials)?,
+        };
 
         if !user.is_active {
             return Err(AuthError::InvalidCredentials);

@@ -76,7 +76,7 @@ export function ApiKeysManagement() {
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" asChild>
-              <Link to="/app/admin">← Back to Admin</Link>
+              <Link to="/app/admin/projects">返回项目管理</Link>
             </Button>
             <Button onClick={() => setCreateDialogOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />

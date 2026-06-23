@@ -1,6 +1,5 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { LandingPage } from "@/features/home/components/LandingPage";
+import { Navigate, createFileRoute } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/")({
-  component: LandingPage,
+  component: () => <Navigate to="/app/login" replace />,
 });

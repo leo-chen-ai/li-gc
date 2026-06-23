@@ -1,17 +1,16 @@
 import { Outlet, useNavigate } from "@tanstack/react-router";
 import { createFileRoute } from "@tanstack/react-router";
-import { Bell, Menu } from "lucide-react";
-import { useState } from "react";
+import { Bell, Menu, Search } from "lucide-react";
+import type { CSSProperties } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   SidebarProvider,
   SidebarInset,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/AppSidebar";
-import { BreadcrumbNav } from "@/components/layout/BreadcrumbNav";
-import { CommandMenu, CommandMenuTrigger } from "@/components/layout/CommandMenu";
 import { useAuthUser } from "@/stores/use-auth-store";
 import { HeaderUserMenu } from "@/components/layout/HeaderUserMenu";
 import {
@@ -26,50 +25,58 @@ import { Badge } from "@/components/ui/badge";
 
 // Mock notifications
 const notifications = [
-  { id: 1, title: "New user registered", description: "john@example.com joined", time: "2 min ago", unread: true },
-  { id: 2, title: "API Key created", description: "Production key was created", time: "1 hour ago", unread: true },
-  { id: 3, title: "System update", description: "Database backup completed", time: "3 hours ago", unread: false },
+  { id: 1, title: "考勤待补图", description: "淮安高铁商务区综合体项目有 1 条记录待补图", time: "2 分钟前", unread: true },
+  { id: 2, title: "班组信息待完善", description: "安装综合班缺少班组长证件信息", time: "1 小时前", unread: true },
+  { id: 3, title: "数据库备份完成", description: "本地开发库备份任务已完成", time: "3 小时前", unread: false },
 ];
 
 export const Route = createFileRoute("/app/admin")({
-  component: DashboardLayout,
+  component: AdminLayout,
 });
 
-function DashboardLayout() {
-  return <DashboardContent />;
+function AdminLayout() {
+  return <AdminContent />;
 }
 
-function DashboardContent() {
+function AdminContent() {
   const navigate = useNavigate();
   const user = useAuthUser();
-  const [commandOpen, setCommandOpen] = useState(false);
   const unreadCount = notifications.filter((n) => n.unread).length;
 
   // Note: Authenticated guard is handled by app.tsx 
 
-  // Redirect standard users to their dashboard
+  // Redirect standard users to their workspace
   if (user?.role !== "admin") {
     navigate({ to: "/app" });
     return null;
   }
 
   return (
-    <SidebarProvider>
+    <SidebarProvider
+      style={{
+        "--sidebar-width": "12rem",
+        "--sidebar-width-icon": "3.25rem",
+      } as CSSProperties}
+    >
       <AppSidebar />
       <SidebarInset>
         {/* Top Header */}
-        <header className="flex h-16 shrink-0 items-center justify-between gap-2 border-b bg-background px-4 transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-16">
+        <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b bg-background px-4 transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-14">
           <div className="flex items-center gap-2">
             <SidebarTrigger className="-ml-1 md:hidden">
               <Menu className="h-5 w-5" />
             </SidebarTrigger>
-            <BreadcrumbNav />
+            <div>
+              <div className="text-sm font-medium leading-none">山淮建设管理平台</div>
+              <div className="mt-1 hidden text-xs text-muted-foreground sm:block">项目、班组、工人、考勤统一管理</div>
+            </div>
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Command Menu Trigger */}
-            <CommandMenuTrigger onClick={() => setCommandOpen(true)} />
-            <CommandMenu open={commandOpen} setOpen={setCommandOpen} />
+            <div className="relative hidden w-[300px] lg:block">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input className="h-9 pl-9" placeholder="搜索项目、班组、工人" />
+            </div>
 
             {/* Notifications */}
             <DropdownMenu>
@@ -77,23 +84,23 @@ function DashboardContent() {
                 <Button variant="ghost" size="icon" className="relative">
                   <Bell className="h-5 w-5" />
                   {unreadCount > 0 && (
-                    <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-miku-accent ring-2 ring-background" />
+                    <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-amber-500 ring-2 ring-background" />
                   )}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-80">
                 <DropdownMenuLabel className="flex items-center justify-between">
-                  <span>Notifications</span>
+                  <span>通知提醒</span>
                   {unreadCount > 0 && (
                     <Badge variant="secondary" className="text-xs">
-                      {unreadCount} new
+                      {unreadCount} 条
                     </Badge>
                   )}
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 {notifications.length === 0 ? (
                   <div className="py-4 text-center text-sm text-muted-foreground">
-                    No notifications
+                    暂无通知
                   </div>
                 ) : (
                   notifications.map((notification) => (
@@ -116,7 +123,7 @@ function DashboardContent() {
                 )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem className="justify-center text-sm text-muted-foreground cursor-pointer">
-                  View all notifications
+                  查看全部通知
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -127,7 +134,7 @@ function DashboardContent() {
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 p-6">
+        <main className="flex-1 bg-muted/20 p-4 md:p-5">
           <Outlet />
         </main>
       </SidebarInset>

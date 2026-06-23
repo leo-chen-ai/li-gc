@@ -122,7 +122,7 @@ export function TerminalBlock() {
                     </span>
                   </div>
                   <div className="text-zinc-500">
-                    # UI running at http://localhost:5173
+                    # UI running at http://localhost:8073
                   </div>
                 </div>
                 <Button

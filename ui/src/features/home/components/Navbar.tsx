@@ -7,7 +7,7 @@ export function Navbar() {
         <div className="flex items-center justify-between h-16 relative">
           <div className="flex items-center gap-2 z-10">
             <img src="/favicon.svg" alt="Logo" className="w-8 h-8" />
-            <span className="text-xl font-bold text-foreground">Quax</span>
+            <span className="text-xl font-bold text-foreground">山淮建设管理平台</span>
           </div>
 
           {/* Centered nav links */}

@@ -161,7 +161,7 @@ JWT_REFRESH_EXPIRY_SECS=604800
 REDIS_URL=redis://localhost:6379
 
 # CORS
-CORS_ALLOWED_ORIGINS=http://localhost:5173
+CORS_ALLOWED_ORIGINS=http://localhost:8073,http://127.0.0.1:8073
 
 # Upload
 UPLOAD_DIR=./uploads

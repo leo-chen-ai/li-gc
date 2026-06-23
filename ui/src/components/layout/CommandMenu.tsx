@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import {
-  LayoutDashboard,
+  Building2,
   Settings,
   LogOut,
   Search,
@@ -61,7 +61,7 @@ export function CommandMenu({ open, setOpen }: CommandMenuProps) {
           <CommandItem
             onSelect={() => runCommand(() => navigate({ to: "/app" }))}
           >
-            <LayoutDashboard className="mr-2 h-4 w-4" />
+            <Building2 className="mr-2 h-4 w-4" />
             App Home
             <CommandShortcut>⌘D</CommandShortcut>
           </CommandItem>
@@ -77,11 +77,11 @@ export function CommandMenu({ open, setOpen }: CommandMenuProps) {
           {isAdmin && (
             <CommandItem
               onSelect={() =>
-                runCommand(() => navigate({ to: "/app/admin" }))
+                runCommand(() => navigate({ to: "/app/admin/projects" }))
               }
             >
               <Settings className="mr-2 h-4 w-4" />
-              Admin Panel
+              项目管理
               <CommandShortcut>⌘A</CommandShortcut>
             </CommandItem>
           )}

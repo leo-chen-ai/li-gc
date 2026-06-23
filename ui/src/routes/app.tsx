@@ -35,7 +35,7 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
         // 2. Authenticated users should not access login/register again
         if (isAuth && isPublicRoute) {
             if (user?.role === "admin") {
-                navigate({ to: "/app/admin", replace: true });
+                navigate({ to: "/app/admin/projects", replace: true });
             } else {
                 navigate({ to: "/app", replace: true });
             }

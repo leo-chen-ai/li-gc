@@ -4,6 +4,7 @@ use validator::Validate;
 /// Login credentials
 #[derive(Debug, Deserialize)]
 pub struct LoginCredentials {
+    #[serde(alias = "account")]
     pub email: String,
     pub password: String,
 }
@@ -31,7 +32,8 @@ pub struct RegisterRequest {
 /// Login request
 #[derive(Debug, Clone, Deserialize, Validate)]
 pub struct LoginRequest {
-    #[validate(email(message = "Invalid email format"))]
+    #[serde(alias = "account")]
+    #[validate(length(min = 1, message = "Account is required"))]
     pub email: String,
 
     #[validate(length(min = 1, message = "Password is required"))]

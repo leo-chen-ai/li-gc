@@ -111,7 +111,7 @@ pub async fn login(
             AuthError::InvalidCredentials => ApiError::default()
                 .with_code(StatusCode::UNAUTHORIZED)
                 .with_error_code(auth_codes::INVALID_CREDENTIALS)
-                .with_message("Invalid email or password"),
+                .with_message("Invalid account or password"),
             _ => ApiError::default()
                 .with_code(StatusCode::INTERNAL_SERVER_ERROR)
                 .with_error_code(auth_codes::INTERNAL_ERROR)

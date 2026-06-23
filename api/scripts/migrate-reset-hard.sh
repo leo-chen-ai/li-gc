@@ -11,8 +11,8 @@ echo "🔄 Hard resetting database..."
 # Revert migration 004 (drops tables)
 cargo sqlx migrate revert --source migrations 2>/dev/null || true
 
-# Run migration 004 again (recreates tables)
-cargo sqlx migrate run --source migrations --target-version 004
+# Run all pending migrations so local reset includes admin API keys and roles.
+cargo sqlx migrate run --source migrations
 
 echo "✅ Database reset complete!"
 echo ""

@@ -1,0 +1,177 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shanhuai-app
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shanhuai-app-config
+  namespace: shanhuai-app
+data:
+  RUST_ENV: production
+  RUST_LOG: info
+  SERVER_PORT: "8080"
+  CORS_ALLOWED_ORIGINS: "http://36.151.143.235:30081"
+  DB_MAX_CONNECTIONS: "5"
+  DB_MIN_CONNECTIONS: "1"
+  BOOTSTRAP_ENABLED: "true"
+  COOKIE_SAMESITE: lax
+  COOKIE_SECURE: "false"
+  COOKIE_HTTPONLY: "true"
+  STORAGE_DRIVER: jdcloud_oss
+  UPLOAD_DIR: /app/uploads
+  MAX_AVATAR_SIZE: "2097152"
+  MAX_UPLOAD_SIZE: "20971520"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shanhuai-api
+  namespace: shanhuai-app
+  labels:
+    app.kubernetes.io/name: shanhuai-api
+    app.kubernetes.io/part-of: shanhuai-gc
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: shanhuai-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: shanhuai-api
+        app.kubernetes.io/part-of: shanhuai-gc
+    spec:
+      containers:
+        - name: api
+          image: shanhuai-api:initial
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: shanhuai-app-config
+            - secretRef:
+                name: shanhuai-app-secret
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shanhuai-api
+  namespace: shanhuai-app
+  labels:
+    app.kubernetes.io/name: shanhuai-api
+    app.kubernetes.io/part-of: shanhuai-gc
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: shanhuai-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shanhuai-ui
+  namespace: shanhuai-app
+  labels:
+    app.kubernetes.io/name: shanhuai-ui
+    app.kubernetes.io/part-of: shanhuai-gc
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: shanhuai-ui
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: shanhuai-ui
+        app.kubernetes.io/part-of: shanhuai-gc
+    spec:
+      containers:
+        - name: ui
+          image: shanhuai-ui:initial
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shanhuai-ui
+  namespace: shanhuai-app
+  labels:
+    app.kubernetes.io/name: shanhuai-ui
+    app.kubernetes.io/part-of: shanhuai-gc
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: shanhuai-ui
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      nodePort: 30081

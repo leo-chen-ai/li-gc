@@ -18,17 +18,17 @@ export function useLogin() {
     onSuccess: (data) => {
       login(data.token.access_token, data.user);
       queryClient.invalidateQueries({ queryKey: authKeys.me() });
-      toast.success("Welcome back!");
+      toast.success("登录成功");
     },
     onError: (error: unknown) => {
-      let description = "An unexpected error occurred.";
+      let description = "登录时发生未知错误。";
       if (isApiError(error)) {
         description = error.message;
       } else if (error instanceof Error) {
         description = error.message;
       }
 
-      toast.error("Login failed", {
+      toast.error("登录失败", {
         description,
       });
     },

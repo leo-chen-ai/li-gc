@@ -1,6 +1,5 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { ApiKeysManagement } from "@/features/admin/components/ApiKeysManagement";
+import { Navigate, createFileRoute } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/app/admin/api-keys")({
-  component: ApiKeysManagement,
+  component: () => <Navigate to="/app/admin/projects" replace />,
 });

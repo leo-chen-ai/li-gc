@@ -19,9 +19,9 @@ export function SecuritySettings() {
 
     // Derived validation states (no need for useState for these, less syncing issues)
     const newPasswordError = newPassword.length > 0 && newPassword.length < 8
-        ? "Password must be at least 8 characters" : null;
+        ? "密码至少需要 8 个字符" : null;
     const confirmPasswordError = confirmPassword.length > 0 && confirmPassword !== newPassword
-        ? "Passwords do not match" : null;
+        ? "两次输入的密码不一致" : null;
 
     const handlePasswordSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -37,7 +37,7 @@ export function SecuritySettings() {
                 current_password: currentPassword,
                 new_password: newPassword
             });
-            toast.success("Password changed successfully");
+            toast.success("密码已修改");
             setCurrentPassword("");
             setNewPassword("");
             setConfirmPassword("");
@@ -45,9 +45,9 @@ export function SecuritySettings() {
             // Because api.ts interceptor unwraps the response data, error is actually an ApiErrorResponse
             const apiError = error as { error_code?: string; message?: string };
             if (apiError.error_code === 'AUTH/INVALID_CREDENTIALS' || apiError.error_code === 'auth/invalid_credentials' || apiError.message?.toLowerCase().includes("current password")) {
-                setCurrentPasswordError("Current password is incorrect");
+                setCurrentPasswordError("当前密码不正确");
             } else {
-                toast.error("Failed to change password. Please try again.");
+                toast.error("密码修改失败，请稍后重试。");
             }
         } finally {
             setIsSubmitting(false);
@@ -72,9 +72,9 @@ export function SecuritySettings() {
     return (
         <div className="space-y-10 animate-fade-in pb-10">
             <div>
-                <h2 className="text-2xl font-bold tracking-tight mb-2">Password and Authentication</h2>
+                <h2 className="text-2xl font-bold tracking-tight mb-2">密码与认证</h2>
                 <p className="text-[15px] text-muted-foreground">
-                    Manage your account security and change your password.
+                    管理账号安全信息，并修改登录密码。
                 </p>
             </div>
 
@@ -84,7 +84,7 @@ export function SecuritySettings() {
                 {/* Current Password */}
                 <div className="space-y-2">
                     <Label htmlFor="current-password" className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                        Current Password
+                        当前密码
                         <span className="text-destructive ml-1">*</span>
                     </Label>
                     <div className="relative">
@@ -110,7 +110,7 @@ export function SecuritySettings() {
                         <p className="text-[13px] text-destructive">{currentPasswordError}</p>
                     ) : (
                         <p className="text-[13px] text-muted-foreground">
-                            You must provide your current password to set a new one.
+                            修改密码前需要先输入当前密码。
                         </p>
                     )}
                 </div>
@@ -119,7 +119,7 @@ export function SecuritySettings() {
                 <div className="space-y-4 pt-2">
                     <div className="space-y-2">
                         <Label htmlFor="new-password" className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                            New Password
+                            新密码
                             <span className="text-destructive ml-1">*</span>
                         </Label>
                         <div className="relative">
@@ -142,13 +142,13 @@ export function SecuritySettings() {
                             <p className="text-[13px] text-destructive">{newPasswordError}</p>
                         ) : (
                             <p className="text-[13px] text-muted-foreground">
-                                Make sure your new password is at least 8 characters long.
+                                新密码至少需要 8 个字符。
                             </p>
                         )}
                     </div>
                     <div className="space-y-2">
                         <Label htmlFor="confirm-password" className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                            Confirm New Password
+                            确认新密码
                             <span className="text-destructive ml-1">*</span>
                         </Label>
                         <Input
@@ -170,7 +170,7 @@ export function SecuritySettings() {
                         disabled={!isPasswordValid || isSubmitting}
                         className="h-10 px-8 font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-all shadow-md"
                     >
-                        {isSubmitting ? "Updating..." : "Update Password"}
+                        {isSubmitting ? "更新中..." : "更新密码"}
                     </Button>
                 </div>
             </form>

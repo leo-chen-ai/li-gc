@@ -3,18 +3,18 @@ import { Zap, ShieldCheck, Package } from "lucide-react";
 const features = [
   {
     icon: Zap,
-    title: "High-Performance API",
-    desc: "Optimized Rust backend architecture",
+    title: "现场管理",
+    desc: "项目、人员、设备统一管控",
   },
   {
     icon: ShieldCheck,
-    title: "Secure Authentication",
-    desc: "Robust session & JWT management",
+    title: "安全合规",
+    desc: "权限分级，操作留痕",
   },
   {
     icon: Package,
-    title: "Production Ready",
-    desc: "Configured CI/CD & infrastructure",
+    title: "协同高效",
+    desc: "数据同步，进度清晰",
   },
 ];
 
@@ -29,11 +29,10 @@ export function AuthHero() {
         <div className="space-y-8">
           <div className="space-y-3">
             <h2 className="text-2xl font-medium tracking-tight">
-              Quax Fullstack Template
+              山淮建设管理平台
             </h2>
             <p className="text-sm text-zinc-400">
-              A modern foundation for your next project, built with speed,
-              security, and reliability in mind.
+              聚焦建设项目现场管理，让工程更安全、高效、可控。
             </p>
           </div>
 

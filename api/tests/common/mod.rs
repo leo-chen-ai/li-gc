@@ -9,7 +9,7 @@ use axum::{
     http::{HeaderMap, Request, Response, StatusCode, header},
 };
 use serde_json::Value;
-use sqlx::postgres::PgPoolOptions;
+use sqlx::{PgPool, postgres::PgPoolOptions};
 use testcontainers::{ContainerAsync, runners::AsyncRunner};
 use testcontainers_modules::postgres::Postgres;
 
@@ -40,6 +40,12 @@ fn setup_env() {
 /// Start a fresh Postgres container, run migrations, return (Router, container).
 /// Keep `_container` alive for the duration of the test — dropping it stops the DB.
 pub async fn build_test_app() -> (Router, ContainerAsync<Postgres>) {
+    let (app, pool, container) = build_test_app_with_pool().await;
+    drop(pool);
+    (app, container)
+}
+
+pub async fn build_test_app_with_pool() -> (Router, PgPool, ContainerAsync<Postgres>) {
     setup_env();
 
     let container = Postgres::default()
@@ -62,10 +68,10 @@ pub async fn build_test_app() -> (Router, ContainerAsync<Postgres>) {
         .expect("Failed to run migrations");
 
     let config = Config::load().expect("Failed to load config");
-    let db = Database::from_pool(pool);
+    let db = Database::from_pool(pool.clone());
     let state = AppState::new_for_test(config, db);
 
-    (app_routes(state), container)
+    (app_routes(state), pool, container)
 }
 
 // ─── Request helpers ──────────────────────────────────────────────────────────

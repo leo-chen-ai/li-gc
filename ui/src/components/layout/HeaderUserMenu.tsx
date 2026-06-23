@@ -19,7 +19,9 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { getAvatarUrl } from "@/lib/utils";
 import {
-    Settings,
+    User,
+    Shield,
+    MonitorSmartphone,
     Monitor,
     Moon,
     Sun,
@@ -40,7 +42,7 @@ export function HeaderUserMenu() {
                     <Avatar className="h-8 w-8 object-cover">
                         <AvatarImage src={getAvatarUrl(user?.avatar_url)} className="object-cover" />
                         <AvatarFallback className="bg-primary/10 text-primary text-xs">
-                            {user?.name?.charAt(0).toUpperCase() || "U"}
+                            {user?.name?.charAt(0).toUpperCase() || "管"}
                         </AvatarFallback>
                     </Avatar>
                 </Button>
@@ -55,8 +57,16 @@ export function HeaderUserMenu() {
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>
                     <DropdownMenuItem onClick={() => navigate({ to: "/app/settings/profile" })}>
-                        <Settings className="mr-2 h-4 w-4" />
-                        <span>User Settings</span>
+                        <User className="mr-2 h-4 w-4" />
+                        <span>个人资料</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => navigate({ to: "/app/settings/security" })}>
+                        <Shield className="mr-2 h-4 w-4" />
+                        <span>安全设置</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => navigate({ to: "/app/settings/sessions" })}>
+                        <MonitorSmartphone className="mr-2 h-4 w-4" />
+                        <span>登录设备</span>
                     </DropdownMenuItem>
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator />
@@ -64,23 +74,23 @@ export function HeaderUserMenu() {
                     <DropdownMenuSub>
                         <DropdownMenuSubTrigger>
                             <Palette className="mr-2 h-4 w-4" />
-                            <span>Theme</span>
+                            <span>主题</span>
                         </DropdownMenuSubTrigger>
                         <DropdownMenuPortal>
                             <DropdownMenuSubContent>
                                 <DropdownMenuItem onClick={() => setTheme("light")}>
                                     <Sun className="mr-2 h-4 w-4" />
-                                    <span>Light</span>
+                                    <span>白天</span>
                                     {theme === "light" && <span className="ml-auto text-xs">✓</span>}
                                 </DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => setTheme("dark")}>
                                     <Moon className="mr-2 h-4 w-4" />
-                                    <span>Dark</span>
+                                    <span>夜间</span>
                                     {theme === "dark" && <span className="ml-auto text-xs">✓</span>}
                                 </DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => setTheme("system")}>
                                     <Monitor className="mr-2 h-4 w-4" />
-                                    <span>System</span>
+                                    <span>跟随系统</span>
                                     {theme === "system" && <span className="ml-auto text-xs">✓</span>}
                                 </DropdownMenuItem>
                             </DropdownMenuSubContent>
@@ -90,7 +100,7 @@ export function HeaderUserMenu() {
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => logout.mutate()} className="text-destructive focus:text-destructive">
                     <LogOut className="mr-2 h-4 w-4" />
-                    <span>Log out</span>
+                    <span>退出登录</span>
                 </DropdownMenuItem>
             </DropdownMenuContent>
         </DropdownMenu>

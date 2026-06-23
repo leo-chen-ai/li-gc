@@ -71,9 +71,9 @@ export function ProfileSettings() {
                 queryClient.setQueryData(settingsKeys.profile(), updatedUser);
                 useAuthStore.getState().actions.setUser(updatedUser);
             }
-            toast.success("Avatar updated successfully");
+            toast.success("头像已更新");
         } catch {
-            toast.error("Failed to upload avatar");
+            toast.error("头像上传失败");
         }
     };
 
@@ -90,10 +90,10 @@ export function ProfileSettings() {
                 queryClient.setQueryData(settingsKeys.profile(), updatedUser);
                 useAuthStore.getState().actions.setUser(updatedUser);
             }
-            toast.success("Avatar removed successfully");
+            toast.success("头像已移除");
             setIsRemoveModalOpen(false);
         } catch {
-            toast.error("Failed to remove avatar");
+            toast.error("头像移除失败");
         } finally {
             setIsRemovingAvatar(false);
         }
@@ -114,9 +114,9 @@ export function ProfileSettings() {
                     useAuthStore.getState().actions.setUser({ ...user, ...updates });
                 }
                 queryClient.invalidateQueries({ queryKey: settingsKeys.profile() });
-                toast.success("Profile updated successfully");
+                toast.success("个人资料已更新");
             } catch {
-                toast.error("Failed to update profile");
+                toast.error("个人资料更新失败");
             }
         }
     };
@@ -132,8 +132,8 @@ export function ProfileSettings() {
                 isOpen={isUploadModalOpen}
                 onClose={() => setIsUploadModalOpen(false)}
                 onUpload={handleAvatarUpload}
-                title="Upload Profile Photo"
-                description="Select a profile photo. Recommended: Square image, at least 200x200px."
+                title="上传头像"
+                description="请选择头像图片，建议使用至少 200x200 像素的方形图片。"
                 maxSizeMB={2}
                 isAvatar={true}
             />
@@ -141,13 +141,13 @@ export function ProfileSettings() {
             <AlertDialog open={isRemoveModalOpen} onOpenChange={setIsRemoveModalOpen}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
-                        <AlertDialogTitle>Remove Profile Picture?</AlertDialogTitle>
+                        <AlertDialogTitle>移除头像？</AlertDialogTitle>
                         <AlertDialogDescription>
-                            Are you sure you want to remove your profile picture? This action cannot be undone.
+                            确定要移除当前头像吗？该操作不可撤销。
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
-                        <AlertDialogCancel disabled={isRemovingAvatar}>Cancel</AlertDialogCancel>
+                        <AlertDialogCancel disabled={isRemovingAvatar}>取消</AlertDialogCancel>
                         <AlertDialogAction
                             onClick={(e) => {
                                 e.preventDefault();
@@ -159,10 +159,10 @@ export function ProfileSettings() {
                             {isRemovingAvatar ? (
                                 <>
                                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                    Removing...
+                                    正在移除...
                                 </>
                             ) : (
-                                "Remove"
+                                "移除"
                             )}
                         </AlertDialogAction>
                     </AlertDialogFooter>
@@ -170,9 +170,9 @@ export function ProfileSettings() {
             </AlertDialog>
 
             <div>
-                <h2 className="text-2xl font-bold tracking-tight mb-2">My Account</h2>
+                <h2 className="text-2xl font-bold tracking-tight mb-2">个人资料</h2>
                 <p className="text-[15px] text-muted-foreground">
-                    This is how others will see you on the site.
+                    这里的信息会用于后台账号展示和系统通知。
                 </p>
             </div>
 
@@ -188,7 +188,7 @@ export function ProfileSettings() {
                         </AvatarFallback>
                     </Avatar>
                     <div className="space-y-3">
-                        <h4 className="text-[15px] font-bold">Profile Picture</h4>
+                        <h4 className="text-[15px] font-bold">头像</h4>
                         <div className="flex items-center gap-3">
                             <Button
                                 type="button"
@@ -196,7 +196,7 @@ export function ProfileSettings() {
                                 className="bg-primary text-primary-foreground hover:bg-primary/90"
                                 onClick={() => setIsUploadModalOpen(true)}
                             >
-                                <Camera className="mr-2 h-4 w-4" /> Change Avatar
+                                <Camera className="mr-2 h-4 w-4" /> 更换头像
                             </Button>
                             {avatarUrl && (
                                 <Button
@@ -210,13 +210,13 @@ export function ProfileSettings() {
                                     {isRemovingAvatar ? (
                                         <Loader2 className="h-4 w-4 animate-spin" />
                                     ) : (
-                                        "Remove"
+                                        "移除"
                                     )}
                                 </Button>
                             )}
                         </div>
                         <p className="text-[13px] text-muted-foreground">
-                            We support JPG, PNG, or GIF. Max size 2MB.
+                            支持 JPG、PNG 或 GIF，最大 2MB。
                         </p>
                     </div>
                 </div>
@@ -225,34 +225,34 @@ export function ProfileSettings() {
                 <div className="grid gap-6 sm:grid-cols-2">
                     <div className="space-y-2">
                         <Label htmlFor="name" className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                            Display Name
+                            显示名称
                         </Label>
                         <Input
                             id="name"
                             value={name}
                             onChange={(e) => setName(e.target.value)}
-                            placeholder="Your display name"
+                            placeholder="请输入显示名称"
                             className="h-11 bg-muted/40 border-transparent transition-colors focus-visible:ring-1 focus-visible:ring-primary/50 hover:bg-muted/60"
                         />
                     </div>
                     <div className="space-y-2">
                         <Label htmlFor="username" className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                            Username
+                            用户名
                         </Label>
                         <Input
                             id="username"
                             value={username}
                             onChange={(e) => setUsername(e.target.value)}
-                            placeholder="username"
+                            placeholder="请输入用户名"
                             className="h-11 bg-muted/40 border-transparent transition-colors focus-visible:ring-1 focus-visible:ring-primary/50 hover:bg-muted/60"
                         />
                         <p className="text-[13px] text-muted-foreground mt-1">
-                            You can only change this once every 30 days.
+                            用户名每 30 天只能修改一次。
                         </p>
                     </div>
                     <div className="space-y-2 sm:col-span-2">
                         <Label htmlFor="email" className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                            Email Address
+                            邮箱地址
                             <span className="text-destructive ml-1">*</span>
                         </Label>
                         <Input
@@ -260,11 +260,11 @@ export function ProfileSettings() {
                             type="email"
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
-                            placeholder="your@email.com"
+                            placeholder="name@example.com"
                             className="h-11 bg-muted/40 border-transparent transition-colors focus-visible:ring-1 focus-visible:ring-primary/50 hover:bg-muted/60"
                         />
                         <p className="text-[13px] text-muted-foreground mt-1">
-                            We use this for authentication and notifications.
+                            邮箱用于登录认证和系统通知。
                         </p>
                     </div>
                 </div>
@@ -275,7 +275,7 @@ export function ProfileSettings() {
                         disabled={isUpdating || !isProfileChanged}
                         className="h-10 px-8 font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-all shadow-md"
                     >
-                        {isUpdating ? "Saving..." : "Save Changes"}
+                        {isUpdating ? "保存中..." : "保存修改"}
                     </Button>
                 </div>
             </form>

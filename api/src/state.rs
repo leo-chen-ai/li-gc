@@ -5,6 +5,7 @@ use eyre::WrapErr;
 use crate::{
     feature::{
         admin::{
+            role::{AdminRoleRepository, AdminRoleRepositoryImpl},
             stats::{StatsRepository, StatsRepositoryImpl, StatsService},
             user::{AdminUserRepository, AdminUserRepositoryImpl},
         },
@@ -37,6 +38,7 @@ pub struct AppState {
     pub user_repo: Arc<dyn UserRepository>,
     pub user_profile_repo: Arc<dyn UserProfileRepository>,
     pub admin_user_repo: Arc<dyn AdminUserRepository>,
+    pub admin_role_repo: Arc<dyn AdminRoleRepository>,
     pub stats_service: Arc<StatsService>,
     pub storage: Arc<dyn StorageProvider>,
     pub session_blacklist: Option<Arc<dyn SessionBlacklist>>,
@@ -57,7 +59,7 @@ impl AppState {
     }
 
     pub async fn new(config: Config, log_reload_handle: ReloadFilterHandle) -> eyre::Result<Self> {
-        use crate::infrastructure::storage::LocalStorage;
+        use crate::infrastructure::storage::{JdCloudOssStorage, LocalStorage};
 
         let db = Database::new(&config)
             .await
@@ -69,6 +71,8 @@ impl AppState {
             Arc::new(UserProfileRepositoryImpl::new());
         let admin_user_repo: Arc<dyn AdminUserRepository> =
             Arc::new(AdminUserRepositoryImpl::new());
+        let admin_role_repo: Arc<dyn AdminRoleRepository> =
+            Arc::new(AdminRoleRepositoryImpl::new());
         let auth_method_repo = Arc::new(AuthMethodRepositoryImpl::new());
         let session_repo = Arc::new(SessionRepositoryImpl::new());
         let stats_repository: Arc<dyn StatsRepository> = Arc::new(StatsRepositoryImpl::new());
@@ -108,10 +112,13 @@ impl AppState {
 
         let stats_service = Arc::new(StatsService::new(stats_repository));
 
-        let storage: Arc<dyn StorageProvider> = Arc::new(LocalStorage::new(
-            &config.upload.upload_dir,
-            &config.upload.base_url,
-        ));
+        let storage: Arc<dyn StorageProvider> = match config.upload.storage_driver.as_str() {
+            "jdcloud_oss" | "s3" => Arc::new(JdCloudOssStorage::from_config(&config.upload)?),
+            _ => Arc::new(LocalStorage::new(
+                &config.upload.upload_dir,
+                &config.upload.base_url,
+            )),
+        };
 
         Ok(Self {
             config: Arc::new(config),
@@ -120,6 +127,7 @@ impl AppState {
             user_repo,
             user_profile_repo,
             admin_user_repo,
+            admin_role_repo,
             stats_service,
             storage,
             session_blacklist,
@@ -138,6 +146,8 @@ impl AppState {
             Arc::new(UserProfileRepositoryImpl::new());
         let admin_user_repo: Arc<dyn AdminUserRepository> =
             Arc::new(AdminUserRepositoryImpl::new());
+        let admin_role_repo: Arc<dyn AdminRoleRepository> =
+            Arc::new(AdminRoleRepositoryImpl::new());
         let auth_method_repo = Arc::new(AuthMethodRepositoryImpl::new());
         let session_repo = Arc::new(SessionRepositoryImpl::new());
         let stats_repository: Arc<dyn StatsRepository> = Arc::new(StatsRepositoryImpl::new());
@@ -177,6 +187,7 @@ impl AppState {
             user_repo,
             user_profile_repo,
             admin_user_repo,
+            admin_role_repo,
             stats_service,
             storage,
             session_blacklist: None,

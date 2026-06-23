@@ -10,6 +10,8 @@ bytes = "1.11.1"
 chrono = { version = "0.4.44", features = ["serde"] }
 tower-http = { version = "0.6.8", features = ["cors", "trace", "fs"] }
 dashmap = "6.1.0"
+ureq = "3.2.0"
+percent-encoding = "2.3.2"
 
 # Async
 async-trait = "0.1.89"
@@ -53,8 +55,11 @@ time = "0.3.47"
 constant_time_eq = "0.4.2"
 
 # Crypto
+hex = "0.4.3"
+hmac = "0.12.1"
 md5 = "0.8.0"
 rand = "0.8.5"
+sha2 = "0.10.9"
 
 # Auth
 jsonwebtoken = "9"

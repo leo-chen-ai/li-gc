@@ -7,6 +7,16 @@ import { envValidatorPlugin } from "./plugins/env-validator";
 
 // https://vite.dev/config/
 export default defineConfig({
+  server: {
+    host: "0.0.0.0",
+    port: 8073,
+    strictPort: true,
+  },
+  preview: {
+    host: "0.0.0.0",
+    port: 8073,
+    strictPort: true,
+  },
   plugins: [
     envValidatorPlugin(),
     tanstackRouter({ target: "react", autoCodeSplitting: true }),

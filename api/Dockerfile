@@ -2,6 +2,8 @@
 # Chef — install cargo-chef for dependency layer caching
 # =============================================================================
 FROM rust:1-bookworm AS chef
+ARG CARGO_BUILD_JOBS=1
+ENV CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS
 RUN cargo install cargo-chef --locked
 WORKDIR /app
 
@@ -16,6 +18,8 @@ RUN cargo chef prepare --recipe-path recipe.json
 # Builder — cook deps (cached layer), then build binary
 # =============================================================================
 FROM chef AS builder
+ARG CARGO_BUILD_JOBS=1
+ENV CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS
 RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
 
 # Restore deps from cache — only re-runs when Cargo.toml/Cargo.lock changes

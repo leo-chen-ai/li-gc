@@ -4,9 +4,9 @@ import { X } from "lucide-react";
 import { useAuthUser } from "@/stores/use-auth-store";
 
 const settingsNavigation = [
-    { name: "My Account", href: "/app/settings/profile" },
-    { name: "Security", href: "/app/settings/security" },
-    { name: "Devices", href: "/app/settings/sessions" },
+    { name: "个人资料", href: "/app/settings/profile" },
+    { name: "安全设置", href: "/app/settings/security" },
+    { name: "登录设备", href: "/app/settings/sessions" },
 ];
 
 export function SettingsLayout() {
@@ -31,7 +31,7 @@ export function SettingsLayout() {
             <aside className="flex w-[230px] md:w-[280px] lg:w-[30%] lg:min-w-[280px] lg:max-w-[340px] justify-end bg-muted/30 pb-10 border-r border-border/50">
                 <nav className="w-full max-w-[240px] px-2 md:px-4 pt-16 flex flex-col gap-0.5">
                     <div className="px-3 pb-2 text-[12px] font-bold uppercase tracking-wider text-muted-foreground">
-                        User Settings
+                        个人设置
                     </div>
                     {settingsNavigation.map((item) => {
                         const isActive = location.pathname.startsWith(item.href);
@@ -64,7 +64,7 @@ export function SettingsLayout() {
                 <div className="fixed top-14 right-8 lg:right-16 hidden sm:block z-50">
                     <button
                         type="button"
-                        aria-label="Close settings"
+                        aria-label="关闭设置"
                         onClick={() => navigate({ to: user?.role === 'admin' ? '/app/admin' : '/app' })}
                         className="group flex flex-col items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors"
                     >

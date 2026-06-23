@@ -22,7 +22,13 @@ import { Route as AppSettingsSessionsRouteImport } from './routes/app/settings/s
 import { Route as AppSettingsSecurityRouteImport } from './routes/app/settings/security'
 import { Route as AppSettingsProfileRouteImport } from './routes/app/settings/profile'
 import { Route as AppAdminUsersRouteImport } from './routes/app/admin/users'
+import { Route as AppAdminUploadsRouteImport } from './routes/app/admin/uploads'
+import { Route as AppAdminRolesRouteImport } from './routes/app/admin/roles'
+import { Route as AppAdminProjectsRouteImport } from './routes/app/admin/projects'
+import { Route as AppAdminAttendanceDevicesRouteImport } from './routes/app/admin/attendance-devices'
+import { Route as AppAdminAttendanceDeviceIssueReportsRouteImport } from './routes/app/admin/attendance-device-issue-reports'
 import { Route as AppAdminApiKeysRouteImport } from './routes/app/admin/api-keys'
+import { Route as AppAdminProjectsProjectIdRouteImport } from './routes/app/admin/projects.$projectId'
 
 const AppRoute = AppRouteImport.update({
   id: '/app',
@@ -89,11 +95,44 @@ const AppAdminUsersRoute = AppAdminUsersRouteImport.update({
   path: '/users',
   getParentRoute: () => AppAdminRoute,
 } as any)
+const AppAdminUploadsRoute = AppAdminUploadsRouteImport.update({
+  id: '/uploads',
+  path: '/uploads',
+  getParentRoute: () => AppAdminRoute,
+} as any)
+const AppAdminRolesRoute = AppAdminRolesRouteImport.update({
+  id: '/roles',
+  path: '/roles',
+  getParentRoute: () => AppAdminRoute,
+} as any)
+const AppAdminProjectsRoute = AppAdminProjectsRouteImport.update({
+  id: '/projects',
+  path: '/projects',
+  getParentRoute: () => AppAdminRoute,
+} as any)
+const AppAdminAttendanceDevicesRoute =
+  AppAdminAttendanceDevicesRouteImport.update({
+    id: '/attendance-devices',
+    path: '/attendance-devices',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminAttendanceDeviceIssueReportsRoute =
+  AppAdminAttendanceDeviceIssueReportsRouteImport.update({
+    id: '/attendance-device-issue-reports',
+    path: '/attendance-device-issue-reports',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
 const AppAdminApiKeysRoute = AppAdminApiKeysRouteImport.update({
   id: '/api-keys',
   path: '/api-keys',
   getParentRoute: () => AppAdminRoute,
 } as any)
+const AppAdminProjectsProjectIdRoute =
+  AppAdminProjectsProjectIdRouteImport.update({
+    id: '/$projectId',
+    path: '/$projectId',
+    getParentRoute: () => AppAdminProjectsRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -104,12 +143,18 @@ export interface FileRoutesByFullPath {
   '/app/settings': typeof AppSettingsRouteWithChildren
   '/app/': typeof AppIndexRoute
   '/app/admin/api-keys': typeof AppAdminApiKeysRoute
+  '/app/admin/attendance-device-issue-reports': typeof AppAdminAttendanceDeviceIssueReportsRoute
+  '/app/admin/attendance-devices': typeof AppAdminAttendanceDevicesRoute
+  '/app/admin/projects': typeof AppAdminProjectsRouteWithChildren
+  '/app/admin/roles': typeof AppAdminRolesRoute
+  '/app/admin/uploads': typeof AppAdminUploadsRoute
   '/app/admin/users': typeof AppAdminUsersRoute
   '/app/settings/profile': typeof AppSettingsProfileRoute
   '/app/settings/security': typeof AppSettingsSecurityRoute
   '/app/settings/sessions': typeof AppSettingsSessionsRoute
   '/app/admin/': typeof AppAdminIndexRoute
   '/app/settings/': typeof AppSettingsIndexRoute
+  '/app/admin/projects/$projectId': typeof AppAdminProjectsProjectIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -117,12 +162,18 @@ export interface FileRoutesByTo {
   '/app/register': typeof AppRegisterRoute
   '/app': typeof AppIndexRoute
   '/app/admin/api-keys': typeof AppAdminApiKeysRoute
+  '/app/admin/attendance-device-issue-reports': typeof AppAdminAttendanceDeviceIssueReportsRoute
+  '/app/admin/attendance-devices': typeof AppAdminAttendanceDevicesRoute
+  '/app/admin/projects': typeof AppAdminProjectsRouteWithChildren
+  '/app/admin/roles': typeof AppAdminRolesRoute
+  '/app/admin/uploads': typeof AppAdminUploadsRoute
   '/app/admin/users': typeof AppAdminUsersRoute
   '/app/settings/profile': typeof AppSettingsProfileRoute
   '/app/settings/security': typeof AppSettingsSecurityRoute
   '/app/settings/sessions': typeof AppSettingsSessionsRoute
   '/app/admin': typeof AppAdminIndexRoute
   '/app/settings': typeof AppSettingsIndexRoute
+  '/app/admin/projects/$projectId': typeof AppAdminProjectsProjectIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -134,12 +185,18 @@ export interface FileRoutesById {
   '/app/settings': typeof AppSettingsRouteWithChildren
   '/app/': typeof AppIndexRoute
   '/app/admin/api-keys': typeof AppAdminApiKeysRoute
+  '/app/admin/attendance-device-issue-reports': typeof AppAdminAttendanceDeviceIssueReportsRoute
+  '/app/admin/attendance-devices': typeof AppAdminAttendanceDevicesRoute
+  '/app/admin/projects': typeof AppAdminProjectsRouteWithChildren
+  '/app/admin/roles': typeof AppAdminRolesRoute
+  '/app/admin/uploads': typeof AppAdminUploadsRoute
   '/app/admin/users': typeof AppAdminUsersRoute
   '/app/settings/profile': typeof AppSettingsProfileRoute
   '/app/settings/security': typeof AppSettingsSecurityRoute
   '/app/settings/sessions': typeof AppSettingsSessionsRoute
   '/app/admin/': typeof AppAdminIndexRoute
   '/app/settings/': typeof AppSettingsIndexRoute
+  '/app/admin/projects/$projectId': typeof AppAdminProjectsProjectIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -152,12 +209,18 @@ export interface FileRouteTypes {
     | '/app/settings'
     | '/app/'
     | '/app/admin/api-keys'
+    | '/app/admin/attendance-device-issue-reports'
+    | '/app/admin/attendance-devices'
+    | '/app/admin/projects'
+    | '/app/admin/roles'
+    | '/app/admin/uploads'
     | '/app/admin/users'
     | '/app/settings/profile'
     | '/app/settings/security'
     | '/app/settings/sessions'
     | '/app/admin/'
     | '/app/settings/'
+    | '/app/admin/projects/$projectId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -165,12 +228,18 @@ export interface FileRouteTypes {
     | '/app/register'
     | '/app'
     | '/app/admin/api-keys'
+    | '/app/admin/attendance-device-issue-reports'
+    | '/app/admin/attendance-devices'
+    | '/app/admin/projects'
+    | '/app/admin/roles'
+    | '/app/admin/uploads'
     | '/app/admin/users'
     | '/app/settings/profile'
     | '/app/settings/security'
     | '/app/settings/sessions'
     | '/app/admin'
     | '/app/settings'
+    | '/app/admin/projects/$projectId'
   id:
     | '__root__'
     | '/'
@@ -181,12 +250,18 @@ export interface FileRouteTypes {
     | '/app/settings'
     | '/app/'
     | '/app/admin/api-keys'
+    | '/app/admin/attendance-device-issue-reports'
+    | '/app/admin/attendance-devices'
+    | '/app/admin/projects'
+    | '/app/admin/roles'
+    | '/app/admin/uploads'
     | '/app/admin/users'
     | '/app/settings/profile'
     | '/app/settings/security'
     | '/app/settings/sessions'
     | '/app/admin/'
     | '/app/settings/'
+    | '/app/admin/projects/$projectId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -287,6 +362,41 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdminUsersRouteImport
       parentRoute: typeof AppAdminRoute
     }
+    '/app/admin/uploads': {
+      id: '/app/admin/uploads'
+      path: '/uploads'
+      fullPath: '/app/admin/uploads'
+      preLoaderRoute: typeof AppAdminUploadsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/roles': {
+      id: '/app/admin/roles'
+      path: '/roles'
+      fullPath: '/app/admin/roles'
+      preLoaderRoute: typeof AppAdminRolesRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/projects': {
+      id: '/app/admin/projects'
+      path: '/projects'
+      fullPath: '/app/admin/projects'
+      preLoaderRoute: typeof AppAdminProjectsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/attendance-devices': {
+      id: '/app/admin/attendance-devices'
+      path: '/attendance-devices'
+      fullPath: '/app/admin/attendance-devices'
+      preLoaderRoute: typeof AppAdminAttendanceDevicesRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/attendance-device-issue-reports': {
+      id: '/app/admin/attendance-device-issue-reports'
+      path: '/attendance-device-issue-reports'
+      fullPath: '/app/admin/attendance-device-issue-reports'
+      preLoaderRoute: typeof AppAdminAttendanceDeviceIssueReportsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
     '/app/admin/api-keys': {
       id: '/app/admin/api-keys'
       path: '/api-keys'
@@ -294,17 +404,46 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdminApiKeysRouteImport
       parentRoute: typeof AppAdminRoute
     }
+    '/app/admin/projects/$projectId': {
+      id: '/app/admin/projects/$projectId'
+      path: '/$projectId'
+      fullPath: '/app/admin/projects/$projectId'
+      preLoaderRoute: typeof AppAdminProjectsProjectIdRouteImport
+      parentRoute: typeof AppAdminProjectsRoute
+    }
   }
 }
 
+interface AppAdminProjectsRouteChildren {
+  AppAdminProjectsProjectIdRoute: typeof AppAdminProjectsProjectIdRoute
+}
+
+const AppAdminProjectsRouteChildren: AppAdminProjectsRouteChildren = {
+  AppAdminProjectsProjectIdRoute: AppAdminProjectsProjectIdRoute,
+}
+
+const AppAdminProjectsRouteWithChildren =
+  AppAdminProjectsRoute._addFileChildren(AppAdminProjectsRouteChildren)
+
 interface AppAdminRouteChildren {
   AppAdminApiKeysRoute: typeof AppAdminApiKeysRoute
+  AppAdminAttendanceDeviceIssueReportsRoute: typeof AppAdminAttendanceDeviceIssueReportsRoute
+  AppAdminAttendanceDevicesRoute: typeof AppAdminAttendanceDevicesRoute
+  AppAdminProjectsRoute: typeof AppAdminProjectsRouteWithChildren
+  AppAdminRolesRoute: typeof AppAdminRolesRoute
+  AppAdminUploadsRoute: typeof AppAdminUploadsRoute
   AppAdminUsersRoute: typeof AppAdminUsersRoute
   AppAdminIndexRoute: typeof AppAdminIndexRoute
 }
 
 const AppAdminRouteChildren: AppAdminRouteChildren = {
   AppAdminApiKeysRoute: AppAdminApiKeysRoute,
+  AppAdminAttendanceDeviceIssueReportsRoute:
+    AppAdminAttendanceDeviceIssueReportsRoute,
+  AppAdminAttendanceDevicesRoute: AppAdminAttendanceDevicesRoute,
+  AppAdminProjectsRoute: AppAdminProjectsRouteWithChildren,
+  AppAdminRolesRoute: AppAdminRolesRoute,
+  AppAdminUploadsRoute: AppAdminUploadsRoute,
   AppAdminUsersRoute: AppAdminUsersRoute,
   AppAdminIndexRoute: AppAdminIndexRoute,
 }

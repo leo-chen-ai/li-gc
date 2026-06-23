@@ -3,7 +3,7 @@ use std::time::Duration;
 use tower_http::services::ServeDir;
 
 use crate::{
-    feature::{admin, auth, health, user},
+    feature::{admin, auth, health, ocr, upload, user},
     infrastructure::web::middleware::{RateLimiter, rate_limit_middleware},
     state::AppState,
 };
@@ -35,6 +35,8 @@ pub fn app_routes(state: AppState) -> Router {
     let api_routes = Router::new()
         .nest("/auth", auth::auth_routes().merge(auth_sensitive))
         .nest("/users", user::user_routes())
+        .nest("/uploads", upload::upload_routes())
+        .nest("/ocr", ocr::ocr_routes())
         .nest("/admin", admin::routes::admin_routes())
         .nest("/admin/api-keys", admin::api_key::api_key_routes())
         .layer(Extension(blacklist)) // Inject blacklist for auth middleware

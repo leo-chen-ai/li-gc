@@ -25,4 +25,12 @@ pub trait StorageProvider: Send + Sync {
 
     /// Return the publicly accessible URL for `key`.
     fn public_url(&self, key: &str) -> String;
+
+    fn driver(&self) -> &str;
+
+    fn bucket(&self) -> Option<&str>;
+
+    fn endpoint(&self) -> Option<&str>;
+
+    fn public_base_url(&self) -> &str;
 }

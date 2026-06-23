@@ -19,8 +19,8 @@ echo ""
 echo "🔄 Running reset migration..."
 echo ""
 
-# Run the up migration (drops and recreates)
-cargo sqlx migrate run --source migrations --target-version 004
+# Run all pending migrations so local reset includes admin API keys and roles.
+cargo sqlx migrate run --source migrations
 
 echo ""
 echo "✅ Database reset complete!"
