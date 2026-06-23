@@ -18,6 +18,7 @@ target/
 # Build
 dist/
 build/
+.deploy-cache/
 
 # Database
 *.db

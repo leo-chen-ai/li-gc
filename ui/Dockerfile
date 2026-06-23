@@ -2,8 +2,9 @@
 # Multi-stage build for React + Vite frontend
 # =============================================================================
 
-# Stage 1: Build
-FROM oven/bun:1-alpine AS builder
+# Stage 1: Build static assets on the local build platform. The final nginx
+# image still targets DEPLOY_PLATFORM from deploy-local.sh.
+FROM --platform=$BUILDPLATFORM oven/bun:1-alpine AS builder
 
 WORKDIR /app
 

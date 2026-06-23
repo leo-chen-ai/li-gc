@@ -1,4 +1,4 @@
-FROM rust:alpine
+FROM rust:alpine AS builder
 
 ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 RUN mkdir -p /usr/local/cargo \
@@ -18,6 +18,14 @@ RUN sed -i 's|https://dl-cdn.alpinelinux.org/alpine|https://mirrors.aliyun.com/a
 RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static
 
 RUN cargo install sqlx-cli --no-default-features --features native-tls,postgres
+
+FROM alpine:3.22
+
+RUN sed -i 's|https://dl-cdn.alpinelinux.org/alpine|https://mirrors.aliyun.com/alpine|g' /etc/apk/repositories \
+    && apk add --no-cache ca-certificates libgcc openssl \
+    && update-ca-certificates
+
+COPY --from=builder /usr/local/cargo/bin/sqlx /usr/local/bin/sqlx
 
 WORKDIR /migrations
 
