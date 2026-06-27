@@ -35,8 +35,8 @@ function UserDashboard() {
             <header className="sticky top-0 z-50 flex h-16 shrink-0 items-center justify-between gap-2 border-b bg-background/80 px-4 backdrop-blur-md">
                 <div className="flex items-center gap-2">
                     <Link to="/app" className="flex items-center gap-2">
-                        <img src="/favicon.svg" alt="山淮建设管理平台" className="aspect-square size-8" />
-                        <span className="font-semibold hidden sm:inline-block">山淮建设管理平台</span>
+                        <img src="/favicon.svg" alt="山淮筑" className="aspect-square size-8" />
+                        <span className="font-semibold hidden sm:inline-block">山淮筑</span>
                     </Link>
                 </div>
 

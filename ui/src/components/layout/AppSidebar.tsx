@@ -102,7 +102,7 @@ export function AppSidebar() {
                     山
                   </div>
                   <div className="grid flex-1 text-left text-sm leading-tight">
-                    <span className="truncate font-semibold">山淮建设管理平台</span>
+                    <span className="truncate font-semibold">山淮筑</span>
                     <span className="truncate text-xs text-muted-foreground">{isAdmin ? "管理后台" : "工作台"}</span>
                   </div>
                 </Link>

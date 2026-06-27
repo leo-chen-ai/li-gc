@@ -29,7 +29,7 @@ export function AuthHero() {
         <div className="space-y-8">
           <div className="space-y-3">
             <h2 className="text-2xl font-medium tracking-tight">
-              山淮建设管理平台
+              山淮筑
             </h2>
             <p className="text-sm text-zinc-400">
               聚焦建设项目现场管理，让工程更安全、高效、可控。

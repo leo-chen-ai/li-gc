@@ -67,7 +67,7 @@ function AdminContent() {
               <Menu className="h-5 w-5" />
             </SidebarTrigger>
             <div>
-              <div className="text-sm font-medium leading-none">山淮建设管理平台</div>
+              <div className="text-sm font-medium leading-none">山淮筑</div>
               <div className="mt-1 hidden text-xs text-muted-foreground sm:block">项目、班组、工人、考勤统一管理</div>
             </div>
           </div>

@@ -55,7 +55,7 @@ export function LoginPage() {
             </div>
             <div>
               <div className="text-xl font-semibold tracking-normal text-slate-950 dark:text-white">
-                山淮建设管理平台
+                山淮筑
               </div>
               <div className="mt-1 text-sm font-medium text-slate-600 dark:text-white/62">管理后台</div>
             </div>
