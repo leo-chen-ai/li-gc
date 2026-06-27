@@ -1,0 +1,66 @@
+<view class="login-page">
+  <image class="login-bg" src="{{loginIllustration}}" mode="aspectFill" />
+  <view class="login-bg-fade"></view>
+
+  <view class="login-content">
+    <view class="brand-block">
+      <view class="brand-mark">山</view>
+      <view class="brand-name">山淮筑</view>
+      <view class="brand-subtitle">实名考勤管理平台</view>
+    </view>
+
+    <view class="login-card">
+      <view class="field-group">
+        <view class="field-label">账号</view>
+        <view class="native-input-wrap">
+          <text class="input-icon">◇</text>
+          <input
+            class="native-input"
+            value="{{account}}"
+            placeholder="请输入邮箱或用户名"
+            placeholder-class="input-placeholder"
+            bindinput="onAccountChange"
+          />
+        </view>
+      </view>
+
+      <view class="field-group">
+        <view class="field-label">密码</view>
+        <view class="native-input-wrap">
+          <text class="input-icon">□</text>
+          <input
+            class="native-input"
+            value="{{password}}"
+            password
+            placeholder="请输入密码"
+            placeholder-class="input-placeholder"
+            bindinput="onPasswordChange"
+          />
+          <text class="input-action">●</text>
+        </view>
+      </view>
+
+      <view class="form-row">
+        <view class="remember-row" bind:tap="toggleRemember">
+          <view class="checkbox {{rememberAccount ? 'checkbox-active' : ''}}"></view>
+          <text>记住账号</text>
+        </view>
+        <view class="forgot-link" bind:tap="forgotPassword">忘记密码</view>
+      </view>
+
+      <t-button
+        block
+        theme="primary"
+        size="large"
+        loading="{{loading}}"
+        bind:tap="submitLogin"
+        t-class="login-button"
+      >
+        登录
+      </t-button>
+    </view>
+
+
+    <view class="support-footer">宁波山淮科技有限公司 技术支持</view>
+  </view>
+</view>

@@ -1,0 +1,30 @@
+page {
+  min-height: 100vh;
+  color: #263238;
+  background: #eef3f8;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+}
+
+view,
+text,
+button,
+input {
+  box-sizing: border-box;
+}
+
+button {
+  padding: 0;
+  margin: 0;
+  line-height: 1;
+  background: transparent;
+}
+
+.page-shell {
+  min-height: 100vh;
+  padding: 72rpx 32rpx 40rpx;
+  background: linear-gradient(180deg, #f5f8fc 0%, #e9eff7 100%);
+}
+
+.safe-top {
+  height: env(safe-area-inset-top);
+}

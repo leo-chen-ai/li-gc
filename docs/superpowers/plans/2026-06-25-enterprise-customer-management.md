@@ -1,6 +1,5 @@
 # Enterprise Customer Management Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add customer-centered enterprise management so customer pages show projects, invoicing, received invoices, collections, payments, yearly balances, and profit.
 

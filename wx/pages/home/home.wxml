@@ -1,0 +1,69 @@
+<view class="home-page">
+  <view class="home-header">
+    <view>
+      <view class="home-title">山淮筑</view>
+      <view class="home-subtitle">实名考勤管理平台</view>
+    </view>
+   
+  </view>
+
+  <view class="feature-board">
+    <view
+      class="feature-card feature-primary {{primaryFeature.tone}}"
+      bind:tap="navigateToModule"
+      data-title="{{primaryFeature.title}}"
+    >
+      <view class="feature-title">{{primaryFeature.title}}</view>
+      <view class="feature-note">{{primaryFeature.note}}</view>
+      <image class="feature-primary-image" src="{{primaryFeature.image}}" mode="aspectFit" />
+    </view>
+
+    <view class="feature-side">
+      <view class="feature-mini-row">
+        <block wx:for="{{miniFeatures}}" wx:key="key">
+          <view class="feature-card feature-mini {{item.tone}}" bind:tap="navigateToModule" data-title="{{item.title}}">
+            <view class="feature-title">{{item.title}}</view>
+            <image class="feature-mini-image" src="{{item.image}}" mode="aspectFit" />
+          </view>
+        </block>
+      </view>
+
+      <view class="feature-card feature-wide {{wideFeature.tone}}" bind:tap="navigateToModule" data-title="{{wideFeature.title}}">
+        <image class="feature-wide-image" src="{{wideFeature.image}}" mode="aspectFit" />
+        <view>
+          <view class="feature-title accent">{{wideFeature.title}}</view>
+          <view class="feature-note">{{wideFeature.note}}</view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="section-card">
+    <view class="section-title-row">
+      <view class="section-title">考勤统计</view>
+      <view class="section-metric">今日出勤286人</view>
+    </view>
+    <view class="section-grid two">
+      <block wx:for="{{attendanceModules}}" wx:key="key">
+        <view class="section-item" bind:tap="navigateToModule" data-title="{{item.title}}">
+          <view class="icon-disc">
+            <image class="section-icon" src="{{item.image}}" mode="aspectFit" />
+          </view>
+          <view class="section-item-title">{{item.title}}</view>
+          <view class="section-item-note">{{item.note}}</view>
+        </view>
+      </block>
+    </view>
+  </view>
+
+  <view class="bottom-nav">
+    <view class="nav-item active">
+      <view class="nav-mark nav-home"></view>
+      <text>首页</text>
+    </view>
+    <view class="nav-item" bind:tap="navigateToModule" data-title="我的">
+      <view class="nav-mark nav-user"></view>
+      <text>我的</text>
+    </view>
+  </view>
+</view>

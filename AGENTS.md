@@ -141,97 +141,17 @@ http://36.151.143.235:30081
 - Docker 清理脚本：`/usr/local/sbin/shanhuai-docker-prune.sh`；cron：每天 03:30 清理，日志写入 `/srv/shanhuai-ci/logs/docker-prune.log`。
 - 已配置 Docker registry mirrors：`docker.1ms.run`、`docker.m.daocloud.io`、`dockerproxy.com`。实测 Docker Hub 直拉 `moby/buildkit:buildx-stable-1` 仍可能超时，CI 初期优先使用默认 builder + 本地 cache；需要 registry cache 时再处理 `docker-container` builder 镜像来源。
 
+## 山淮微信小程序 OSS 图片上传
 
-## Codex + Superpowers + OpenSpec 协作架构
+- 小程序图片外链前缀：`https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/wx`，配置在 `wx/config/assets.js`。
+- 小程序首页模块图、登录图等静态资源上传到京东云 OSS 的 `wx/` 对象前缀，例如源文件 `module-teams.png` 对应远端对象 `wx/module-teams.png`。源文件可临时放在桌面、`tmp/` 或其他工作目录，上传后不要为了运行依赖保留在小程序包里。
+- OSS 凭据优先读取 `api/.env` 里的 `JD_OSS_ACCESS_KEY_ID`、`JD_OSS_ACCESS_KEY_SECRET`、`JD_OSS_BUCKET`、`JD_OSS_ENDPOINT`、`JD_OSS_REGION`、`JD_OSS_PUBLIC_BASE_URL`；不要把密钥硬编码进命令、脚本或回复。
+- 当前仓库没有安装 `aws`/`s3cmd`/`mc`/`ossutil` CLI 时，可以复用后端 `api/src/infrastructure/storage/jdcloud_oss.rs` 的 AWS4 S3 签名逻辑，用临时 Python/Node 脚本直接 `PUT https://<bucket>.<endpoint>/<key>`。
+- 上传请求必须包含并参与签名的 headers：`content-type`、`host`、`x-amz-content-sha256`、`x-amz-date`；`Authorization` 使用 `AWS4-HMAC-SHA256`，credential scope 为 `<YYYYMMDD>/<JD_OSS_REGION>/s3/aws4_request`。
+- 上传后必须用公开 URL 重新 `GET` 校验，至少比对远端内容的 SHA256 和本地文件 SHA256 一致；为绕过缓存可在 URL 后追加 `?verify=<timestamp>`。
+- 微信开发者工具或真机如果仍显示旧图，先清缓存/重新编译；代码仍使用同名外链时，覆盖 OSS 同名对象即可生效。
 
 
-> 参考理念来自：https://www.heyuan110.com/zh/posts/ai/2026-04-09-claude-code-openspec-superpowers/  
-> 本节不是原文复制，而是按本项目实际情况整理后的 Codex 使用规则。
-
-本项目采用 **Codex + OpenSpec + Superpowers** 三层架构：
-
-- **OpenSpec = 需求层 / 规范层 / 记忆层**：负责把一句话需求变成可追溯的文档，明确“为什么做、做什么、不做什么、行为验收、任务拆分”。
-- **Superpowers = 工程纪律层 / 质量监理层**：负责让 AI 在写代码时遵守 TDD、系统化调试、代码审查、完成前验证
-- **Codex = 执行层**：负责真正读代码、改文件、跑命令、执行测试、管理 git、必要时调用子代理并行处理。
-
-一句话原则：**OpenSpec 先把事情想清楚，Superpowers 确保写代码时不乱来，Codex 负责落地执行。**
-
-### 三者分别解决什么问题
-
-| 常见问题 | 主要负责工具 | 本项目要求 |
-| --- | --- | --- |
-| AI 做出来不是用户想要的 | OpenSpec | 复杂需求先 `/opsx:propose`，把目标、边界、验收写清楚 |
-| AI 跳过测试直接写代码 | Superpowers | 实现功能/修 bug 前默认 TDD，不能先写实现再补测试 |
-| 多轮迭代后忘记早期决策 | OpenSpec | 每个 change 完成后必须 archive，保留决策和 Delta 记录 |
-| 代码改了但没验证就说完成 | Superpowers | 声称完成前必须运行测试/构建/lint/接口验证 |
-| 主工作区被 AI 改乱 | Superpowers | 大改动优先隔离 明确当前工作区状态 |
-
-### OpenSpec 和 Superpowers 怎么衔接
-
-OpenSpec 和 Superpowers 都有“规划”能力，但它们不是同一个东西，也不会天然互相让路：
-
-- OpenSpec 的规划产物是 `openspec/changes/<change-id>/` 下的 `proposal.md`、`design.md`、`specs/`、`tasks.md`。
-- Superpowers 的规划产物通常是 `docs/superpowers/specs/` 和 `docs/superpowers/plans/`。
-- 如果复杂需求同时让两套系统各自规划，容易出现两份设计文档不同步。
-
-所以本项目规定：
-
-1. **复杂需求默认由 OpenSpec 主导规划**。
-    - 例如：后端新接口、数据库变化、权限/支付/状态机、跨 PC/App/后端联动、多步骤功能。
-    - 先用 `/opsx:explore` 或 `/opsx:propose`，不要先让 Superpowers brainstorming 另起一套设计。
-
-2. **进入编码阶段后，由 Superpowers 主导工程纪律**。
-    - `/opsx:apply` 负责按 OpenSpec 的 tasks 实施，但它本身不等于自动执行 TDD、review、verification。
-    - Codex 在执行 `/opsx:apply` 时，必须主动套用 Superpowers 的纪律：TDD、系统化调试、代码审查、完成前验证。
-
-3. **没有走 OpenSpec 的中小需求，可以使用 Superpowers 轻量规划**。
-    - 例如：单文件小重构、小 UI 调整、小工具函数、局部 bug 修复。
-    - 这时可用 Superpowers brainstorming/writing-plans 形成轻量设计和计划。
-
-4. **OpenSpec archive 是复杂功能完成闭环的最后一步**。
-    - 实现完成、测试通过后，还要 `/opsx:archive <change-id>`。
-    - 不 archive 的后果：下次会话可能读不到最新规范，甚至重复实现已完成能力。
-
-### 推荐完整流程：复杂功能
-
-适用于：预估超过 2 小时、多端/多服务联动、会影响接口/数据库/权限/业务流程、需要长期维护的功能。
-
-1. **探索阶段：OpenSpec explore**
-    - 使用 `/opsx:explore`。
-    - 目标是搞清楚问题、约束、已有代码结构、风险和可选方案。
-    - 这个阶段可以读代码、画架构、比较方案，但不写实现代码。
-
-2. **规范阶段：OpenSpec propose**
-    - 使用 `/opsx:propose <change-id 或功能描述>`。
-    - 生成或完善：
-        - `proposal.md`：为什么做、做什么、不做什么。
-        - `design.md`：技术方案、关键取舍、拒绝的替代方案。
-        - `specs/`：行为规格，强调 GIVEN/WHEN/THEN 或等价验收行为。
-        - `tasks.md`：可执行任务清单。
-    - 重点 review：Out of Scope/Non-goals，避免 AI 自作主张加功能。
-
-3. **人工确认阶段**
-    - Codex 必须提示用户 review OpenSpec 文档。
-    - 如果用户发现方向不对，先改文档，不要直接改代码。
-    - 文档是复杂变更的 source of truth。
-
-4. **实施阶段：OpenSpec apply + Superpowers 纪律**
-    - 使用 `/opsx:apply <change-id>`。
-    - 每个实现任务都应遵守：
-        - 先写失败测试，再写实现，再保持测试通过。
-        - 遇到失败先定位根因，不猜测式修复。
-        - 每完成关键步骤，检查代码是否符合 OpenSpec 文档。
-        - 必要时做代码审查，尤其是接口、权限、数据迁移、并发、安全相关变更。
-
-5. **验证阶段：Superpowers verification**
-    - 声称完成前必须运行能证明结论的命令。
-    - 可包括：`go test ./...`、`pytest`、`npm test`、`npm run build`、`flutter test`、接口 curl、数据库迁移检查等。
-    - 如果不能运行完整验证，必须明确说明原因和已做的替代验证。
-
-6. **归档阶段：OpenSpec archive**
-    - 使用 `/opsx:archive <change-id>`。
-    - 把完成的变更归档，保留决策和演进记录。
-    - 对复杂功能来说，没有 archive 不算完整闭环。
 
 
 推荐命令示例：
@@ -257,66 +177,13 @@ git push origin main
 4. 在 `merge/*` 分支运行完整测试、构建、关键页面或接口验证。
 5. 验证通过后再合回 `main`，发布 `main`。
 
-### 简化流程：中小任务
-
-适用于：30 分钟到 2 小时的小需求，影响范围明确，不需要长期决策追溯。
-
-- 可不走 OpenSpec。
-- 仍要遵守 Superpowers 基础纪律：
-    - 修 bug 先复现和定位根因。
-    - 行为变化尽量先补测试。
-    - 完成前必须验证。
-- 如果做着做着发现范围扩大，应暂停并升级到 OpenSpec。
 
 ### 极简流程：一次性/探索性任务
 
 适用于：临时脚本、一次性数据查看、纯调研、不会进生产的探索。
 
 - 可以直接让 Codex 执行。
-- 不强制 OpenSpec，不强制完整 TDD。
 - 但不能编造结果，结论仍要基于命令输出、文件内容或可验证证据。
-
-### 什么时候必须使用 OpenSpec
-
-满足任一条件时，优先使用 OpenSpec，不要直接开写：
-
-- 预估超过 2 小时，或需要多步实现/多轮迭代。
-- 涉及后端接口、数据库结构、权限、支付、状态机、跨端联动、生产风险。
-- 涉及 `gc-echo-backend`、`construction_frontend`、`app_flutter` 之间的联动。
-- 需要保留决策记录，后续可能复盘“为什么当时这么设计”。
-- 团队协作或需要让下一个 Codex 会话继续接手。
-- 用户说“先设计”“先讨论方案”“复杂一点”“后面还会迭代”。
-
-推荐命令：
-
-```text
-/opsx:explore
-/opsx:propose <change-id 或功能描述>
-/opsx:apply <change-id>
-/opsx:archive <change-id>
-```
-
-
-
-### Superpowers 在本项目的强制纪律
-
-#### TDD：实现前先测试
-
-实现功能、修 bug、改变行为前，默认采用 TDD：
-
-1. 写一个能表达目标行为的测试。
-2. 运行测试，确认它失败，而且失败原因正确。
-3. 写最小实现让测试通过。
-4. 再运行相关测试，确认没有回归。
-5. 必要时重构，但保持测试为绿。
-
-例外情况：
-
-- 纯配置变更。
-- 一次性脚本。
-- 没有现成测试框架且建立测试成本明显高于改动本身。
-
-即使例外，也必须说明替代验证方式。
 
 #### Systematic Debugging：先根因，后修复
 
@@ -343,7 +210,6 @@ git push origin main
 
 Review 重点：
 
-- 是否符合 OpenSpec 的 proposal/design/specs/tasks。
 - 是否有漏测场景。
 - 是否有安全、并发、兼容性、回滚风险。
 - 是否引入不必要复杂度。
