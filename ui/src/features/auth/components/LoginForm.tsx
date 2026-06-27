@@ -49,7 +49,7 @@ export function LoginForm() {
             管理员登录
           </h1>
           <p className="text-sm leading-6 text-slate-500 dark:text-white/54">
-            欢迎使用山淮建设管理平台
+            欢迎使用山淮筑
           </p>
         </div>
 
