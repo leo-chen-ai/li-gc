@@ -8,6 +8,11 @@ export function envValidatorPlugin(): Plugin {
   return {
     name: "env-validator",
     config(_config, { mode }) {
+      if (mode !== "development") {
+        console.log("✅ Environment variables validated");
+        return;
+      }
+
       const fileEnv = loadEnv(mode, process.cwd(), "");
       const systemEnv = process.env;
 

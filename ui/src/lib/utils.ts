@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { API_URL } from "@/lib/env";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -47,8 +48,7 @@ export function getAvatarUrl(url?: string | null): string | undefined {
     return appendBuster(url);
   }
 
-  const baseUrl = import.meta.env.VITE_API_URL || "http://localhost:8080";
-  const normalizedBase = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
+  const normalizedBase = API_URL.endsWith("/") ? API_URL.slice(0, -1) : API_URL;
   const normalizedUrl = url.startsWith("/") ? url : `/${url}`;
 
   return appendBuster(`${normalizedBase}${normalizedUrl}`);

@@ -26,7 +26,9 @@ Environment:
   SHANHUAI_SSH_KEY=~/.ssh/shanhuai_k3s_deploy_ed25519
   SHANHUAI_LOCAL_CACHE=~/.cache/shanhuai-gc/buildkit
   DEPLOY_PLATFORM=linux/amd64
+  FRONTEND_API_URL=             Optional. Leave empty to use browser origin at runtime.
   PUBLIC_WEB_URL=http://36.151.143.235:30081
+  VERIFY_WEB_URL=$PUBLIC_WEB_URL
   BUILDX_BUILDER=desktop-linux
 EOF
 }
@@ -48,6 +50,8 @@ VPS_SSH_PORT="${VPS_SSH_PORT:-22}"
 NAMESPACE="${SHANHUAI_K3S_NAMESPACE:-shanhuai-app}"
 DEPLOY_PLATFORM="${DEPLOY_PLATFORM:-linux/amd64}"
 PUBLIC_WEB_URL="${PUBLIC_WEB_URL:-http://$VPS_HOST:30081}"
+VERIFY_WEB_URL="${VERIFY_WEB_URL:-$PUBLIC_WEB_URL}"
+FRONTEND_API_URL="${FRONTEND_API_URL:-${VITE_API_URL:-}}"
 SSH_KEY="${SHANHUAI_SSH_KEY:-$HOME/.ssh/shanhuai_k3s_deploy_ed25519}"
 CACHE_ROOT="${SHANHUAI_LOCAL_CACHE:-$HOME/.cache/shanhuai-gc/buildkit}"
 DEPLOYED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -470,9 +474,9 @@ rollout_ui() {
 }
 
 verify_public_endpoint() {
-  echo "Verifying $PUBLIC_WEB_URL ..."
-  curl -fsS --connect-timeout 10 "$PUBLIC_WEB_URL/" >/dev/null
-  curl -fsS --connect-timeout 10 "$PUBLIC_WEB_URL/health" >/dev/null
+  echo "Verifying $VERIFY_WEB_URL ..."
+  curl -fsS --connect-timeout 10 "$VERIFY_WEB_URL/" >/dev/null
+  curl -fsS --connect-timeout 10 "$VERIFY_WEB_URL/health" >/dev/null
   ssh_remote "k3s kubectl -n '$NAMESPACE' get pods,svc -o wide"
 }
 
@@ -516,7 +520,7 @@ fi
 
 if [ "$DEPLOY_UI" = true ]; then
   build_image "$UI_IMAGE" ui \
-    --build-arg "VITE_API_URL=$PUBLIC_WEB_URL" \
+    --build-arg "VITE_API_URL=$FRONTEND_API_URL" \
     "$ROOT_DIR/ui"
   import_image "$UI_IMAGE"
   rollout_ui

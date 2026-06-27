@@ -1,10 +1,11 @@
-// Centralized environment variables
-// Build-time validation happens in vite.config.ts
+// Centralized environment variables.
+// Production can use the current browser origin so one image works for IP and domain access.
 
-const isDev = import.meta.env.DEV;
+const viteEnv = import.meta.env ?? {};
+const isDev = Boolean(viteEnv.DEV);
 
 function getRequiredEnv(name: string): string {
-  const value = import.meta.env[name];
+  const value = viteEnv[name];
   
   // Only validate in development (production validated at build time)
   if (isDev && (!value || value.trim() === "")) {
@@ -18,11 +19,25 @@ function getRequiredEnv(name: string): string {
   return value || "";
 }
 
+export function resolveApiUrl(
+  configuredUrl = "",
+  browserOrigin = typeof window !== "undefined" ? window.location.origin : "",
+  fallbackUrl = "http://localhost:8080"
+): string {
+  const trimmedUrl = configuredUrl.trim();
+  if (trimmedUrl) return trimmedUrl;
+
+  const trimmedOrigin = browserOrigin.trim();
+  if (trimmedOrigin) return trimmedOrigin;
+
+  return fallbackUrl;
+}
+
 // ============================================
 // REQUIRED
 // ============================================
 
-export const API_URL = getRequiredEnv("VITE_API_URL");
+export const API_URL = resolveApiUrl(getRequiredEnv("VITE_API_URL"));
 
 // ============================================
 // OPTIONAL (add more as needed)
