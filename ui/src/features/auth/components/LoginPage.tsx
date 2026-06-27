@@ -47,7 +47,7 @@ export function LoginPage() {
       <div className="absolute inset-y-0 right-0 hidden w-[44vw] bg-[#f6fbf8]/72 backdrop-blur-sm dark:bg-[#071f22]/72 lg:block 2xl:w-[46vw]" />
       <div className="absolute inset-x-0 top-0 h-px bg-white/22 dark:bg-white/14" />
 
-      <div className="relative mx-auto grid min-h-screen w-full max-w-7xl grid-rows-[auto_1fr_auto] px-5 py-6 sm:px-8 lg:px-10">
+      <div className="relative mx-auto grid min-h-screen w-full max-w-7xl grid-rows-[auto_1fr] px-5 py-6 sm:px-8 lg:px-10">
         <header className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <div className="flex size-13 items-center justify-center rounded-lg bg-[#0f7d6f] text-2xl font-semibold text-white shadow-[0_18px_44px_rgba(4,120,103,0.34)] ring-1 ring-white/30">
@@ -123,14 +123,16 @@ export function LoginPage() {
             </div>
           </section>
 
-          <section className="w-full rounded-2xl border border-white/82 bg-white/88 p-5 shadow-[0_32px_90px_rgba(15,23,42,0.18)] backdrop-blur-xl dark:border-white/16 dark:bg-[#09272d]/88 dark:shadow-[0_32px_90px_rgba(0,0,0,0.42)] sm:p-7 lg:p-8 2xl:translate-x-40">
-            <LoginForm />
-          </section>
-        </main>
+          <div className="w-full min-w-0 max-w-full space-y-5 2xl:translate-x-40">
+            <section className="w-full min-w-0 max-w-full rounded-2xl border border-white/82 bg-white/88 p-5 shadow-[0_32px_90px_rgba(15,23,42,0.18)] backdrop-blur-xl dark:border-white/16 dark:bg-[#09272d]/88 dark:shadow-[0_32px_90px_rgba(0,0,0,0.42)] sm:p-7 lg:p-8">
+              <LoginForm />
+            </section>
 
-        <footer className="pb-1 text-center text-xs font-medium text-slate-600/78 dark:text-white/52 lg:text-slate-700/68 lg:dark:text-white/52">
-          2026 宁波山淮科技有限公司 技术支持
-        </footer>
+            <footer className="text-center text-xs font-medium text-slate-500/82 dark:text-white/52">
+              2026 宁波山淮科技有限公司 技术支持
+            </footer>
+          </div>
+        </main>
       </div>
     </div>
   );
