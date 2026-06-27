@@ -4,9 +4,18 @@ import {
   Users,
   ShieldCheck,
   Building2,
+  BriefcaseBusiness,
   Fingerprint,
   Files,
   FileClock,
+  BarChart3,
+  FileText,
+  Clock3,
+  Link2,
+  ReceiptText,
+  FileInput,
+  WalletMinimal,
+  WalletCards,
   type LucideIcon,
 } from "lucide-react";
 
@@ -39,7 +48,27 @@ export function AppSidebar() {
   const workspaceItems: Array<{
     key: MenuPermissionKey;
     title: string;
-    href: "/app/admin/projects";
+    href: "/app/admin";
+    icon: LucideIcon;
+    enabled: boolean;
+  }> = [
+    {
+      key: "admin_overview",
+      title: "首页总览",
+      href: "/app/admin",
+      icon: BarChart3,
+      enabled: isAdmin,
+    },
+  ];
+
+  const projectModuleItems: Array<{
+    key: MenuPermissionKey;
+    title: string;
+    href:
+      | "/app/admin/projects"
+      | "/app/admin/contract-templates"
+      | "/app/admin/work-hour-configs"
+      | "/app/admin/platform-integrations";
     icon: LucideIcon;
     enabled: boolean;
   }> = [
@@ -48,6 +77,92 @@ export function AppSidebar() {
       title: "项目管理",
       href: "/app/admin/projects",
       icon: Building2,
+      enabled: isAdmin,
+    },
+    {
+      key: "contract_templates",
+      title: "合同模板管理",
+      href: "/app/admin/contract-templates",
+      icon: FileText,
+      enabled: isAdmin,
+    },
+    {
+      key: "work_hour_configs",
+      title: "工时配置",
+      href: "/app/admin/work-hour-configs",
+      icon: Clock3,
+      enabled: isAdmin,
+    },
+    {
+      key: "platform_integrations",
+      title: "平台对接管理",
+      href: "/app/admin/platform-integrations",
+      icon: Link2,
+      enabled: isAdmin,
+    },
+  ];
+
+  const enterpriseItems: Array<{
+    key: MenuPermissionKey;
+    title: string;
+    href:
+      | "/app/admin/enterprise-customers"
+      | "/app/admin/enterprise-own-entities"
+      | "/app/admin/enterprise-projects"
+      | "/app/admin/enterprise-issued-invoices"
+      | "/app/admin/enterprise-received-invoices"
+      | "/app/admin/enterprise-collections"
+      | "/app/admin/enterprise-payments";
+    icon: LucideIcon;
+    enabled: boolean;
+  }> = [
+    {
+      key: "enterprise_customers",
+      title: "往来单位管理",
+      href: "/app/admin/enterprise-customers",
+      icon: Users,
+      enabled: isAdmin,
+    },
+    {
+      key: "enterprise_own_entities",
+      title: "我方主体管理",
+      href: "/app/admin/enterprise-own-entities",
+      icon: Building2,
+      enabled: isAdmin,
+    },
+    {
+      key: "enterprise_projects",
+      title: "往来单位关联项目管理",
+      href: "/app/admin/enterprise-projects",
+      icon: BriefcaseBusiness,
+      enabled: isAdmin,
+    },
+    {
+      key: "enterprise_issued_invoices",
+      title: "开票管理",
+      href: "/app/admin/enterprise-issued-invoices",
+      icon: ReceiptText,
+      enabled: isAdmin,
+    },
+    {
+      key: "enterprise_received_invoices",
+      title: "收票管理",
+      href: "/app/admin/enterprise-received-invoices",
+      icon: FileInput,
+      enabled: isAdmin,
+    },
+    {
+      key: "enterprise_collections",
+      title: "回款管理",
+      href: "/app/admin/enterprise-collections",
+      icon: WalletMinimal,
+      enabled: isAdmin,
+    },
+    {
+      key: "enterprise_payments",
+      title: "付款管理",
+      href: "/app/admin/enterprise-payments",
+      icon: WalletCards,
       enabled: isAdmin,
     },
   ];
@@ -87,6 +202,9 @@ export function AppSidebar() {
   ];
 
   const isActive = (href: string) => {
+    if (href === "/app/admin") {
+      return location.pathname === "/app/admin" || location.pathname === "/app/admin/";
+    }
     return location.pathname.startsWith(href);
   };
 
@@ -97,7 +215,7 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <div className="flex items-center justify-between">
               <SidebarMenuButton size="lg" asChild>
-                <Link to={isAdmin ? "/app/admin/projects" : "/app"}>
+                <Link to={isAdmin ? "/app/admin" : "/app"}>
                   <div className="flex aspect-square size-8 items-center justify-center rounded-md bg-[#0f6b5d] text-sm font-semibold text-white">
                     山
                   </div>
@@ -115,7 +233,7 @@ export function AppSidebar() {
         </SidebarMenu>
       </SidebarHeader>
 
-      <SidebarContent>
+      <SidebarContent className="max-h-[calc(100svh-4.25rem)] overflow-y-auto overscroll-contain pr-1">
         <SidebarGroup>
           <SidebarGroupLabel>工作台</SidebarGroupLabel>
           <SidebarMenu>
@@ -133,6 +251,46 @@ export function AppSidebar() {
               ))}
           </SidebarMenu>
         </SidebarGroup>
+
+        {projectModuleItems.some((item) => item.enabled && allowedMenus.has(item.key)) && (
+          <SidebarGroup>
+            <SidebarGroupLabel>项目管理</SidebarGroupLabel>
+            <SidebarMenu>
+              {projectModuleItems
+                .filter((item) => item.enabled && allowedMenus.has(item.key))
+                .map((item) => (
+                  <SidebarMenuItem key={item.key}>
+                    <SidebarMenuButton asChild isActive={isActive(item.href)} tooltip={item.title}>
+                      <Link to={item.href}>
+                        <item.icon className="size-4" />
+                        <span>{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+            </SidebarMenu>
+          </SidebarGroup>
+        )}
+
+        {enterpriseItems.some((item) => item.enabled && allowedMenus.has(item.key)) && (
+          <SidebarGroup>
+            <SidebarGroupLabel>企业经营管理</SidebarGroupLabel>
+            <SidebarMenu>
+              {enterpriseItems
+                .filter((item) => item.enabled && allowedMenus.has(item.key))
+                .map((item) => (
+                  <SidebarMenuItem key={item.key}>
+                    <SidebarMenuButton asChild isActive={isActive(item.href)} tooltip={item.title}>
+                      <Link to={item.href}>
+                        <item.icon className="size-4" />
+                        <span>{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+            </SidebarMenu>
+          </SidebarGroup>
+        )}
 
         {attendanceDeviceItems.some((item) => item.enabled && allowedMenus.has(item.key)) && (
           <SidebarGroup>

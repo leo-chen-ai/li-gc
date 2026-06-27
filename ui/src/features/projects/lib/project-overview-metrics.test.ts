@@ -33,7 +33,7 @@ const teams = [
 
 const workers = [
   { name: "工人一", idCard: "3201", phone: "138", team: "钢筋班", unit: "总包单位", workType: "钢筋工", status: "在场" },
-  { name: "工人二", idCard: "3202", phone: "139", team: "木工班", unit: "总包单位", workType: "木工", status: "未认证" },
+  { name: "工人二", idCard: "3202", phone: "139", team: "木工班", unit: "总包单位", workType: "木工", status: "离场" },
 ] as Worker[];
 
 const attendance = [

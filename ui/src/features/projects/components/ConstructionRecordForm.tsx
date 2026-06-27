@@ -1,10 +1,11 @@
-import { FileText, ImageIcon, Loader2, Upload, X } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { Eraser, FileText, ImageIcon, Loader2, PenLine, Upload, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import {
+  inferNativePlaceFromAddress,
   getFieldsBySection,
   type ConstructionFormField,
   type ConstructionFormOption,
@@ -338,10 +339,21 @@ function UploadField({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [base64ByUrl, setBase64ByUrl] = useState<Record<string, string>>({});
+  const [signatureOpen, setSignatureOpen] = useState(false);
   const isJsonField = field.valueType === "json";
   const items = isJsonField ? parseUploadRecords(value) : value ? [urlToUploadRecord(value)] : [];
   const accept = field.uploadKind === "image" ? "image/*" : undefined;
   const idCardSide = sideForIdCardField(field.key);
+
+  const uploadFile = async (file: File) => {
+    const imageBase64 = field.uploadKind === "image" ? await fileToBase64Payload(file) : null;
+    const record = await constructionProjectService.uploadFile(file, {
+      bizType: uploadContext?.bizType,
+      bizId: uploadContext?.bizId,
+      fieldKey: field.key,
+    });
+    return { record, imageBase64 };
+  };
 
   const handleFiles = async (files: FileList | null) => {
     if (!files?.length) return;
@@ -355,12 +367,7 @@ function UploadField({
       const uploaded: UploadFileRecord[] = [];
       const uploadedBase64: Record<string, string> = {};
       for (const file of selectedFiles) {
-        const imageBase64 = field.uploadKind === "image" ? await fileToBase64Payload(file) : null;
-        const record = await constructionProjectService.uploadFile(file, {
-          bizType: uploadContext?.bizType,
-          bizId: uploadContext?.bizId,
-          fieldKey: field.key,
-        });
+        const { record, imageBase64 } = await uploadFile(file);
         uploaded.push(record);
         if (imageBase64) uploadedBase64[record.public_url] = imageBase64;
         if (!field.uploadMultiple) break;
@@ -380,6 +387,26 @@ function UploadField({
     } finally {
       setIsUploading(false);
       if (inputRef.current) inputRef.current.value = "";
+    }
+  };
+
+  const handleSignatureFile = async (file: File) => {
+    setIsUploading(true);
+    setError(null);
+    setNotice(null);
+
+    try {
+      const { record, imageBase64 } = await uploadFile(file);
+      if (imageBase64) {
+        setBase64ByUrl((current) => ({ ...current, [record.public_url]: imageBase64 }));
+      }
+      onChange(record.public_url ?? "");
+      setNotice("签字已上传");
+      setSignatureOpen(false);
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "签字上传失败");
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -406,7 +433,12 @@ function UploadField({
         imageUrl: base64ByUrl[imageUrl] ? undefined : imageUrl,
         imageBase64: base64ByUrl[imageUrl],
       });
-      const entries = Object.entries(result.fields ?? {}).filter(([, value]) => value != null && value !== "");
+      const recognizedFields = { ...(result.fields ?? {}) };
+      if (!recognizedFields.native_place && recognizedFields.address) {
+        const nativePlace = inferNativePlaceFromAddress(recognizedFields.address);
+        if (nativePlace) recognizedFields.native_place = nativePlace;
+      }
+      const entries = Object.entries(recognizedFields).filter(([, value]) => value != null && value !== "");
       if (entries.length === 0) {
         setNotice("识别完成，未返回可回填字段");
         return;
@@ -421,7 +453,7 @@ function UploadField({
   };
 
   return (
-    <div className="rounded-md border border-slate-200 bg-white p-2 dark:border-border dark:bg-background">
+    <div className="min-w-0 overflow-hidden rounded-md border border-slate-200 bg-white p-2 dark:border-border dark:bg-background">
       <input
         ref={inputRef}
         type="file"
@@ -461,29 +493,43 @@ function UploadField({
             {isRecognizing ? "识别中" : idCardSide === "front" ? "识别正面" : "识别背面"}
           </Button>
         )}
+        {field.signaturePad && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 gap-2 border-[#0f6b5d]/30 bg-white text-[#0f6b5d] hover:bg-[#0f6b5d]/10 dark:border-[#0f6b5d]/50 dark:bg-background"
+            disabled={isUploading}
+            onClick={() => setSignatureOpen(true)}
+          >
+            {isUploading ? <Loader2 className="size-4 animate-spin" /> : <PenLine className="size-4" />}
+            手写签字
+          </Button>
+        )}
       </div>
 
       {error && <div className="mt-2 text-xs text-red-600">{error}</div>}
       {notice && <div className="mt-2 text-xs text-[#0f6b5d]">{notice}</div>}
 
       {items.length > 0 && (
-        <div className="mt-2 grid gap-2">
+        <div className="mt-2 grid min-w-0 gap-2">
           {items.map((item, index) => (
-            <div key={`${item.public_url}-${index}`} className="flex items-center gap-2 rounded-md bg-slate-50 p-2 dark:bg-muted/40">
+            <div key={`${item.public_url}-${index}`} className="flex min-w-0 items-center gap-2 overflow-hidden rounded-md bg-slate-50 p-2 dark:bg-muted/40">
               {field.uploadKind === "image" ? (
                 item.public_url ? (
-                  <img src={item.public_url} alt={item.original_filename ?? field.label} className="size-10 rounded object-cover" />
+                  <img src={item.public_url} alt={item.original_filename ?? field.label} className="size-10 shrink-0 rounded object-cover" />
                 ) : (
-                  <ImageIcon className="size-5 text-slate-400" />
+                  <ImageIcon className="size-5 shrink-0 text-slate-400" />
                 )
               ) : (
-                <FileText className="size-5 text-slate-400" />
+                <FileText className="size-5 shrink-0 text-slate-400" />
               )}
               <a
                 href={item.public_url}
                 target="_blank"
                 rel="noreferrer"
-                className="min-w-0 flex-1 truncate text-xs text-slate-700 hover:text-[#0f6b5d] dark:text-muted-foreground"
+                title={item.original_filename ?? item.public_url}
+                className="block min-w-0 flex-1 overflow-hidden truncate whitespace-nowrap text-xs text-slate-700 hover:text-[#0f6b5d] dark:text-muted-foreground"
               >
                 {item.original_filename ?? item.public_url}
               </a>
@@ -491,7 +537,7 @@ function UploadField({
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="size-7 text-slate-500 hover:bg-red-50 hover:text-red-600"
+                className="size-7 shrink-0 text-slate-500 hover:bg-red-50 hover:text-red-600"
                 onClick={() => removeItem(index)}
                 aria-label="移除文件"
               >
@@ -501,6 +547,160 @@ function UploadField({
           ))}
         </div>
       )}
+      {field.signaturePad && (
+        <SignaturePadDialog
+          open={signatureOpen}
+          isUploading={isUploading}
+          onClose={() => setSignatureOpen(false)}
+          onConfirm={(file) => void handleSignatureFile(file)}
+        />
+      )}
+    </div>
+  );
+}
+
+function SignaturePadDialog({
+  open,
+  isUploading,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  isUploading: boolean;
+  onClose: () => void;
+  onConfirm: (file: File) => void;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const isDrawingRef = useRef(false);
+  const lastPointRef = useRef<{ x: number; y: number } | null>(null);
+  const [hasStroke, setHasStroke] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const prepareCanvas = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const ratio = window.devicePixelRatio || 1;
+    canvas.width = Math.max(1, Math.floor(rect.width * ratio));
+    canvas.height = Math.max(1, Math.floor(rect.height * ratio));
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, rect.width, rect.height);
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    context.strokeStyle = "#111827";
+    context.lineWidth = 3;
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const frame = window.requestAnimationFrame(() => {
+      prepareCanvas();
+      setHasStroke(false);
+      setMessage(null);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [open]);
+
+  if (!open) return null;
+
+  const pointFromEvent = (event: PointerEvent<HTMLCanvasElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    };
+  };
+
+  const startDrawing = (event: PointerEvent<HTMLCanvasElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    isDrawingRef.current = true;
+    lastPointRef.current = pointFromEvent(event);
+    setMessage(null);
+  };
+
+  const draw = (event: PointerEvent<HTMLCanvasElement>) => {
+    if (!isDrawingRef.current || !lastPointRef.current) return;
+    const context = event.currentTarget.getContext("2d");
+    if (!context) return;
+    const nextPoint = pointFromEvent(event);
+    context.beginPath();
+    context.moveTo(lastPointRef.current.x, lastPointRef.current.y);
+    context.lineTo(nextPoint.x, nextPoint.y);
+    context.stroke();
+    lastPointRef.current = nextPoint;
+    setHasStroke(true);
+  };
+
+  const stopDrawing = (event: PointerEvent<HTMLCanvasElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    isDrawingRef.current = false;
+    lastPointRef.current = null;
+  };
+
+  const clearCanvas = () => {
+    prepareCanvas();
+    setHasStroke(false);
+    setMessage(null);
+  };
+
+  const confirm = () => {
+    if (!hasStroke) {
+      setMessage("请先在签字区域手写签名");
+      return;
+    }
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        setMessage("签字生成失败，请重新签字");
+        return;
+      }
+      onConfirm(new File([blob], `signature-${Date.now()}.png`, { type: "image/png" }));
+    }, "image/png");
+  };
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 p-4">
+      <div className="w-full max-w-5xl rounded-lg bg-white shadow-xl dark:bg-card">
+        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-border">
+          <div>
+            <h3 className="text-base font-semibold text-slate-950 dark:text-foreground">人员签字</h3>
+            <p className="mt-0.5 text-xs text-slate-500 dark:text-muted-foreground">在下方空白区域手写签名，确认后自动上传。</p>
+          </div>
+          <Button type="button" variant="ghost" size="icon" onClick={onClose} disabled={isUploading}>
+            <X className="size-5" />
+          </Button>
+        </div>
+        <div className="space-y-3 p-4">
+          <canvas
+            ref={canvasRef}
+            className="h-[320px] w-full touch-none rounded-md border border-slate-300 bg-white"
+            onPointerDown={startDrawing}
+            onPointerMove={draw}
+            onPointerUp={stopDrawing}
+            onPointerCancel={stopDrawing}
+          />
+          {message ? <div className="text-sm text-red-600">{message}</div> : null}
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-4 py-3 dark:border-border">
+          <Button type="button" variant="outline" className="gap-2" onClick={clearCanvas} disabled={isUploading}>
+            <Eraser className="size-4" />
+            清空
+          </Button>
+          <Button type="button" variant="outline" onClick={onClose} disabled={isUploading}>
+            取消
+          </Button>
+          <Button type="button" className="gap-2 bg-[#0f6b5d] text-white hover:bg-[#0b5148]" onClick={confirm} disabled={isUploading}>
+            {isUploading ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
+            {isUploading ? "上传中" : "确认并上传"}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

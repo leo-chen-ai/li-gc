@@ -1,4 +1,4 @@
-type JsonValue =
+export type JsonValue =
   | string
   | number
   | boolean
@@ -252,6 +252,33 @@ export type ConstructionAttendanceRecord = {
   deleted_at: string | null;
 };
 
+export type ConstructionAttendanceCalendarDay = {
+  day: number;
+  first_in_record_id: string | null;
+  first_in_time: string | null;
+  last_out_record_id: string | null;
+  last_out_time: string | null;
+  working_hours: number | null;
+  work_point: number | null;
+  work_hour_algorithm: string | null;
+};
+
+export type ConstructionAttendanceCalendarRow = {
+  worker_id: string;
+  worker_name: string | null;
+  team_id: string | null;
+  team_name: string | null;
+  total_working_hours: number | null;
+  total_work_point: number | null;
+  days: ConstructionAttendanceCalendarDay[];
+};
+
+export type ConstructionAttendanceCalendarResponse = {
+  items: ConstructionAttendanceCalendarRow[];
+  month: string;
+  view: "calendar";
+};
+
 export type ConstructionAttendanceDevice = {
   id: string;
   is_deleted: boolean;
@@ -265,6 +292,369 @@ export type ConstructionAttendanceDevice = {
   updated_at: string;
   deleted_at: string | null;
 };
+
+export type ConstructionAttendanceDeviceIssueAction = "create" | "update" | "delete";
+export type ConstructionAttendanceDeviceIssueStatus = "pending" | "success" | "failed";
+
+export type ConstructionAttendanceDeviceIssueReport = {
+  id: string;
+  is_deleted: boolean;
+  project_id: string;
+  project_name?: string | null;
+  worker_id: string | null;
+  attendance_device_id: string | null;
+  worker_name: string | null;
+  worker_id_card: string | null;
+  worker_phone: string | null;
+  avatar_url: string | null;
+  device_name: string | null;
+  serial_number: string | null;
+  device_type: string | null;
+  action: ConstructionAttendanceDeviceIssueAction;
+  status: ConstructionAttendanceDeviceIssueStatus;
+  issued_at: string;
+  message: string | null;
+  remark: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+};
+
+export type ConstructionWageStatus = "draft" | "confirmed" | "paid" | "imported";
+
+export type ConstructionWageSummary = {
+  employee_count: number;
+  payable_amount_cents: number;
+  paid_amount_cents: number;
+  unpaid_amount_cents: number;
+};
+
+export type ConstructionWageItem = {
+  id: string;
+  batch_id: string;
+  project_id: string;
+  is_deleted: boolean;
+  worker_id: string | null;
+  worker_name: string | null;
+  id_card: string | null;
+  team_name: string | null;
+  attendance_days: string | null;
+  monthly_settlement: string | null;
+  daily_settlement: string | null;
+  wage_card_number: string | null;
+  wage_bank: string | null;
+  payable_amount_cents: number;
+  paid_amount_cents: number;
+  adjustment_amount_cents: number;
+  unpaid_amount_cents: number;
+  adjustment_reason: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+};
+
+export type ConstructionWageBatch = {
+  id: string;
+  is_deleted: boolean;
+  project_id: string;
+  payroll_month: string;
+  company_name: string | null;
+  employee_count: number;
+  payable_amount_cents: number;
+  paid_amount_cents: number;
+  unpaid_amount_cents: number;
+  status: ConstructionWageStatus;
+  remark: string | null;
+  created_by_user_id: string | null;
+  updated_by_user_id: string | null;
+  created_by_name?: string | null;
+  updated_by_name?: string | null;
+  items?: ConstructionWageItem[];
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+};
+
+export type ConstructionWageListResponse = {
+  items: ConstructionWageBatch[];
+  total: number;
+  page: number;
+  page_size: number;
+  summary: ConstructionWageSummary;
+};
+
+export type ConstructionResourceListResponse<T> = {
+  items: T[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+
+export type ConstructionContractTemplate = {
+  id: string;
+  is_deleted: boolean;
+  name: string;
+  code: string | null;
+  content: string;
+  template_file: JsonValue | null;
+  template_file_object_key: string | null;
+  template_file_name: string | null;
+  template_file_content_type: string | null;
+  is_enabled: boolean;
+  is_default: boolean;
+  remark: string | null;
+  created_by_user_id: string | null;
+  updated_by_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+};
+
+export type ConstructionProjectContractTemplateConfig = {
+  id: string;
+  project_id: string;
+  template_id: string | null;
+  is_deleted: boolean;
+  remark: string | null;
+  template_name?: string | null;
+  template_code?: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+};
+
+export type ConstructionWorkHourConfig = {
+  id: string;
+  project_id: string;
+  project_name?: string | null;
+  is_deleted: boolean;
+  name: string;
+  algorithm_type: string;
+  rules: JsonValue;
+  is_enabled: boolean;
+  remark: string | null;
+  created_by_user_id: string | null;
+  updated_by_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+};
+
+export type ConstructionPlatformConfig = {
+  id: string;
+  project_id: string;
+  project_name?: string | null;
+  is_deleted: boolean;
+  platform_name: string;
+  platform_type: string;
+  config: JsonValue;
+  is_enabled: boolean;
+  remark: string | null;
+  created_by_user_id: string | null;
+  updated_by_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+};
+
+export type ConstructionPlatformLog = {
+  id: string;
+  project_id: string;
+  project_name?: string | null;
+  platform_config_id: string | null;
+  is_deleted: boolean;
+  platform_name: string | null;
+  operation: string;
+  direction: string;
+  status: "success" | "failed" | "pending" | string;
+  request_count: number;
+  success_count: number;
+  failure_count: number;
+  message: string | null;
+  payload: JsonValue | null;
+  occurred_at: string;
+  created_by_user_id: string | null;
+  updated_by_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+};
+
+export type ConstructionPlatformLogSummary = {
+  today_request_count: number;
+  today_success_count: number;
+  today_failure_count: number;
+  today_log_count: number;
+};
+
+export type ConstructionPlatformLogListResponse =
+  ConstructionResourceListResponse<ConstructionPlatformLog> & {
+    summary: ConstructionPlatformLogSummary;
+  };
+
+export type ConstructionModuleListFilters = {
+  page?: number;
+  page_size?: number;
+  keyword?: string;
+  project_id?: string;
+  status?: string;
+  platform_type?: string;
+  action?: string;
+};
+
+export type ConstructionOverviewMetric = {
+  status?: number | string | null;
+  count: number;
+  date?: string;
+};
+
+export type ConstructionOverview = {
+  project_count: number;
+  unit_count: number;
+  team_count: number;
+  worker_count: number;
+  today_attendance_count: number;
+  wage_payable_amount_cents: number;
+  wage_paid_amount_cents: number;
+  wage_unpaid_amount_cents?: number;
+  wage_paid_rate_basis_points?: number;
+  attendance_7day_count?: number;
+  attendance_7day_average?: number;
+  project_active_count?: number;
+  project_other_count?: number;
+  platform_success_count?: number;
+  platform_failed_count?: number;
+  platform_success_rate_basis_points?: number;
+  contract_template_count?: number;
+  work_hour_config_count?: number;
+  platform_config_count?: number;
+  platform_today_request_count: number;
+  project_status_distribution: ConstructionOverviewMetric[];
+  attendance_trend: Array<{ date: string; count: number }>;
+  platform_status_distribution: Array<{ status: string; count: number }>;
+};
+
+export type ConstructionResourceListFilters = {
+  view?: "list" | "calendar";
+  page?: number;
+  page_size?: number;
+  keyword?: string;
+  unit_id?: string;
+  team_id?: string;
+  company_type?: number;
+  salary_calc_type?: number;
+  work_type?: number;
+  settlement_type?: number;
+  work_status?: number;
+  direction?: number;
+  attendance_date?: string;
+  month?: string;
+  attendance_month?: string;
+  attendance_configured?: boolean;
+};
+
+export type ConstructionProjectListFilters = {
+  page?: number;
+  page_size?: number;
+  keyword?: string;
+  status?: number;
+};
+
+export type ConstructionWageListFilters = {
+  payroll_month?: string;
+  status?: string;
+  page?: number;
+  page_size?: number;
+};
+
+export type ConstructionWageItemPayload = {
+  worker_id?: string;
+  worker_name?: string;
+  id_card: string;
+  team_name?: string;
+  attendance_days?: string;
+  monthly_settlement?: string;
+  daily_settlement?: string;
+  wage_card_number?: string;
+  wage_bank?: string;
+  payable_amount_cents: number;
+  paid_amount_cents: number;
+  adjustment_amount_cents?: number;
+  unpaid_amount_cents?: number;
+  adjustment_reason?: string;
+};
+
+export type ConstructionWageBatchPayload = {
+  payroll_month: string;
+  company_name?: string;
+  employee_count?: number;
+  payable_amount_cents?: number;
+  paid_amount_cents?: number;
+  unpaid_amount_cents?: number;
+  status?: ConstructionWageStatus;
+  remark?: string;
+  rows?: ConstructionWageItemPayload[];
+};
+
+export type ConstructionWageImportPayload = {
+  payroll_month: string;
+  company_name?: string;
+  status?: ConstructionWageStatus;
+  rows: ConstructionWageItemPayload[];
+};
+
+export type ConstructionContractTemplatePayload = Partial<
+  Pick<
+    ConstructionContractTemplate,
+    | "name"
+    | "code"
+    | "content"
+    | "template_file"
+    | "template_file_object_key"
+    | "template_file_name"
+    | "template_file_content_type"
+    | "is_enabled"
+    | "is_default"
+    | "remark"
+  >
+>;
+
+export type ConstructionProjectContractTemplatePayload = {
+  template_id: string | null;
+  remark?: string | null;
+};
+
+export type ConstructionWorkHourConfigPayload = Partial<
+  Pick<
+    ConstructionWorkHourConfig,
+    "project_id" | "name" | "algorithm_type" | "rules" | "is_enabled" | "remark"
+  >
+>;
+
+export type ConstructionPlatformConfigPayload = Partial<
+  Pick<
+    ConstructionPlatformConfig,
+    "project_id" | "platform_name" | "platform_type" | "config" | "is_enabled" | "remark"
+  >
+>;
+
+export type ConstructionPlatformLogPayload = Partial<
+  Pick<
+    ConstructionPlatformLog,
+    | "project_id"
+    | "platform_config_id"
+    | "platform_name"
+    | "operation"
+    | "direction"
+    | "status"
+    | "request_count"
+    | "success_count"
+    | "failure_count"
+    | "message"
+    | "payload"
+    | "occurred_at"
+  >
+>;
 
 type WritableKeys =
   | "id"
@@ -286,4 +676,24 @@ export type ConstructionAttendancePayload = Partial<
 >;
 export type ConstructionAttendanceDevicePayload = Partial<
   Omit<ConstructionAttendanceDevice, WritableKeys>
+>;
+export type ConstructionAttendanceDeviceIssueReportPayload = Partial<
+  Pick<
+    ConstructionAttendanceDeviceIssueReport,
+    | "project_id"
+    | "worker_id"
+    | "attendance_device_id"
+    | "worker_name"
+    | "worker_id_card"
+    | "worker_phone"
+    | "avatar_url"
+    | "device_name"
+    | "serial_number"
+    | "device_type"
+    | "action"
+    | "status"
+    | "issued_at"
+    | "message"
+    | "remark"
+  >
 >;

@@ -67,7 +67,7 @@ export type Worker = {
   team: string;
   unit: string;
   workType: string;
-  status: "在场" | "离场" | "未认证";
+  status: "在场" | "离场";
   entryDate: string;
 };
 
@@ -79,6 +79,7 @@ export type AttendanceRecord = {
   direction: AttendanceDirection;
   time: string;
   device: string;
+  photoUrl?: string;
   status: "有效" | "待补图" | "异常";
 };
 
@@ -188,14 +189,14 @@ export const workers: Worker[] = [
   { id: "w-1", projectId: "p-1001", name: "张建国", gender: "男", idCard: "3208**********1132", phone: "138****6112", team: "钢筋一班", unit: "苏北劳务工程有限公司", workType: "钢筋工", status: "在场", entryDate: "2026-03-20" },
   { id: "w-2", projectId: "p-1001", name: "李红梅", gender: "女", idCard: "3208**********2041", phone: "137****8104", team: "木工二班", unit: "苏北劳务工程有限公司", workType: "木工", status: "在场", entryDate: "2026-03-22" },
   { id: "w-3", projectId: "p-1001", name: "周海", gender: "男", idCard: "3208**********7719", phone: "150****4317", team: "安装综合班", unit: "山淮建设工程有限公司", workType: "安装工", status: "离场", entryDate: "2026-04-02" },
-  { id: "w-4", projectId: "p-1001", name: "孙志强", gender: "男", idCard: "3208**********0934", phone: "139****8821", team: "钢筋一班", unit: "苏北劳务工程有限公司", workType: "钢筋工", status: "未认证", entryDate: "2026-05-16" },
+  { id: "w-4", projectId: "p-1001", name: "孙志强", gender: "男", idCard: "3208**********0934", phone: "139****8821", team: "钢筋一班", unit: "苏北劳务工程有限公司", workType: "钢筋工", status: "在场", entryDate: "2026-05-16" },
   { id: "w-5", projectId: "p-1002", name: "顾明", gender: "男", idCard: "3208**********4501", phone: "136****2237", team: "机电安装班", unit: "江苏筑安建筑集团", workType: "电工", status: "在场", entryDate: "2026-01-12" },
 ];
 
 export const attendanceRecords: AttendanceRecord[] = [
   { id: "a-1", projectId: "p-1001", worker: "张建国", team: "钢筋一班", direction: "进场", time: "2026-06-18 06:41:22", device: "南门 01 号闸机", status: "有效" },
   { id: "a-2", projectId: "p-1001", worker: "李红梅", team: "木工二班", direction: "进场", time: "2026-06-18 06:52:08", device: "东门 02 号闸机", status: "有效" },
-  { id: "a-3", projectId: "p-1001", worker: "周海", team: "安装综合班", direction: "出场", time: "2026-06-18 11:58:19", device: "生活区人脸机", status: "待补图" },
+  { id: "a-3", projectId: "p-1001", worker: "周海", team: "安装综合班", direction: "出场", time: "2026-06-18 11:58:19", device: "生活区人脸机", status: "有效" },
   { id: "a-4", projectId: "p-1002", worker: "顾明", team: "机电安装班", direction: "进场", time: "2026-06-18 07:03:44", device: "厂房南门闸机", status: "有效" },
 ];
 

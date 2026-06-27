@@ -21,14 +21,26 @@ import { Route as AppAdminIndexRouteImport } from './routes/app/admin/index'
 import { Route as AppSettingsSessionsRouteImport } from './routes/app/settings/sessions'
 import { Route as AppSettingsSecurityRouteImport } from './routes/app/settings/security'
 import { Route as AppSettingsProfileRouteImport } from './routes/app/settings/profile'
+import { Route as AppAdminWorkHourConfigsRouteImport } from './routes/app/admin/work-hour-configs'
 import { Route as AppAdminUsersRouteImport } from './routes/app/admin/users'
 import { Route as AppAdminUploadsRouteImport } from './routes/app/admin/uploads'
 import { Route as AppAdminRolesRouteImport } from './routes/app/admin/roles'
 import { Route as AppAdminProjectsRouteImport } from './routes/app/admin/projects'
+import { Route as AppAdminPlatformIntegrationsRouteImport } from './routes/app/admin/platform-integrations'
+import { Route as AppAdminEnterpriseReceivedInvoicesRouteImport } from './routes/app/admin/enterprise-received-invoices'
+import { Route as AppAdminEnterpriseProjectsRouteImport } from './routes/app/admin/enterprise-projects'
+import { Route as AppAdminEnterprisePaymentsRouteImport } from './routes/app/admin/enterprise-payments'
+import { Route as AppAdminEnterpriseOwnEntitiesRouteImport } from './routes/app/admin/enterprise-own-entities'
+import { Route as AppAdminEnterpriseIssuedInvoicesRouteImport } from './routes/app/admin/enterprise-issued-invoices'
+import { Route as AppAdminEnterpriseCustomersRouteImport } from './routes/app/admin/enterprise-customers'
+import { Route as AppAdminEnterpriseCollectionsRouteImport } from './routes/app/admin/enterprise-collections'
+import { Route as AppAdminContractTemplatesRouteImport } from './routes/app/admin/contract-templates'
 import { Route as AppAdminAttendanceDevicesRouteImport } from './routes/app/admin/attendance-devices'
 import { Route as AppAdminAttendanceDeviceIssueReportsRouteImport } from './routes/app/admin/attendance-device-issue-reports'
 import { Route as AppAdminApiKeysRouteImport } from './routes/app/admin/api-keys'
 import { Route as AppAdminProjectsProjectIdRouteImport } from './routes/app/admin/projects.$projectId'
+import { Route as AppAdminEnterpriseProjectsProjectIdRouteImport } from './routes/app/admin/enterprise-projects.$projectId'
+import { Route as AppAdminEnterpriseCustomersCustomerIdRouteImport } from './routes/app/admin/enterprise-customers.$customerId'
 
 const AppRoute = AppRouteImport.update({
   id: '/app',
@@ -90,6 +102,11 @@ const AppSettingsProfileRoute = AppSettingsProfileRouteImport.update({
   path: '/profile',
   getParentRoute: () => AppSettingsRoute,
 } as any)
+const AppAdminWorkHourConfigsRoute = AppAdminWorkHourConfigsRouteImport.update({
+  id: '/work-hour-configs',
+  path: '/work-hour-configs',
+  getParentRoute: () => AppAdminRoute,
+} as any)
 const AppAdminUsersRoute = AppAdminUsersRouteImport.update({
   id: '/users',
   path: '/users',
@@ -110,6 +127,60 @@ const AppAdminProjectsRoute = AppAdminProjectsRouteImport.update({
   path: '/projects',
   getParentRoute: () => AppAdminRoute,
 } as any)
+const AppAdminPlatformIntegrationsRoute =
+  AppAdminPlatformIntegrationsRouteImport.update({
+    id: '/platform-integrations',
+    path: '/platform-integrations',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminEnterpriseReceivedInvoicesRoute =
+  AppAdminEnterpriseReceivedInvoicesRouteImport.update({
+    id: '/enterprise-received-invoices',
+    path: '/enterprise-received-invoices',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminEnterpriseProjectsRoute =
+  AppAdminEnterpriseProjectsRouteImport.update({
+    id: '/enterprise-projects',
+    path: '/enterprise-projects',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminEnterprisePaymentsRoute =
+  AppAdminEnterprisePaymentsRouteImport.update({
+    id: '/enterprise-payments',
+    path: '/enterprise-payments',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminEnterpriseOwnEntitiesRoute =
+  AppAdminEnterpriseOwnEntitiesRouteImport.update({
+    id: '/enterprise-own-entities',
+    path: '/enterprise-own-entities',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminEnterpriseIssuedInvoicesRoute =
+  AppAdminEnterpriseIssuedInvoicesRouteImport.update({
+    id: '/enterprise-issued-invoices',
+    path: '/enterprise-issued-invoices',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminEnterpriseCustomersRoute =
+  AppAdminEnterpriseCustomersRouteImport.update({
+    id: '/enterprise-customers',
+    path: '/enterprise-customers',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminEnterpriseCollectionsRoute =
+  AppAdminEnterpriseCollectionsRouteImport.update({
+    id: '/enterprise-collections',
+    path: '/enterprise-collections',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminContractTemplatesRoute =
+  AppAdminContractTemplatesRouteImport.update({
+    id: '/contract-templates',
+    path: '/contract-templates',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
 const AppAdminAttendanceDevicesRoute =
   AppAdminAttendanceDevicesRouteImport.update({
     id: '/attendance-devices',
@@ -133,6 +204,18 @@ const AppAdminProjectsProjectIdRoute =
     path: '/$projectId',
     getParentRoute: () => AppAdminProjectsRoute,
   } as any)
+const AppAdminEnterpriseProjectsProjectIdRoute =
+  AppAdminEnterpriseProjectsProjectIdRouteImport.update({
+    id: '/$projectId',
+    path: '/$projectId',
+    getParentRoute: () => AppAdminEnterpriseProjectsRoute,
+  } as any)
+const AppAdminEnterpriseCustomersCustomerIdRoute =
+  AppAdminEnterpriseCustomersCustomerIdRouteImport.update({
+    id: '/$customerId',
+    path: '/$customerId',
+    getParentRoute: () => AppAdminEnterpriseCustomersRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -145,15 +228,27 @@ export interface FileRoutesByFullPath {
   '/app/admin/api-keys': typeof AppAdminApiKeysRoute
   '/app/admin/attendance-device-issue-reports': typeof AppAdminAttendanceDeviceIssueReportsRoute
   '/app/admin/attendance-devices': typeof AppAdminAttendanceDevicesRoute
+  '/app/admin/contract-templates': typeof AppAdminContractTemplatesRoute
+  '/app/admin/enterprise-collections': typeof AppAdminEnterpriseCollectionsRoute
+  '/app/admin/enterprise-customers': typeof AppAdminEnterpriseCustomersRouteWithChildren
+  '/app/admin/enterprise-issued-invoices': typeof AppAdminEnterpriseIssuedInvoicesRoute
+  '/app/admin/enterprise-own-entities': typeof AppAdminEnterpriseOwnEntitiesRoute
+  '/app/admin/enterprise-payments': typeof AppAdminEnterprisePaymentsRoute
+  '/app/admin/enterprise-projects': typeof AppAdminEnterpriseProjectsRouteWithChildren
+  '/app/admin/enterprise-received-invoices': typeof AppAdminEnterpriseReceivedInvoicesRoute
+  '/app/admin/platform-integrations': typeof AppAdminPlatformIntegrationsRoute
   '/app/admin/projects': typeof AppAdminProjectsRouteWithChildren
   '/app/admin/roles': typeof AppAdminRolesRoute
   '/app/admin/uploads': typeof AppAdminUploadsRoute
   '/app/admin/users': typeof AppAdminUsersRoute
+  '/app/admin/work-hour-configs': typeof AppAdminWorkHourConfigsRoute
   '/app/settings/profile': typeof AppSettingsProfileRoute
   '/app/settings/security': typeof AppSettingsSecurityRoute
   '/app/settings/sessions': typeof AppSettingsSessionsRoute
   '/app/admin/': typeof AppAdminIndexRoute
   '/app/settings/': typeof AppSettingsIndexRoute
+  '/app/admin/enterprise-customers/$customerId': typeof AppAdminEnterpriseCustomersCustomerIdRoute
+  '/app/admin/enterprise-projects/$projectId': typeof AppAdminEnterpriseProjectsProjectIdRoute
   '/app/admin/projects/$projectId': typeof AppAdminProjectsProjectIdRoute
 }
 export interface FileRoutesByTo {
@@ -164,15 +259,27 @@ export interface FileRoutesByTo {
   '/app/admin/api-keys': typeof AppAdminApiKeysRoute
   '/app/admin/attendance-device-issue-reports': typeof AppAdminAttendanceDeviceIssueReportsRoute
   '/app/admin/attendance-devices': typeof AppAdminAttendanceDevicesRoute
+  '/app/admin/contract-templates': typeof AppAdminContractTemplatesRoute
+  '/app/admin/enterprise-collections': typeof AppAdminEnterpriseCollectionsRoute
+  '/app/admin/enterprise-customers': typeof AppAdminEnterpriseCustomersRouteWithChildren
+  '/app/admin/enterprise-issued-invoices': typeof AppAdminEnterpriseIssuedInvoicesRoute
+  '/app/admin/enterprise-own-entities': typeof AppAdminEnterpriseOwnEntitiesRoute
+  '/app/admin/enterprise-payments': typeof AppAdminEnterprisePaymentsRoute
+  '/app/admin/enterprise-projects': typeof AppAdminEnterpriseProjectsRouteWithChildren
+  '/app/admin/enterprise-received-invoices': typeof AppAdminEnterpriseReceivedInvoicesRoute
+  '/app/admin/platform-integrations': typeof AppAdminPlatformIntegrationsRoute
   '/app/admin/projects': typeof AppAdminProjectsRouteWithChildren
   '/app/admin/roles': typeof AppAdminRolesRoute
   '/app/admin/uploads': typeof AppAdminUploadsRoute
   '/app/admin/users': typeof AppAdminUsersRoute
+  '/app/admin/work-hour-configs': typeof AppAdminWorkHourConfigsRoute
   '/app/settings/profile': typeof AppSettingsProfileRoute
   '/app/settings/security': typeof AppSettingsSecurityRoute
   '/app/settings/sessions': typeof AppSettingsSessionsRoute
   '/app/admin': typeof AppAdminIndexRoute
   '/app/settings': typeof AppSettingsIndexRoute
+  '/app/admin/enterprise-customers/$customerId': typeof AppAdminEnterpriseCustomersCustomerIdRoute
+  '/app/admin/enterprise-projects/$projectId': typeof AppAdminEnterpriseProjectsProjectIdRoute
   '/app/admin/projects/$projectId': typeof AppAdminProjectsProjectIdRoute
 }
 export interface FileRoutesById {
@@ -187,15 +294,27 @@ export interface FileRoutesById {
   '/app/admin/api-keys': typeof AppAdminApiKeysRoute
   '/app/admin/attendance-device-issue-reports': typeof AppAdminAttendanceDeviceIssueReportsRoute
   '/app/admin/attendance-devices': typeof AppAdminAttendanceDevicesRoute
+  '/app/admin/contract-templates': typeof AppAdminContractTemplatesRoute
+  '/app/admin/enterprise-collections': typeof AppAdminEnterpriseCollectionsRoute
+  '/app/admin/enterprise-customers': typeof AppAdminEnterpriseCustomersRouteWithChildren
+  '/app/admin/enterprise-issued-invoices': typeof AppAdminEnterpriseIssuedInvoicesRoute
+  '/app/admin/enterprise-own-entities': typeof AppAdminEnterpriseOwnEntitiesRoute
+  '/app/admin/enterprise-payments': typeof AppAdminEnterprisePaymentsRoute
+  '/app/admin/enterprise-projects': typeof AppAdminEnterpriseProjectsRouteWithChildren
+  '/app/admin/enterprise-received-invoices': typeof AppAdminEnterpriseReceivedInvoicesRoute
+  '/app/admin/platform-integrations': typeof AppAdminPlatformIntegrationsRoute
   '/app/admin/projects': typeof AppAdminProjectsRouteWithChildren
   '/app/admin/roles': typeof AppAdminRolesRoute
   '/app/admin/uploads': typeof AppAdminUploadsRoute
   '/app/admin/users': typeof AppAdminUsersRoute
+  '/app/admin/work-hour-configs': typeof AppAdminWorkHourConfigsRoute
   '/app/settings/profile': typeof AppSettingsProfileRoute
   '/app/settings/security': typeof AppSettingsSecurityRoute
   '/app/settings/sessions': typeof AppSettingsSessionsRoute
   '/app/admin/': typeof AppAdminIndexRoute
   '/app/settings/': typeof AppSettingsIndexRoute
+  '/app/admin/enterprise-customers/$customerId': typeof AppAdminEnterpriseCustomersCustomerIdRoute
+  '/app/admin/enterprise-projects/$projectId': typeof AppAdminEnterpriseProjectsProjectIdRoute
   '/app/admin/projects/$projectId': typeof AppAdminProjectsProjectIdRoute
 }
 export interface FileRouteTypes {
@@ -211,15 +330,27 @@ export interface FileRouteTypes {
     | '/app/admin/api-keys'
     | '/app/admin/attendance-device-issue-reports'
     | '/app/admin/attendance-devices'
+    | '/app/admin/contract-templates'
+    | '/app/admin/enterprise-collections'
+    | '/app/admin/enterprise-customers'
+    | '/app/admin/enterprise-issued-invoices'
+    | '/app/admin/enterprise-own-entities'
+    | '/app/admin/enterprise-payments'
+    | '/app/admin/enterprise-projects'
+    | '/app/admin/enterprise-received-invoices'
+    | '/app/admin/platform-integrations'
     | '/app/admin/projects'
     | '/app/admin/roles'
     | '/app/admin/uploads'
     | '/app/admin/users'
+    | '/app/admin/work-hour-configs'
     | '/app/settings/profile'
     | '/app/settings/security'
     | '/app/settings/sessions'
     | '/app/admin/'
     | '/app/settings/'
+    | '/app/admin/enterprise-customers/$customerId'
+    | '/app/admin/enterprise-projects/$projectId'
     | '/app/admin/projects/$projectId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -230,15 +361,27 @@ export interface FileRouteTypes {
     | '/app/admin/api-keys'
     | '/app/admin/attendance-device-issue-reports'
     | '/app/admin/attendance-devices'
+    | '/app/admin/contract-templates'
+    | '/app/admin/enterprise-collections'
+    | '/app/admin/enterprise-customers'
+    | '/app/admin/enterprise-issued-invoices'
+    | '/app/admin/enterprise-own-entities'
+    | '/app/admin/enterprise-payments'
+    | '/app/admin/enterprise-projects'
+    | '/app/admin/enterprise-received-invoices'
+    | '/app/admin/platform-integrations'
     | '/app/admin/projects'
     | '/app/admin/roles'
     | '/app/admin/uploads'
     | '/app/admin/users'
+    | '/app/admin/work-hour-configs'
     | '/app/settings/profile'
     | '/app/settings/security'
     | '/app/settings/sessions'
     | '/app/admin'
     | '/app/settings'
+    | '/app/admin/enterprise-customers/$customerId'
+    | '/app/admin/enterprise-projects/$projectId'
     | '/app/admin/projects/$projectId'
   id:
     | '__root__'
@@ -252,15 +395,27 @@ export interface FileRouteTypes {
     | '/app/admin/api-keys'
     | '/app/admin/attendance-device-issue-reports'
     | '/app/admin/attendance-devices'
+    | '/app/admin/contract-templates'
+    | '/app/admin/enterprise-collections'
+    | '/app/admin/enterprise-customers'
+    | '/app/admin/enterprise-issued-invoices'
+    | '/app/admin/enterprise-own-entities'
+    | '/app/admin/enterprise-payments'
+    | '/app/admin/enterprise-projects'
+    | '/app/admin/enterprise-received-invoices'
+    | '/app/admin/platform-integrations'
     | '/app/admin/projects'
     | '/app/admin/roles'
     | '/app/admin/uploads'
     | '/app/admin/users'
+    | '/app/admin/work-hour-configs'
     | '/app/settings/profile'
     | '/app/settings/security'
     | '/app/settings/sessions'
     | '/app/admin/'
     | '/app/settings/'
+    | '/app/admin/enterprise-customers/$customerId'
+    | '/app/admin/enterprise-projects/$projectId'
     | '/app/admin/projects/$projectId'
   fileRoutesById: FileRoutesById
 }
@@ -355,6 +510,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsProfileRouteImport
       parentRoute: typeof AppSettingsRoute
     }
+    '/app/admin/work-hour-configs': {
+      id: '/app/admin/work-hour-configs'
+      path: '/work-hour-configs'
+      fullPath: '/app/admin/work-hour-configs'
+      preLoaderRoute: typeof AppAdminWorkHourConfigsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
     '/app/admin/users': {
       id: '/app/admin/users'
       path: '/users'
@@ -381,6 +543,69 @@ declare module '@tanstack/react-router' {
       path: '/projects'
       fullPath: '/app/admin/projects'
       preLoaderRoute: typeof AppAdminProjectsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/platform-integrations': {
+      id: '/app/admin/platform-integrations'
+      path: '/platform-integrations'
+      fullPath: '/app/admin/platform-integrations'
+      preLoaderRoute: typeof AppAdminPlatformIntegrationsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/enterprise-received-invoices': {
+      id: '/app/admin/enterprise-received-invoices'
+      path: '/enterprise-received-invoices'
+      fullPath: '/app/admin/enterprise-received-invoices'
+      preLoaderRoute: typeof AppAdminEnterpriseReceivedInvoicesRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/enterprise-projects': {
+      id: '/app/admin/enterprise-projects'
+      path: '/enterprise-projects'
+      fullPath: '/app/admin/enterprise-projects'
+      preLoaderRoute: typeof AppAdminEnterpriseProjectsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/enterprise-payments': {
+      id: '/app/admin/enterprise-payments'
+      path: '/enterprise-payments'
+      fullPath: '/app/admin/enterprise-payments'
+      preLoaderRoute: typeof AppAdminEnterprisePaymentsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/enterprise-own-entities': {
+      id: '/app/admin/enterprise-own-entities'
+      path: '/enterprise-own-entities'
+      fullPath: '/app/admin/enterprise-own-entities'
+      preLoaderRoute: typeof AppAdminEnterpriseOwnEntitiesRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/enterprise-issued-invoices': {
+      id: '/app/admin/enterprise-issued-invoices'
+      path: '/enterprise-issued-invoices'
+      fullPath: '/app/admin/enterprise-issued-invoices'
+      preLoaderRoute: typeof AppAdminEnterpriseIssuedInvoicesRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/enterprise-customers': {
+      id: '/app/admin/enterprise-customers'
+      path: '/enterprise-customers'
+      fullPath: '/app/admin/enterprise-customers'
+      preLoaderRoute: typeof AppAdminEnterpriseCustomersRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/enterprise-collections': {
+      id: '/app/admin/enterprise-collections'
+      path: '/enterprise-collections'
+      fullPath: '/app/admin/enterprise-collections'
+      preLoaderRoute: typeof AppAdminEnterpriseCollectionsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/contract-templates': {
+      id: '/app/admin/contract-templates'
+      path: '/contract-templates'
+      fullPath: '/app/admin/contract-templates'
+      preLoaderRoute: typeof AppAdminContractTemplatesRouteImport
       parentRoute: typeof AppAdminRoute
     }
     '/app/admin/attendance-devices': {
@@ -411,8 +636,52 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdminProjectsProjectIdRouteImport
       parentRoute: typeof AppAdminProjectsRoute
     }
+    '/app/admin/enterprise-projects/$projectId': {
+      id: '/app/admin/enterprise-projects/$projectId'
+      path: '/$projectId'
+      fullPath: '/app/admin/enterprise-projects/$projectId'
+      preLoaderRoute: typeof AppAdminEnterpriseProjectsProjectIdRouteImport
+      parentRoute: typeof AppAdminEnterpriseProjectsRoute
+    }
+    '/app/admin/enterprise-customers/$customerId': {
+      id: '/app/admin/enterprise-customers/$customerId'
+      path: '/$customerId'
+      fullPath: '/app/admin/enterprise-customers/$customerId'
+      preLoaderRoute: typeof AppAdminEnterpriseCustomersCustomerIdRouteImport
+      parentRoute: typeof AppAdminEnterpriseCustomersRoute
+    }
   }
 }
+
+interface AppAdminEnterpriseCustomersRouteChildren {
+  AppAdminEnterpriseCustomersCustomerIdRoute: typeof AppAdminEnterpriseCustomersCustomerIdRoute
+}
+
+const AppAdminEnterpriseCustomersRouteChildren: AppAdminEnterpriseCustomersRouteChildren =
+  {
+    AppAdminEnterpriseCustomersCustomerIdRoute:
+      AppAdminEnterpriseCustomersCustomerIdRoute,
+  }
+
+const AppAdminEnterpriseCustomersRouteWithChildren =
+  AppAdminEnterpriseCustomersRoute._addFileChildren(
+    AppAdminEnterpriseCustomersRouteChildren,
+  )
+
+interface AppAdminEnterpriseProjectsRouteChildren {
+  AppAdminEnterpriseProjectsProjectIdRoute: typeof AppAdminEnterpriseProjectsProjectIdRoute
+}
+
+const AppAdminEnterpriseProjectsRouteChildren: AppAdminEnterpriseProjectsRouteChildren =
+  {
+    AppAdminEnterpriseProjectsProjectIdRoute:
+      AppAdminEnterpriseProjectsProjectIdRoute,
+  }
+
+const AppAdminEnterpriseProjectsRouteWithChildren =
+  AppAdminEnterpriseProjectsRoute._addFileChildren(
+    AppAdminEnterpriseProjectsRouteChildren,
+  )
 
 interface AppAdminProjectsRouteChildren {
   AppAdminProjectsProjectIdRoute: typeof AppAdminProjectsProjectIdRoute
@@ -429,10 +698,20 @@ interface AppAdminRouteChildren {
   AppAdminApiKeysRoute: typeof AppAdminApiKeysRoute
   AppAdminAttendanceDeviceIssueReportsRoute: typeof AppAdminAttendanceDeviceIssueReportsRoute
   AppAdminAttendanceDevicesRoute: typeof AppAdminAttendanceDevicesRoute
+  AppAdminContractTemplatesRoute: typeof AppAdminContractTemplatesRoute
+  AppAdminEnterpriseCollectionsRoute: typeof AppAdminEnterpriseCollectionsRoute
+  AppAdminEnterpriseCustomersRoute: typeof AppAdminEnterpriseCustomersRouteWithChildren
+  AppAdminEnterpriseIssuedInvoicesRoute: typeof AppAdminEnterpriseIssuedInvoicesRoute
+  AppAdminEnterpriseOwnEntitiesRoute: typeof AppAdminEnterpriseOwnEntitiesRoute
+  AppAdminEnterprisePaymentsRoute: typeof AppAdminEnterprisePaymentsRoute
+  AppAdminEnterpriseProjectsRoute: typeof AppAdminEnterpriseProjectsRouteWithChildren
+  AppAdminEnterpriseReceivedInvoicesRoute: typeof AppAdminEnterpriseReceivedInvoicesRoute
+  AppAdminPlatformIntegrationsRoute: typeof AppAdminPlatformIntegrationsRoute
   AppAdminProjectsRoute: typeof AppAdminProjectsRouteWithChildren
   AppAdminRolesRoute: typeof AppAdminRolesRoute
   AppAdminUploadsRoute: typeof AppAdminUploadsRoute
   AppAdminUsersRoute: typeof AppAdminUsersRoute
+  AppAdminWorkHourConfigsRoute: typeof AppAdminWorkHourConfigsRoute
   AppAdminIndexRoute: typeof AppAdminIndexRoute
 }
 
@@ -441,10 +720,22 @@ const AppAdminRouteChildren: AppAdminRouteChildren = {
   AppAdminAttendanceDeviceIssueReportsRoute:
     AppAdminAttendanceDeviceIssueReportsRoute,
   AppAdminAttendanceDevicesRoute: AppAdminAttendanceDevicesRoute,
+  AppAdminContractTemplatesRoute: AppAdminContractTemplatesRoute,
+  AppAdminEnterpriseCollectionsRoute: AppAdminEnterpriseCollectionsRoute,
+  AppAdminEnterpriseCustomersRoute:
+    AppAdminEnterpriseCustomersRouteWithChildren,
+  AppAdminEnterpriseIssuedInvoicesRoute: AppAdminEnterpriseIssuedInvoicesRoute,
+  AppAdminEnterpriseOwnEntitiesRoute: AppAdminEnterpriseOwnEntitiesRoute,
+  AppAdminEnterprisePaymentsRoute: AppAdminEnterprisePaymentsRoute,
+  AppAdminEnterpriseProjectsRoute: AppAdminEnterpriseProjectsRouteWithChildren,
+  AppAdminEnterpriseReceivedInvoicesRoute:
+    AppAdminEnterpriseReceivedInvoicesRoute,
+  AppAdminPlatformIntegrationsRoute: AppAdminPlatformIntegrationsRoute,
   AppAdminProjectsRoute: AppAdminProjectsRouteWithChildren,
   AppAdminRolesRoute: AppAdminRolesRoute,
   AppAdminUploadsRoute: AppAdminUploadsRoute,
   AppAdminUsersRoute: AppAdminUsersRoute,
+  AppAdminWorkHourConfigsRoute: AppAdminWorkHourConfigsRoute,
   AppAdminIndexRoute: AppAdminIndexRoute,
 }
 

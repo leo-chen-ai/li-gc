@@ -1,8 +1,6 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
-  AlertTriangle,
   CalendarDays,
-  CheckCircle2,
   ChevronRight,
   ClipboardList,
   Pencil,
@@ -45,7 +43,7 @@ import type { Project } from "../data/mock-projects";
 import {
   useCreateProjectMutation,
   useDeleteProjectMutation,
-  useProjectsQuery,
+  useProjectsPageQuery,
   useUpdateProjectMutation,
 } from "../hooks/use-construction-projects";
 import type {
@@ -53,6 +51,7 @@ import type {
   ConstructionProjectPayload,
 } from "../types/construction-types";
 import { formatProjectTitle } from "../lib/project-title";
+import { buildProjectListParams } from "../lib/project-table-operations";
 import { ConstructionRecordForm } from "./ConstructionRecordForm";
 import { ProjectStatusBadge } from "./ProjectStatusBadge";
 
@@ -67,6 +66,13 @@ const PROJECT_STATUS_LABEL: Record<number, Project["status"]> = {
   7: "停工",
   8: "竣工",
 };
+const PROJECT_STATUS_FILTER: Partial<Record<Project["status"], number>> = {
+  在建: 1,
+  筹备: 2,
+  完工: 6,
+  停工: 7,
+  竣工: 4,
+};
 
 type ProjectRow = Project & {
   source: "api";
@@ -75,7 +81,6 @@ type ProjectRow = Project & {
 
 export function ProjectsPage() {
   const navigate = useNavigate();
-  const projectsQuery = useProjectsQuery();
   const createProject = useCreateProjectMutation();
   const deleteProject = useDeleteProjectMutation();
   const [keyword, setKeyword] = useState("");
@@ -87,35 +92,34 @@ export function ProjectsPage() {
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [projectPendingDelete, setProjectPendingDelete] = useState<ProjectRow | null>(null);
   const updateProject = useUpdateProjectMutation(editingProjectId ?? "");
-  const realProjects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data]);
+  const projectListFilters = useMemo(
+    () =>
+      buildProjectListParams({
+        page,
+        pageSize,
+        keyword,
+        status: status === "全部" ? undefined : PROJECT_STATUS_FILTER[status as Project["status"]],
+      }),
+    [keyword, page, pageSize, status]
+  );
+  const projectsQuery = useProjectsPageQuery(projectListFilters);
+  const realProjects = useMemo(() => projectsQuery.data?.items ?? [], [projectsQuery.data]);
   const projectRows = useMemo<ProjectRow[]>(() => {
     return realProjects.map(apiProjectToRow);
   }, [realProjects]);
 
-  const filteredProjects = useMemo(() => {
-    return projectRows.filter((project) => {
-      const matchesKeyword = [project.name, project.location, project.contractor, project.buildUnit]
-        .join(" ")
-        .includes(keyword.trim());
-      const matchesStatus = status === "全部" || project.status === status;
-      return matchesKeyword && matchesStatus;
-    });
-  }, [keyword, projectRows, status]);
-
+  const projectTotal = projectsQuery.data?.total ?? 0;
   const totalWorkers = projectRows.reduce((sum, project) => sum + project.workerCount, 0);
   const totalAttendance = projectRows.reduce((sum, project) => sum + project.attendanceToday, 0);
   const buildingProjects = projectRows.filter((project) => project.status === "在建").length;
   const focusProjects = projectRows.filter((project) => project.risk !== "正常").length;
   const averageAttendance = totalWorkers > 0 ? Math.round((totalAttendance / totalWorkers) * 100) : 0;
   const statusOptions = ["全部", "在建", "筹备", "完工", "停工", "竣工"];
-  const pageCount = Math.max(1, Math.ceil(filteredProjects.length / pageSize));
+  const pageCount = Math.max(1, Math.ceil(projectTotal / pageSize));
   const currentPage = Math.min(page, pageCount);
-  const paginatedProjects = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return filteredProjects.slice(start, start + pageSize);
-  }, [filteredProjects, currentPage, pageSize]);
-  const rangeStart = filteredProjects.length === 0 ? 0 : (currentPage - 1) * pageSize + 1;
-  const rangeEnd = Math.min(currentPage * pageSize, filteredProjects.length);
+  const paginatedProjects = projectRows;
+  const rangeStart = projectTotal === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const rangeEnd = Math.min(currentPage * pageSize, projectTotal);
 
   const handleOpenProject = (projectId: string) => {
     navigate({ to: "/app/admin/projects/$projectId", params: { projectId } });
@@ -176,21 +180,18 @@ export function ProjectsPage() {
   return (
     <div className="space-y-4 text-slate-950 dark:text-foreground">
       <section className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-border dark:bg-card">
-        <div className="grid gap-4 border-b border-slate-100 px-5 py-4 dark:border-border lg:grid-cols-[minmax(260px,0.85fr)_minmax(520px,1.15fr)_auto] lg:items-start">
+        <div className="grid gap-3 border-b border-slate-100 px-4 py-3 dark:border-border lg:grid-cols-[minmax(220px,0.7fr)_minmax(520px,1.3fr)_auto] lg:items-center">
           <div className="min-w-0">
-            <div className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
+            <div className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
               <ClipboardList className="size-3.5" />
               项目台账
             </div>
-            <h1 className="mt-3 text-2xl font-semibold tracking-normal">项目管理</h1>
-            <p className="mt-1 text-sm text-slate-500 dark:text-muted-foreground">
-              统一查看项目、单位、班组、人员与考勤基础信息。
-            </p>
+            <h1 className="mt-1 text-xl font-semibold tracking-normal">项目管理</h1>
           </div>
 
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-            <CompactStat label="项目总数" value={projectRows.length} helper={`${buildingProjects} 个在建`} />
-            <CompactStat label="在册工人" value={totalWorkers} helper="全部项目合计" accent="teal" />
+            <CompactStat label="项目总数" value={projectTotal} helper={`${buildingProjects} 个在建（当前页）`} />
+            <CompactStat label="在册工人" value={totalWorkers} helper="当前页合计" accent="teal" />
             <CompactStat label="今日打卡" value={totalAttendance} helper={`平均出勤 ${averageAttendance}%`} accent="teal" />
             <CompactStat label="重点关注" value={`${focusProjects} 个`} helper="关注/预警项目" accent="amber" />
           </div>
@@ -204,7 +205,7 @@ export function ProjectsPage() {
           </Button>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 bg-[#f8faf9] px-5 py-3 dark:bg-muted/30">
+        <div className="flex flex-wrap items-center gap-3 bg-[#f8faf9] px-4 py-2.5 dark:bg-muted/30">
           <div className="relative min-w-[280px] flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -242,29 +243,6 @@ export function ProjectsPage() {
       </section>
 
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-border dark:bg-card">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4 dark:border-border">
-          <div>
-            <h2 className="text-base font-semibold tracking-normal">项目列表</h2>
-            <p className="mt-1 text-xs text-slate-500 dark:text-muted-foreground">
-              {projectsQuery.isLoading
-                ? "项目数据加载中"
-                : projectsQuery.isError
-                  ? "项目数据加载失败，请检查登录状态或后端服务"
-                  : `当前筛选 ${filteredProjects.length} 条 / 共 ${projectRows.length} 条`}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-muted-foreground">
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300">
-              <CheckCircle2 className="size-3.5" />
-              正常 {projectRows.filter((project) => project.risk === "正常").length}
-            </span>
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
-              <AlertTriangle className="size-3.5" />
-              待关注 {focusProjects}
-            </span>
-          </div>
-        </div>
-
         <Table className="min-w-[1380px]">
           <TableHeader>
             <TableRow className="bg-[#f8faf9] hover:bg-[#f8faf9] dark:bg-muted/30 dark:hover:bg-muted/30">
@@ -399,7 +377,7 @@ export function ProjectsPage() {
 
         <div className="flex flex-col gap-3 border-t border-slate-100 bg-[#f8faf9] px-5 py-3 text-sm text-slate-500 dark:border-border dark:bg-muted/30 dark:text-muted-foreground lg:flex-row lg:items-center lg:justify-between">
           <span>
-            显示 {rangeStart}-{rangeEnd} / 共 {filteredProjects.length} 条记录
+            显示 {rangeStart}-{rangeEnd} / 共 {projectTotal} 条记录
           </span>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs">每页</span>

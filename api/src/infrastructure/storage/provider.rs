@@ -20,6 +20,9 @@ pub trait StorageProvider: Send + Sync {
     /// Store `data` at `key` with the given `content_type`.
     async fn put(&self, key: &str, data: Bytes, content_type: &str) -> Result<(), StorageError>;
 
+    /// Read object bytes by key.
+    async fn get(&self, key: &str) -> Result<Bytes, StorageError>;
+
     /// Delete the object at `key`. Succeeds even if the key does not exist.
     async fn delete(&self, key: &str) -> Result<(), StorageError>;
 

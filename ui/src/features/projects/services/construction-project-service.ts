@@ -2,18 +2,42 @@ import { apiClient, API_ENDPOINTS } from "@/lib/api";
 import type { ApiResponse } from "@/lib/api/types";
 import type {
   ConstructionAttendanceDevice,
+  ConstructionAttendanceDeviceIssueReport,
+  ConstructionAttendanceDeviceIssueReportPayload,
   ConstructionAttendanceDevicePayload,
+  ConstructionAttendanceCalendarResponse,
   ConstructionAttendancePayload,
   ConstructionAttendanceRecord,
+  ConstructionContractTemplate,
+  ConstructionContractTemplatePayload,
+  ConstructionModuleListFilters,
+  ConstructionOverview,
+  ConstructionPlatformConfig,
+  ConstructionPlatformConfigPayload,
+  ConstructionPlatformLog,
+  ConstructionPlatformLogListResponse,
+  ConstructionPlatformLogPayload,
   IdCardOcrResult,
   IdCardOcrSide,
+  ConstructionProjectContractTemplateConfig,
+  ConstructionProjectContractTemplatePayload,
   ConstructionProject,
+  ConstructionProjectListFilters,
   ConstructionProjectOption,
   ConstructionProjectPayload,
+  ConstructionResourceListFilters,
+  ConstructionResourceListResponse,
   ConstructionTeam,
   ConstructionTeamPayload,
   ConstructionUnit,
   ConstructionUnitPayload,
+  ConstructionWageBatch,
+  ConstructionWageBatchPayload,
+  ConstructionWageImportPayload,
+  ConstructionWageListFilters,
+  ConstructionWageListResponse,
+  ConstructionWorkHourConfig,
+  ConstructionWorkHourConfigPayload,
   UploadFileRecord,
   ConstructionWorker,
   ConstructionWorkerPayload,
@@ -25,6 +49,23 @@ function unwrapData<T>(response: ApiResponse<T>, fallbackMessage: string): T {
   }
 
   return response.data;
+}
+
+async function collectAllPages<T>(
+  loadPage: (filters: ConstructionResourceListFilters) => Promise<ConstructionResourceListResponse<T>>
+) {
+  const pageSize = 100;
+  const firstPage = await loadPage({ page: 1, page_size: pageSize });
+  const items = [...firstPage.items];
+  const total = firstPage.total;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  for (let page = 2; page <= totalPages; page += 1) {
+    const nextPage = await loadPage({ page, page_size: pageSize });
+    items.push(...nextPage.items);
+  }
+
+  return items;
 }
 
 export const constructionProjectService = {
@@ -67,6 +108,17 @@ export const constructionProjectService = {
   listProjects: async (): Promise<ConstructionProject[]> => {
     const response = await apiClient.get<ApiResponse<ConstructionProject[]>>(
       API_ENDPOINTS.ADMIN.PROJECTS
+    );
+
+    return unwrapData(response.data, "获取项目列表失败");
+  },
+
+  listProjectPage: async (
+    filters?: ConstructionProjectListFilters
+  ): Promise<ConstructionResourceListResponse<ConstructionProject>> => {
+    const response = await apiClient.get<ApiResponse<ConstructionResourceListResponse<ConstructionProject>>>(
+      API_ENDPOINTS.ADMIN.PROJECTS,
+      { params: filters }
     );
 
     return unwrapData(response.data, "获取项目列表失败");
@@ -119,13 +171,22 @@ export const constructionProjectService = {
     await apiClient.delete<ApiResponse<void>>(API_ENDPOINTS.ADMIN.PROJECT(projectId));
   },
 
-  listUnits: async (projectId: string): Promise<ConstructionUnit[]> => {
-    const response = await apiClient.get<ApiResponse<ConstructionUnit[]>>(
-      API_ENDPOINTS.ADMIN.PROJECT_UNITS(projectId)
+  listUnits: async (
+    projectId: string,
+    filters?: ConstructionResourceListFilters
+  ): Promise<ConstructionResourceListResponse<ConstructionUnit>> => {
+    const response = await apiClient.get<ApiResponse<ConstructionResourceListResponse<ConstructionUnit>>>(
+      API_ENDPOINTS.ADMIN.PROJECT_UNITS(projectId),
+      { params: filters }
     );
 
     return unwrapData(response.data, "获取参建单位失败");
   },
+
+  listAllUnits: async (projectId: string): Promise<ConstructionUnit[]> =>
+    collectAllPages((filters) =>
+      constructionProjectService.listUnits(projectId, filters)
+    ),
 
   getUnit: async (projectId: string, unitId: string): Promise<ConstructionUnit> => {
     const response = await apiClient.get<ApiResponse<ConstructionUnit>>(
@@ -166,13 +227,22 @@ export const constructionProjectService = {
     );
   },
 
-  listTeams: async (projectId: string): Promise<ConstructionTeam[]> => {
-    const response = await apiClient.get<ApiResponse<ConstructionTeam[]>>(
-      API_ENDPOINTS.ADMIN.PROJECT_TEAMS(projectId)
+  listTeams: async (
+    projectId: string,
+    filters?: ConstructionResourceListFilters
+  ): Promise<ConstructionResourceListResponse<ConstructionTeam>> => {
+    const response = await apiClient.get<ApiResponse<ConstructionResourceListResponse<ConstructionTeam>>>(
+      API_ENDPOINTS.ADMIN.PROJECT_TEAMS(projectId),
+      { params: filters }
     );
 
     return unwrapData(response.data, "获取班组失败");
   },
+
+  listAllTeams: async (projectId: string): Promise<ConstructionTeam[]> =>
+    collectAllPages((filters) =>
+      constructionProjectService.listTeams(projectId, filters)
+    ),
 
   getTeam: async (projectId: string, teamId: string): Promise<ConstructionTeam> => {
     const response = await apiClient.get<ApiResponse<ConstructionTeam>>(
@@ -213,13 +283,22 @@ export const constructionProjectService = {
     );
   },
 
-  listWorkers: async (projectId: string): Promise<ConstructionWorker[]> => {
-    const response = await apiClient.get<ApiResponse<ConstructionWorker[]>>(
-      API_ENDPOINTS.ADMIN.PROJECT_WORKERS(projectId)
+  listWorkers: async (
+    projectId: string,
+    filters?: ConstructionResourceListFilters
+  ): Promise<ConstructionResourceListResponse<ConstructionWorker>> => {
+    const response = await apiClient.get<ApiResponse<ConstructionResourceListResponse<ConstructionWorker>>>(
+      API_ENDPOINTS.ADMIN.PROJECT_WORKERS(projectId),
+      { params: filters }
     );
 
     return unwrapData(response.data, "获取项目工人失败");
   },
+
+  listAllWorkers: async (projectId: string): Promise<ConstructionWorker[]> =>
+    collectAllPages((filters) =>
+      constructionProjectService.listWorkers(projectId, filters)
+    ),
 
   getWorker: async (
     projectId: string,
@@ -264,14 +343,33 @@ export const constructionProjectService = {
   },
 
   listAttendance: async (
-    projectId: string
-  ): Promise<ConstructionAttendanceRecord[]> => {
-    const response = await apiClient.get<ApiResponse<ConstructionAttendanceRecord[]>>(
-      API_ENDPOINTS.ADMIN.PROJECT_ATTENDANCE(projectId)
+    projectId: string,
+    filters?: ConstructionResourceListFilters
+  ): Promise<ConstructionResourceListResponse<ConstructionAttendanceRecord>> => {
+    const response = await apiClient.get<ApiResponse<ConstructionResourceListResponse<ConstructionAttendanceRecord>>>(
+      API_ENDPOINTS.ADMIN.PROJECT_ATTENDANCE(projectId),
+      { params: filters }
     );
 
     return unwrapData(response.data, "获取考勤记录失败");
   },
+
+  getAttendanceCalendar: async (
+    projectId: string,
+    filters?: ConstructionResourceListFilters
+  ): Promise<ConstructionAttendanceCalendarResponse> => {
+    const response = await apiClient.get<ApiResponse<ConstructionAttendanceCalendarResponse>>(
+      API_ENDPOINTS.ADMIN.PROJECT_ATTENDANCE(projectId),
+      { params: { ...filters, view: "calendar" } }
+    );
+
+    return unwrapData(response.data, "获取考勤月历失败");
+  },
+
+  listAllAttendance: async (projectId: string): Promise<ConstructionAttendanceRecord[]> =>
+    collectAllPages((filters) =>
+      constructionProjectService.listAttendance(projectId, filters)
+    ),
 
   getAttendance: async (
     projectId: string,
@@ -318,11 +416,286 @@ export const constructionProjectService = {
     );
   },
 
-  listAttendanceDevices: async (
+  listWageBatches: async (
+    projectId: string,
+    filters?: ConstructionWageListFilters
+  ): Promise<ConstructionWageListResponse> => {
+    const response = await apiClient.get<ApiResponse<ConstructionWageListResponse>>(
+      API_ENDPOINTS.ADMIN.PROJECT_WAGE_BATCHES(projectId),
+      { params: filters }
+    );
+
+    return unwrapData(response.data, "获取工资统计失败");
+  },
+
+  createWageBatch: async (
+    projectId: string,
+    payload: ConstructionWageBatchPayload
+  ): Promise<ConstructionWageBatch> => {
+    const response = await apiClient.post<ApiResponse<ConstructionWageBatch>>(
+      API_ENDPOINTS.ADMIN.PROJECT_WAGE_BATCHES(projectId),
+      payload
+    );
+
+    return unwrapData(response.data, "新增工资单失败");
+  },
+
+  updateWageBatch: async (
+    projectId: string,
+    batchId: string,
+    payload: ConstructionWageBatchPayload
+  ): Promise<ConstructionWageBatch> => {
+    const response = await apiClient.patch<ApiResponse<ConstructionWageBatch>>(
+      API_ENDPOINTS.ADMIN.PROJECT_WAGE_BATCH(projectId, batchId),
+      payload
+    );
+
+    return unwrapData(response.data, "修改工资单失败");
+  },
+
+  deleteWageBatch: async (
+    projectId: string,
+    batchId: string
+  ): Promise<void> => {
+    await apiClient.delete<ApiResponse<void>>(
+      API_ENDPOINTS.ADMIN.PROJECT_WAGE_BATCH(projectId, batchId)
+    );
+  },
+
+  downloadWorkerContract: async (
+    projectId: string,
+    workerId: string
+  ): Promise<Blob> => {
+    const response = await apiClient.get<Blob>(
+      API_ENDPOINTS.ADMIN.PROJECT_WORKER_CONTRACT_DOWNLOAD(projectId, workerId),
+      { responseType: "blob" }
+    );
+
+    return response.data;
+  },
+
+  listContractTemplates: async (
+    filters?: ConstructionModuleListFilters
+  ): Promise<ConstructionResourceListResponse<ConstructionContractTemplate>> => {
+    const response = await apiClient.get<ApiResponse<ConstructionResourceListResponse<ConstructionContractTemplate>>>(
+      API_ENDPOINTS.ADMIN.CONTRACT_TEMPLATES,
+      { params: filters }
+    );
+
+    return unwrapData(response.data, "获取合同模板失败");
+  },
+
+  createContractTemplate: async (
+    payload: ConstructionContractTemplatePayload
+  ): Promise<ConstructionContractTemplate> => {
+    const response = await apiClient.post<ApiResponse<ConstructionContractTemplate>>(
+      API_ENDPOINTS.ADMIN.CONTRACT_TEMPLATES,
+      payload
+    );
+
+    return unwrapData(response.data, "新增合同模板失败");
+  },
+
+  updateContractTemplate: async (
+    templateId: string,
+    payload: ConstructionContractTemplatePayload
+  ): Promise<ConstructionContractTemplate> => {
+    const response = await apiClient.patch<ApiResponse<ConstructionContractTemplate>>(
+      API_ENDPOINTS.ADMIN.CONTRACT_TEMPLATE(templateId),
+      payload
+    );
+
+    return unwrapData(response.data, "修改合同模板失败");
+  },
+
+  deleteContractTemplate: async (templateId: string): Promise<void> => {
+    await apiClient.delete<ApiResponse<void>>(
+      API_ENDPOINTS.ADMIN.CONTRACT_TEMPLATE(templateId)
+    );
+  },
+
+  getProjectContractTemplateConfig: async (
     projectId: string
-  ): Promise<ConstructionAttendanceDevice[]> => {
-    const response = await apiClient.get<ApiResponse<ConstructionAttendanceDevice[]>>(
-      API_ENDPOINTS.ADMIN.PROJECT_ATTENDANCE_DEVICES(projectId)
+  ): Promise<ConstructionProjectContractTemplateConfig | null> => {
+    const response = await apiClient.get<ApiResponse<ConstructionProjectContractTemplateConfig | null>>(
+      API_ENDPOINTS.ADMIN.PROJECT_CONTRACT_TEMPLATE_CONFIG(projectId)
+    );
+
+    return response.data.data ?? null;
+  },
+
+  upsertProjectContractTemplateConfig: async (
+    projectId: string,
+    payload: ConstructionProjectContractTemplatePayload
+  ): Promise<ConstructionProjectContractTemplateConfig> => {
+    const response = await apiClient.put<ApiResponse<ConstructionProjectContractTemplateConfig>>(
+      API_ENDPOINTS.ADMIN.PROJECT_CONTRACT_TEMPLATE_CONFIG(projectId),
+      payload
+    );
+
+    return unwrapData(response.data, "保存项目默认模板失败");
+  },
+
+  listWorkHourConfigs: async (
+    filters?: ConstructionModuleListFilters
+  ): Promise<ConstructionResourceListResponse<ConstructionWorkHourConfig>> => {
+    const response = await apiClient.get<ApiResponse<ConstructionResourceListResponse<ConstructionWorkHourConfig>>>(
+      API_ENDPOINTS.ADMIN.WORK_HOUR_CONFIGS,
+      { params: filters }
+    );
+
+    return unwrapData(response.data, "获取工时配置失败");
+  },
+
+  createWorkHourConfig: async (
+    payload: ConstructionWorkHourConfigPayload
+  ): Promise<ConstructionWorkHourConfig> => {
+    const response = await apiClient.post<ApiResponse<ConstructionWorkHourConfig>>(
+      API_ENDPOINTS.ADMIN.WORK_HOUR_CONFIGS,
+      payload
+    );
+
+    return unwrapData(response.data, "新增工时配置失败");
+  },
+
+  updateWorkHourConfig: async (
+    configId: string,
+    payload: ConstructionWorkHourConfigPayload
+  ): Promise<ConstructionWorkHourConfig> => {
+    const response = await apiClient.patch<ApiResponse<ConstructionWorkHourConfig>>(
+      API_ENDPOINTS.ADMIN.WORK_HOUR_CONFIG(configId),
+      payload
+    );
+
+    return unwrapData(response.data, "修改工时配置失败");
+  },
+
+  deleteWorkHourConfig: async (configId: string): Promise<void> => {
+    await apiClient.delete<ApiResponse<void>>(
+      API_ENDPOINTS.ADMIN.WORK_HOUR_CONFIG(configId)
+    );
+  },
+
+  listPlatformConfigs: async (
+    filters?: ConstructionModuleListFilters
+  ): Promise<ConstructionResourceListResponse<ConstructionPlatformConfig>> => {
+    const response = await apiClient.get<ApiResponse<ConstructionResourceListResponse<ConstructionPlatformConfig>>>(
+      API_ENDPOINTS.ADMIN.PLATFORM_CONFIGS,
+      { params: filters }
+    );
+
+    return unwrapData(response.data, "获取平台配置失败");
+  },
+
+  createPlatformConfig: async (
+    payload: ConstructionPlatformConfigPayload
+  ): Promise<ConstructionPlatformConfig> => {
+    const response = await apiClient.post<ApiResponse<ConstructionPlatformConfig>>(
+      API_ENDPOINTS.ADMIN.PLATFORM_CONFIGS,
+      payload
+    );
+
+    return unwrapData(response.data, "新增平台配置失败");
+  },
+
+  updatePlatformConfig: async (
+    configId: string,
+    payload: ConstructionPlatformConfigPayload
+  ): Promise<ConstructionPlatformConfig> => {
+    const response = await apiClient.patch<ApiResponse<ConstructionPlatformConfig>>(
+      API_ENDPOINTS.ADMIN.PLATFORM_CONFIG(configId),
+      payload
+    );
+
+    return unwrapData(response.data, "修改平台配置失败");
+  },
+
+  deletePlatformConfig: async (configId: string): Promise<void> => {
+    await apiClient.delete<ApiResponse<void>>(
+      API_ENDPOINTS.ADMIN.PLATFORM_CONFIG(configId)
+    );
+  },
+
+  listPlatformLogs: async (
+    filters?: ConstructionModuleListFilters
+  ): Promise<ConstructionPlatformLogListResponse> => {
+    const response = await apiClient.get<ApiResponse<ConstructionPlatformLogListResponse>>(
+      API_ENDPOINTS.ADMIN.PLATFORM_LOGS,
+      { params: filters }
+    );
+
+    return unwrapData(response.data, "获取平台日志失败");
+  },
+
+  createPlatformLog: async (
+    payload: ConstructionPlatformLogPayload
+  ): Promise<ConstructionPlatformLog> => {
+    const response = await apiClient.post<ApiResponse<ConstructionPlatformLog>>(
+      API_ENDPOINTS.ADMIN.PLATFORM_LOGS,
+      payload
+    );
+
+    return unwrapData(response.data, "新增平台日志失败");
+  },
+
+  updatePlatformLog: async (
+    logId: string,
+    payload: ConstructionPlatformLogPayload
+  ): Promise<ConstructionPlatformLog> => {
+    const response = await apiClient.patch<ApiResponse<ConstructionPlatformLog>>(
+      API_ENDPOINTS.ADMIN.PLATFORM_LOG(logId),
+      payload
+    );
+
+    return unwrapData(response.data, "修改平台日志失败");
+  },
+
+  deletePlatformLog: async (logId: string): Promise<void> => {
+    await apiClient.delete<ApiResponse<void>>(API_ENDPOINTS.ADMIN.PLATFORM_LOG(logId));
+  },
+
+  getConstructionOverview: async (): Promise<ConstructionOverview> => {
+    const response = await apiClient.get<ApiResponse<ConstructionOverview>>(
+      API_ENDPOINTS.ADMIN.CONSTRUCTION_OVERVIEW
+    );
+
+    return unwrapData(response.data, "获取首页总览失败");
+  },
+
+  importWageBatch: async (
+    projectId: string,
+    payload: ConstructionWageImportPayload
+  ): Promise<ConstructionWageBatch> => {
+    const response = await apiClient.post<ApiResponse<ConstructionWageBatch>>(
+      API_ENDPOINTS.ADMIN.PROJECT_WAGE_IMPORT(projectId),
+      payload
+    );
+
+    return unwrapData(response.data, "导入工资单失败");
+  },
+
+  exportWageBatches: async (
+    projectId: string,
+    filters?: ConstructionWageListFilters
+  ): Promise<Blob> => {
+    const response = await apiClient.get<Blob>(
+      API_ENDPOINTS.ADMIN.PROJECT_WAGE_EXPORT(projectId),
+      {
+        params: filters,
+        responseType: "blob",
+      }
+    );
+
+    return response.data;
+  },
+
+  listAttendanceDevices: async (
+    projectId: string,
+    filters?: ConstructionResourceListFilters
+  ): Promise<ConstructionResourceListResponse<ConstructionAttendanceDevice>> => {
+    const response = await apiClient.get<ApiResponse<ConstructionResourceListResponse<ConstructionAttendanceDevice>>>(
+      API_ENDPOINTS.ADMIN.PROJECT_ATTENDANCE_DEVICES(projectId),
+      { params: filters }
     );
 
     return unwrapData(response.data, "获取考勤机绑定失败");
@@ -370,6 +743,56 @@ export const constructionProjectService = {
   ): Promise<void> => {
     await apiClient.delete<ApiResponse<void>>(
       API_ENDPOINTS.ADMIN.PROJECT_ATTENDANCE_DEVICE(projectId, deviceId)
+    );
+  },
+
+  listAttendanceDeviceIssueReports: async (
+    filters?: ConstructionModuleListFilters
+  ): Promise<ConstructionResourceListResponse<ConstructionAttendanceDeviceIssueReport>> => {
+    const response = await apiClient.get<ApiResponse<ConstructionResourceListResponse<ConstructionAttendanceDeviceIssueReport>>>(
+      API_ENDPOINTS.ADMIN.ATTENDANCE_DEVICE_ISSUE_REPORTS,
+      { params: filters }
+    );
+
+    return unwrapData(response.data, "获取考勤机人员下发报告失败");
+  },
+
+  getAttendanceDeviceIssueReport: async (
+    reportId: string
+  ): Promise<ConstructionAttendanceDeviceIssueReport> => {
+    const response = await apiClient.get<ApiResponse<ConstructionAttendanceDeviceIssueReport>>(
+      API_ENDPOINTS.ADMIN.ATTENDANCE_DEVICE_ISSUE_REPORT(reportId)
+    );
+
+    return unwrapData(response.data, "获取考勤机人员下发报告详情失败");
+  },
+
+  createAttendanceDeviceIssueReport: async (
+    payload: ConstructionAttendanceDeviceIssueReportPayload
+  ): Promise<ConstructionAttendanceDeviceIssueReport> => {
+    const response = await apiClient.post<ApiResponse<ConstructionAttendanceDeviceIssueReport>>(
+      API_ENDPOINTS.ADMIN.ATTENDANCE_DEVICE_ISSUE_REPORTS,
+      payload
+    );
+
+    return unwrapData(response.data, "新增考勤机人员下发报告失败");
+  },
+
+  updateAttendanceDeviceIssueReport: async (
+    reportId: string,
+    payload: ConstructionAttendanceDeviceIssueReportPayload
+  ): Promise<ConstructionAttendanceDeviceIssueReport> => {
+    const response = await apiClient.patch<ApiResponse<ConstructionAttendanceDeviceIssueReport>>(
+      API_ENDPOINTS.ADMIN.ATTENDANCE_DEVICE_ISSUE_REPORT(reportId),
+      payload
+    );
+
+    return unwrapData(response.data, "修改考勤机人员下发报告失败");
+  },
+
+  deleteAttendanceDeviceIssueReport: async (reportId: string): Promise<void> => {
+    await apiClient.delete<ApiResponse<void>>(
+      API_ENDPOINTS.ADMIN.ATTENDANCE_DEVICE_ISSUE_REPORT(reportId)
     );
   },
 };

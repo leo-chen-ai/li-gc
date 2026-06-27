@@ -1,4 +1,4 @@
-use axum::{Extension, Router, middleware::from_fn};
+use axum::{Extension, Router, extract::DefaultBodyLimit, middleware::from_fn};
 use std::time::Duration;
 use tower_http::services::ServeDir;
 
@@ -7,6 +7,8 @@ use crate::{
     infrastructure::web::middleware::{RateLimiter, rate_limit_middleware},
     state::AppState,
 };
+
+const API_REQUEST_BODY_LIMIT_BYTES: usize = 50 * 1024 * 1024;
 
 pub fn app_routes(state: AppState) -> Router {
     // Global: 120 req/min per IP
@@ -40,6 +42,7 @@ pub fn app_routes(state: AppState) -> Router {
         .nest("/admin", admin::routes::admin_routes())
         .nest("/admin/api-keys", admin::api_key::api_key_routes())
         .layer(Extension(blacklist)) // Inject blacklist for auth middleware
+        .layer(DefaultBodyLimit::max(API_REQUEST_BODY_LIMIT_BYTES))
         .layer(from_fn(rate_limit_middleware))
         .layer(Extension(global_limiter));
 

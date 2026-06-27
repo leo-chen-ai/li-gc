@@ -43,6 +43,8 @@ import type {
   ConstructionAttendanceDevicePayload,
 } from "@/features/projects/types/construction-types";
 
+const DEVICE_PAGE_SIZE = 10;
+
 const directionOptions = [
   { label: "进场", value: "0" },
   { label: "出场", value: "1" },
@@ -72,6 +74,7 @@ export function AttendanceDeviceBindingsPage() {
   const projects = projectsQuery.data ?? [];
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [keyword, setKeyword] = useState("");
+  const [page, setPage] = useState(1);
   const [formOpen, setFormOpen] = useState(false);
   const [editingDevice, setEditingDevice] = useState<ConstructionAttendanceDevice | null>(null);
   const [devicePendingDelete, setDevicePendingDelete] = useState<ConstructionAttendanceDevice | null>(null);
@@ -86,28 +89,28 @@ export function AttendanceDeviceBindingsPage() {
   }, [projects, selectedProjectId]);
 
   const currentProject = projects.find((project) => project.id === selectedProjectId);
-  const devicesQuery = useProjectAttendanceDevicesQuery(selectedProjectId);
+  useEffect(() => {
+    setPage(1);
+  }, [keyword, selectedProjectId]);
+
+  const deviceFilters = useMemo(
+    () => ({
+      page,
+      page_size: DEVICE_PAGE_SIZE,
+      keyword: keyword.trim() || undefined,
+    }),
+    [keyword, page]
+  );
+  const devicesQuery = useProjectAttendanceDevicesQuery(selectedProjectId, deviceFilters);
   const createDevice = useCreateAttendanceDeviceMutation(form.project_id);
   const updateDevice = useUpdateAttendanceDeviceMutation(editingDevice?.project_id ?? form.project_id);
   const deleteDevice = useDeleteAttendanceDeviceMutation(devicePendingDelete?.project_id ?? selectedProjectId);
-  const devices = devicesQuery.data ?? [];
-  const filteredDevices = useMemo(() => {
-    const normalizedKeyword = keyword.trim();
-    if (!normalizedKeyword) return devices;
-
-    return devices.filter((device) =>
-      [
-        device.device_type,
-        device.serial_number,
-        device.device_name,
-        device.remark,
-        currentProject?.name,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .includes(normalizedKeyword)
-    );
-  }, [currentProject?.name, devices, keyword]);
+  const devices = devicesQuery.data?.items ?? [];
+  const total = devicesQuery.data?.total ?? 0;
+  const pageSize = devicesQuery.data?.page_size ?? DEVICE_PAGE_SIZE;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const rangeEnd = Math.min(total, page * pageSize);
   const inboundCount = devices.filter((device) => device.direction === 0).length;
   const outboundCount = devices.filter((device) => device.direction === 1).length;
   const genericCount = devices.filter((device) => device.direction === 2).length;
@@ -201,10 +204,10 @@ export function AttendanceDeviceBindingsPage() {
           </div>
 
           <div className="grid gap-2 sm:grid-cols-4">
-            <CompactStat label="绑定设备" value={devices.length} helper={currentProject?.name || "请选择项目"} />
-            <CompactStat label="进场设备" value={inboundCount} helper="方向为进场" accent="teal" />
-            <CompactStat label="出场设备" value={outboundCount} helper="方向为出场" accent="amber" />
-            <CompactStat label="通用设备" value={genericCount} helper="方向为通用" accent="blue" />
+            <CompactStat label="绑定设备" value={total} helper={currentProject?.name || "请选择项目"} />
+            <CompactStat label="本页进场" value={inboundCount} helper="方向为进场" accent="teal" />
+            <CompactStat label="本页出场" value={outboundCount} helper="方向为出场" accent="amber" />
+            <CompactStat label="本页通用" value={genericCount} helper="方向为通用" accent="blue" />
           </div>
 
           <Button
@@ -261,7 +264,7 @@ export function AttendanceDeviceBindingsPage() {
                 ? "考勤机绑定加载中"
                 : devicesQuery.isError
                   ? "考勤机绑定加载失败，请检查登录状态或后端服务"
-                  : `当前筛选 ${filteredDevices.length} 条 / 共 ${devices.length} 条`}
+                  : `显示 ${rangeStart}-${rangeEnd} 条，共 ${total} 条`}
             </p>
           </div>
           {devicesQuery.isError && (
@@ -285,8 +288,8 @@ export function AttendanceDeviceBindingsPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredDevices.length > 0 ? (
-              filteredDevices.map((device) => (
+            {devices.length > 0 ? (
+              devices.map((device) => (
                 <TableRow key={device.id} className="hover:bg-[#f8faf9]/70 dark:hover:bg-muted/30">
                   <TableCell className="px-5 py-4">
                     <div className="font-medium text-slate-950 dark:text-foreground">
@@ -360,6 +363,32 @@ export function AttendanceDeviceBindingsPage() {
             )}
           </TableBody>
         </Table>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-[#f8faf9] px-5 py-3 text-sm text-slate-500 dark:border-border dark:bg-muted/30 dark:text-muted-foreground">
+          <span>显示 {rangeStart}-{rangeEnd} 条，共 {total} 条</span>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={page <= 1 || devicesQuery.isLoading}
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+            >
+              上一页
+            </Button>
+            <span className="min-w-12 text-center text-slate-700 dark:text-foreground">
+              {page}/{totalPages}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={page >= totalPages || devicesQuery.isLoading}
+              onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+            >
+              下一页
+            </Button>
+          </div>
+        </div>
       </section>
 
       <Dialog open={formOpen} onOpenChange={setFormOpen}>

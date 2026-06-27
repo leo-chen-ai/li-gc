@@ -65,6 +65,27 @@ impl StorageProvider for JdCloudOssStorage {
             .map_err(|e| StorageError::Other(format!("OSS upload task failed: {e}")))?
     }
 
+    async fn get(&self, key: &str) -> Result<Bytes, StorageError> {
+        let url = self.public_url(key);
+        tokio::task::spawn_blocking(move || {
+            let response = ureq::get(&url)
+                .call()
+                .map_err(|e| StorageError::Other(format!("OSS read failed: {e}")))?;
+            if !response.status().is_success() {
+                return Err(StorageError::Other(format!(
+                    "OSS read failed with status {}",
+                    response.status()
+                )));
+            }
+            let mut reader = response.into_body().into_reader();
+            let mut bytes = Vec::new();
+            std::io::Read::read_to_end(&mut reader, &mut bytes)?;
+            Ok(Bytes::from(bytes))
+        })
+        .await
+        .map_err(|e| StorageError::Other(format!("OSS read task failed: {e}")))?
+    }
+
     async fn delete(&self, _key: &str) -> Result<(), StorageError> {
         // Public-read business files are retained for auditability. Soft delete is handled in DB.
         Ok(())

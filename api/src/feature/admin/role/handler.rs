@@ -11,7 +11,18 @@ use crate::{
 };
 
 const ALLOWED_MENU_KEYS: &[&str] = &[
+    "admin_overview",
     "projects",
+    "enterprise_customers",
+    "enterprise_own_entities",
+    "enterprise_projects",
+    "enterprise_issued_invoices",
+    "enterprise_received_invoices",
+    "enterprise_collections",
+    "enterprise_payments",
+    "contract_templates",
+    "work_hour_configs",
+    "platform_integrations",
     "attendance_devices",
     "attendance_device_issue_reports",
     "users",

@@ -3,7 +3,17 @@ import { useNavigate } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ArrowRight, Calculator, Eye, EyeOff, Loader2, LockKeyhole, RefreshCw, UserRound } from "lucide-react";
+import {
+  ArrowRight,
+  Calculator,
+  Eye,
+  EyeOff,
+  Loader2,
+  LockKeyhole,
+  RefreshCw,
+  ShieldCheck,
+  UserRound,
+} from "lucide-react";
 import { useLogin } from "@/features/auth/hooks/use-login";
 import {
   createMathCaptcha,
@@ -43,17 +53,21 @@ export function LoginForm() {
 
   return (
     <div className="w-full">
-      <div className="space-y-8">
-        <div className="space-y-2">
+      <div className="space-y-6">
+        <div className="border-b border-slate-900/8 pb-5 dark:border-white/10">
+          <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[#0f7d6f]/14 bg-[#0f7d6f]/8 px-3 py-1.5 text-xs font-semibold text-[#0f6b5d] dark:border-[#28c7b4]/20 dark:bg-[#28c7b4]/10 dark:text-[#a8fff4]">
+            <ShieldCheck className="size-3.5" />
+            安全入口
+          </div>
           <h1 className="text-[28px] font-semibold leading-tight tracking-normal text-slate-950 dark:text-white">
-            管理员登录
+            登录管理后台
           </h1>
-          <p className="text-sm leading-6 text-slate-500 dark:text-white/54">
-            欢迎使用山淮筑
+          <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-white/54">
+            账号可使用邮箱或用户名，登录后进入项目管理。
           </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-5">
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2.5">
             <Label htmlFor="account" className="text-sm font-semibold text-slate-700 dark:text-white/78">
               账号
@@ -67,7 +81,7 @@ export function LoginForm() {
                 value={account}
                 onChange={(e) => setAccount(e.target.value)}
                 required
-                className="h-13 rounded-lg border-slate-200 bg-white/72 pl-11 pr-4 text-[15px] text-slate-950 shadow-inner shadow-slate-900/5 transition-all placeholder:text-slate-400 focus-visible:border-[#0f7d6f] focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-[#0f7d6f]/15 dark:border-white/14 dark:bg-white/[0.06] dark:text-white dark:shadow-black/10 dark:placeholder:text-white/34 dark:focus-visible:border-[#28c7b4] dark:focus-visible:bg-white/[0.08] dark:focus-visible:ring-[#28c7b4]/20"
+                className="h-13 rounded-lg border-slate-200 bg-white/76 pl-11 pr-4 text-[15px] text-slate-950 shadow-inner shadow-slate-900/4 transition-all placeholder:text-slate-400 focus-visible:border-[#0f7d6f] focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-[#0f7d6f]/15 dark:border-white/14 dark:bg-white/[0.06] dark:text-white dark:shadow-black/10 dark:placeholder:text-white/34 dark:focus-visible:border-[#28c7b4] dark:focus-visible:bg-white/[0.08] dark:focus-visible:ring-[#28c7b4]/20"
               />
             </div>
           </div>
@@ -85,7 +99,7 @@ export function LoginForm() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                className="h-13 rounded-lg border-slate-200 bg-white/72 px-11 text-[15px] text-slate-950 shadow-inner shadow-slate-900/5 transition-all placeholder:text-slate-400 focus-visible:border-[#0f7d6f] focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-[#0f7d6f]/15 dark:border-white/14 dark:bg-white/[0.06] dark:text-white dark:shadow-black/10 dark:placeholder:text-white/34 dark:focus-visible:border-[#28c7b4] dark:focus-visible:bg-white/[0.08] dark:focus-visible:ring-[#28c7b4]/20"
+                className="h-13 rounded-lg border-slate-200 bg-white/76 px-11 text-[15px] text-slate-950 shadow-inner shadow-slate-900/4 transition-all placeholder:text-slate-400 focus-visible:border-[#0f7d6f] focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-[#0f7d6f]/15 dark:border-white/14 dark:bg-white/[0.06] dark:text-white dark:shadow-black/10 dark:placeholder:text-white/34 dark:focus-visible:border-[#28c7b4] dark:focus-visible:bg-white/[0.08] dark:focus-visible:ring-[#28c7b4]/20"
               />
               <button
                 type="button"
@@ -116,8 +130,8 @@ export function LoginForm() {
                 换一题
               </button>
             </div>
-            <div className="grid gap-3 sm:grid-cols-[112px_minmax(0,1fr)]">
-              <div className="flex h-13 items-center justify-center gap-2 rounded-lg border border-[#0f7d6f]/20 bg-[#0f7d6f]/10 text-base font-semibold text-[#0f5f55] dark:border-[#28c7b4]/22 dark:bg-[#0f7d6f]/24 dark:text-white">
+            <div className="grid gap-3 sm:grid-cols-[118px_minmax(0,1fr)]">
+              <div className="flex h-13 items-center justify-center gap-2 rounded-lg border border-[#0f7d6f]/18 bg-[#ecf4f1] text-base font-semibold text-[#0f5f55] dark:border-[#28c7b4]/22 dark:bg-[#0f7d6f]/24 dark:text-white">
                 <Calculator className="size-4 text-[#0f7d6f] dark:text-[#80f3e5]" />
                 {captcha.expression}
               </div>
@@ -131,24 +145,26 @@ export function LoginForm() {
                   setCaptchaError("");
                 }}
                 required
-                className="h-13 rounded-lg border-slate-200 bg-white/72 px-4 text-[15px] text-slate-950 shadow-inner shadow-slate-900/5 transition-all placeholder:text-slate-400 focus-visible:border-[#0f7d6f] focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-[#0f7d6f]/15 dark:border-white/14 dark:bg-white/[0.06] dark:text-white dark:shadow-black/10 dark:placeholder:text-white/34 dark:focus-visible:border-[#28c7b4] dark:focus-visible:bg-white/[0.08] dark:focus-visible:ring-[#28c7b4]/20"
+                className="h-13 rounded-lg border-slate-200 bg-white/76 px-4 text-[15px] text-slate-950 shadow-inner shadow-slate-900/4 transition-all placeholder:text-slate-400 focus-visible:border-[#0f7d6f] focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-[#0f7d6f]/15 dark:border-white/14 dark:bg-white/[0.06] dark:text-white dark:shadow-black/10 dark:placeholder:text-white/34 dark:focus-visible:border-[#28c7b4] dark:focus-visible:bg-white/[0.08] dark:focus-visible:ring-[#28c7b4]/20"
               />
             </div>
             {captchaError && (
-              <div className="text-xs font-medium text-amber-700 dark:text-amber-200">{captchaError}</div>
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 dark:border-amber-500/28 dark:bg-amber-500/10 dark:text-amber-200">
+                {captchaError}
+              </div>
             )}
           </div>
 
           <Button
             type="submit"
-            className="mt-8 h-13 w-full rounded-lg bg-[#0f9b88] text-base font-semibold text-white shadow-[0_18px_42px_rgba(15,155,136,0.28)] transition-all hover:bg-[#0d8a7a] hover:shadow-[0_22px_50px_rgba(15,155,136,0.34)]"
+            className="group mt-6 h-13 w-full rounded-lg bg-[#0f8f7e] text-base font-semibold text-white shadow-[0_18px_42px_rgba(15,143,126,0.28)] transition-all hover:-translate-y-0.5 hover:bg-[#0d7f70] hover:shadow-[0_22px_50px_rgba(15,143,126,0.34)] disabled:translate-y-0"
             disabled={login.isPending}
           >
             {login.isPending ? (
               <Loader2 className="size-5 animate-spin" />
             ) : (
               <>
-                登录 <ArrowRight className="ml-2 size-5" />
+                登录 <ArrowRight className="ml-2 size-5 transition-transform group-hover:translate-x-0.5" />
               </>
             )}
           </Button>

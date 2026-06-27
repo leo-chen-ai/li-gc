@@ -147,23 +147,7 @@ impl IdCardOcrParsedFields {
                             "office",
                         ],
                     );
-                    insert_alias(
-                        &mut values,
-                        "validity_period",
-                        source,
-                        &["validityPeriod", "validPeriod", "validDate", "validity"],
-                    );
-                    insert_alias(
-                        &mut values,
-                        "validity_period_end",
-                        source,
-                        &[
-                            "validityPeriodEnd",
-                            "validEndDate",
-                            "endDate",
-                            "validityEndDate",
-                        ],
-                    );
+                    insert_validity_period(&mut values, source);
                 }
             }
         }
@@ -332,6 +316,83 @@ fn insert_gender(values: &mut BTreeMap<String, String>, source: &Value) {
     }
 }
 
+fn insert_validity_period(values: &mut BTreeMap<String, String>, source: &Value) {
+    let range_value = [
+        "expirationDateStr",
+        "expiration_date_str",
+        "validityPeriod",
+        "validPeriod",
+        "validDate",
+        "validity",
+    ]
+    .iter()
+    .find_map(|key| get_string(source, key));
+
+    if let Some(range_value) = range_value {
+        if let Some((start, end)) = parse_validity_range(&range_value) {
+            values.insert("validity_period".to_string(), start);
+            values.insert("validity_period_end".to_string(), end);
+            return;
+        }
+    }
+
+    insert_alias(
+        values,
+        "validity_period",
+        source,
+        &[
+            "validityPeriodStart",
+            "validStartDate",
+            "startDate",
+            "validityStartDate",
+            "signDate",
+            "singDate",
+            "signDateStr",
+            "singDateStr",
+        ],
+    );
+    insert_alias(
+        values,
+        "validity_period_end",
+        source,
+        &[
+            "validityPeriodEnd",
+            "validEndDate",
+            "endDate",
+            "validityEndDate",
+            "expirationDate",
+        ],
+    );
+}
+
+fn parse_validity_range(value: &str) -> Option<(String, String)> {
+    ["-", "至", "~", "—", "－"].iter().find_map(|separator| {
+        let (start, end) = value.split_once(separator)?;
+        let start = normalize_validity_date(start)?;
+        let end = normalize_validity_date(end)?;
+        Some((start, end))
+    })
+}
+
+fn normalize_validity_date(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.contains("长期") {
+        return Some("长期".to_string());
+    }
+
+    let digits: String = trimmed.chars().filter(|ch| ch.is_ascii_digit()).collect();
+    if digits.len() == 8 {
+        return Some(format!(
+            "{}-{}-{}",
+            &digits[0..4],
+            &digits[4..6],
+            &digits[6..8]
+        ));
+    }
+
+    None
+}
+
 fn get_string(source: &Value, key: &str) -> Option<String> {
     source
         .get(key)
@@ -354,5 +415,69 @@ fn ocr_to_api_error(error: OcrError) -> ApiError {
             .with_code(StatusCode::BAD_GATEWAY)
             .with_message("OCR provider request failed")
             .with_debug(message),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn parses_jd_back_expiration_range() {
+        let response = JdIdCardOcrResponse {
+            code: 100000,
+            msg: Some("Success".to_string()),
+            serial_no: None,
+            timestamp: Some(0),
+            id_card_info: None,
+            id_card_back_info: Some(json!({
+                "expirationDate": null,
+                "expirationDateStr": "20141118-20341118",
+                "issuingAuthority": "杭州市公安局西湖分局",
+            })),
+            ext_map: None,
+        };
+
+        let fields = IdCardOcrParsedFields::from_response(IdCardSide::Back, &response).values;
+
+        assert_eq!(
+            fields.get("visa_office").map(String::as_str),
+            Some("杭州市公安局西湖分局")
+        );
+        assert_eq!(
+            fields.get("validity_period").map(String::as_str),
+            Some("2014-11-18")
+        );
+        assert_eq!(
+            fields.get("validity_period_end").map(String::as_str),
+            Some("2034-11-18")
+        );
+    }
+
+    #[test]
+    fn parses_long_term_back_expiration_range() {
+        let response = JdIdCardOcrResponse {
+            code: 100000,
+            msg: Some("Success".to_string()),
+            serial_no: None,
+            timestamp: Some(0),
+            id_card_info: None,
+            id_card_back_info: Some(json!({
+                "expirationDateStr": "20141118-长期",
+            })),
+            ext_map: None,
+        };
+
+        let fields = IdCardOcrParsedFields::from_response(IdCardSide::Back, &response).values;
+
+        assert_eq!(
+            fields.get("validity_period").map(String::as_str),
+            Some("2014-11-18")
+        );
+        assert_eq!(
+            fields.get("validity_period_end").map(String::as_str),
+            Some("长期")
+        );
     }
 }

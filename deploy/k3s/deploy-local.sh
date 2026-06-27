@@ -144,6 +144,14 @@ SSH_OPTS=(
   -o ServerAliveInterval=30
   -o ServerAliveCountMax=4
 )
+SCP_OPTS=(
+  -i "$SSH_KEY"
+  -P "$VPS_SSH_PORT"
+  -o BatchMode=yes
+  -o StrictHostKeyChecking=accept-new
+  -o ServerAliveInterval=30
+  -o ServerAliveCountMax=4
+)
 REMOTE="$VPS_USER@$VPS_HOST"
 
 ssh_remote() {
@@ -292,16 +300,23 @@ build_image() {
 
 import_image() {
   local image="$1"
+  local image_file
+  local remote_image_file
+
   echo "Importing $image into K3s on $VPS_HOST..."
-  docker save "$image" \
-    | gzip -1 \
-    | ssh "${SSH_OPTS[@]}" "$REMOTE" 'gzip -d | k3s ctr images import -'
+  image_file="$(mktemp "${TMPDIR:-/tmp}/shanhuai-image.XXXXXX.tar.gz")"
+  remote_image_file="/tmp/${image//[^A-Za-z0-9_.-]/_}.tar.gz"
+  docker save "$image" | gzip -1 > "$image_file"
+  scp "${SCP_OPTS[@]}" "$image_file" "$REMOTE:$remote_image_file" >/dev/null
+  rm -f "$image_file"
+  ssh_remote "gzip -dc '$remote_image_file' | k3s ctr images import - && rm -f '$remote_image_file'"
 }
 
 ensure_manifests() {
   if [ "$APPLY_MANIFEST" = true ] || ! ssh_remote "k3s kubectl -n '$NAMESPACE' get deployment/shanhuai-api deployment/shanhuai-ui >/dev/null 2>&1"; then
     echo "Applying K3s app manifest..."
-    ssh "${SSH_OPTS[@]}" "$REMOTE" 'cat > /tmp/shanhuai-app.yaml && k3s kubectl apply -f /tmp/shanhuai-app.yaml' < "$ROOT_DIR/deploy/k3s/shanhuai-app.yaml"
+    scp "${SCP_OPTS[@]}" "$ROOT_DIR/deploy/k3s/shanhuai-app.yaml" "$REMOTE:/tmp/shanhuai-app.yaml" >/dev/null
+    ssh_remote "k3s kubectl apply -f /tmp/shanhuai-app.yaml"
     DEPLOY_API=true
     DEPLOY_UI=true
   fi

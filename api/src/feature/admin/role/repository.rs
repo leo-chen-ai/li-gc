@@ -215,12 +215,23 @@ const ROLE_SELECT_BASE_SQL: &str = r#"
                 WHERE rmp.role_id = rc.id
                 ORDER BY
                     CASE rmp.menu_key
+                        WHEN 'admin_overview' THEN 5
                         WHEN 'projects' THEN 10
+                        WHEN 'enterprise_customers' THEN 20
+                        WHEN 'enterprise_own_entities' THEN 21
+                        WHEN 'enterprise_projects' THEN 22
+                        WHEN 'enterprise_issued_invoices' THEN 23
+                        WHEN 'enterprise_received_invoices' THEN 24
+                        WHEN 'enterprise_collections' THEN 25
+                        WHEN 'enterprise_payments' THEN 26
                         WHEN 'users' THEN 30
                         WHEN 'roles' THEN 40
                         WHEN 'attendance_devices' THEN 50
                         WHEN 'attendance_device_issue_reports' THEN 60
                         WHEN 'uploads' THEN 70
+                        WHEN 'contract_templates' THEN 80
+                        WHEN 'work_hour_configs' THEN 90
+                        WHEN 'platform_integrations' THEN 95
                         ELSE 100
                     END,
                     rmp.menu_key

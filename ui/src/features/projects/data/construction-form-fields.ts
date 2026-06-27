@@ -20,6 +20,7 @@ export type ConstructionFormField = {
   control?: "input" | "select" | "textarea" | "upload" | "region";
   uploadKind?: "image" | "file";
   uploadMultiple?: boolean;
+  signaturePad?: boolean;
   required?: boolean;
   hidden?: boolean;
   defaultValue?: string;
@@ -121,6 +122,155 @@ const progressTypeOptions: ConstructionFormOption[] = [
   { label: "预验收扫尾", value: "73" },
   { label: "装饰装修", value: "1263" },
   { label: "预验收扫尾", value: "1264" },
+];
+
+const companyTypeOptions: ConstructionFormOption[] = [
+  { label: "总承包单位", value: "1" },
+  { label: "监理", value: "2" },
+  { label: "劳务分包", value: "3" },
+  { label: "建设单位", value: "4" },
+  { label: "专业分包", value: "5" },
+  { label: "设备分包", value: "6" },
+  { label: "材料分包", value: "7" },
+  { label: "后勤服务", value: "8" },
+  { label: "特殊服务", value: "9" },
+  { label: "勘察", value: "10" },
+  { label: "设计单位", value: "11" },
+  { label: "其它", value: "12" },
+];
+
+const unitSalaryCalcTypeOptions: ConstructionFormOption[] = [
+  { label: "按日", value: "1" },
+  { label: "按月", value: "2" },
+  { label: "按周", value: "3" },
+  { label: "劳务派遣合同", value: "4" },
+  { label: "按小时", value: "5" },
+  { label: "计件", value: "6" },
+  { label: "按量", value: "7" },
+  { label: "其他", value: "9" },
+];
+
+const inheritedSalaryCalcTypeOptions: ConstructionFormOption[] = [
+  { label: "按上级配置", value: "0" },
+  ...unitSalaryCalcTypeOptions,
+];
+
+const quantityUnitTypeOptions: ConstructionFormOption[] = [
+  { label: "平方", value: "1" },
+  { label: "米", value: "2" },
+  { label: "吨", value: "3" },
+  { label: "件", value: "4" },
+  { label: "套", value: "5" },
+  { label: "立方", value: "6" },
+];
+
+const workTypeOptions: ConstructionFormOption[] = [
+  { label: "钢筋工", value: "1" },
+  { label: "木工", value: "2" },
+  { label: "安装工", value: "3" },
+  { label: "架子工", value: "4" },
+  { label: "混凝土工", value: "5" },
+  { label: "瓦工", value: "6" },
+  { label: "电工", value: "7" },
+  { label: "焊工", value: "8" },
+  { label: "水工", value: "9" },
+  { label: "测量工", value: "10" },
+  { label: "抹灰工", value: "11" },
+  { label: "油漆工", value: "12" },
+  { label: "防水工", value: "13" },
+  { label: "机械司机", value: "14" },
+  { label: "其他", value: "900" },
+];
+
+const workerTypeOptions: ConstructionFormOption[] = [
+  { label: "建筑工人", value: "1" },
+  { label: "管理人员", value: "1001" },
+  { label: "其他", value: "9" },
+];
+
+const politicalStatusOptions: ConstructionFormOption[] = [
+  { label: "群众", value: "1" },
+  { label: "中共党员", value: "2" },
+  { label: "中共预备党员", value: "3" },
+  { label: "共青团员", value: "4" },
+  { label: "民主党派", value: "5" },
+  { label: "其他", value: "9" },
+];
+
+const managerTypeOptions: ConstructionFormOption[] = [
+  { label: "项目经理", value: "1" },
+  { label: "技术负责人", value: "2" },
+  { label: "施工员", value: "3" },
+  { label: "质量员", value: "4" },
+  { label: "安全员", value: "5" },
+  { label: "材料员", value: "6" },
+  { label: "资料员", value: "7" },
+  { label: "劳资专管员", value: "8" },
+  { label: "实名制专管员", value: "9" },
+  { label: "其他", value: "99" },
+];
+
+const educationOptions: ConstructionFormOption[] = [
+  { label: "小学", value: "1" },
+  { label: "初中", value: "2" },
+  { label: "高中", value: "3" },
+  { label: "中专", value: "4" },
+  { label: "大专", value: "5" },
+  { label: "本科", value: "6" },
+  { label: "硕士及以上", value: "7" },
+  { label: "其他", value: "9" },
+];
+
+export const nativePlaceOptions: ConstructionFormOption[] = [
+  { label: "江苏省", value: "320000" },
+  { label: "淮安市", value: "320800" },
+  { label: "南京市", value: "320100" },
+  { label: "宿迁市", value: "321300" },
+  { label: "徐州市", value: "320300" },
+  { label: "盐城市", value: "320900" },
+  { label: "浙江省", value: "330000" },
+  { label: "杭州市", value: "330100" },
+  { label: "宁波市", value: "330200" },
+  { label: "安徽省", value: "340000" },
+  { label: "山东省", value: "370000" },
+  { label: "河南省", value: "410000" },
+  { label: "其他", value: "0" },
+];
+
+export function inferNativePlaceFromAddress(address: string): string | null {
+  const normalized = address.trim();
+  if (!normalized) return null;
+
+  const prefix = normalized.slice(0, Math.min(2, normalized.length));
+  const matchedByPrefix = nativePlaceOptions.find((option) => option.label.includes(prefix));
+  if (matchedByPrefix) return matchedByPrefix.value;
+
+  const matchedByFullName = nativePlaceOptions
+    .filter((option) => option.value !== "0")
+    .sort((left, right) => right.label.length - left.label.length)
+    .find((option) => normalized.includes(option.label));
+
+  return matchedByFullName?.value ?? null;
+}
+
+const salaryBankOptions: ConstructionFormOption[] = [
+  { label: "中国工商银行", value: "中国工商银行" },
+  { label: "中国农业银行", value: "中国农业银行" },
+  { label: "中国银行", value: "中国银行" },
+  { label: "中国建设银行", value: "中国建设银行" },
+  { label: "交通银行", value: "交通银行" },
+  { label: "中国邮政储蓄银行", value: "中国邮政储蓄银行" },
+  { label: "招商银行", value: "招商银行" },
+  { label: "中信银行", value: "中信银行" },
+  { label: "浦发银行", value: "浦发银行" },
+  { label: "江苏银行", value: "江苏银行" },
+  { label: "南京银行", value: "南京银行" },
+  { label: "其他", value: "其他" },
+];
+
+const workStatusOptions: ConstructionFormOption[] = [
+  { label: "在场", value: "1" },
+  { label: "离场", value: "2" },
 ];
 
 export const projectFormFields: ConstructionFormField[] = [
@@ -253,7 +403,7 @@ export const projectFormFields: ConstructionFormField[] = [
 export const unitFormFields: ConstructionFormField[] = [
   { key: "company_name", label: "单位名称", valueType: "string", required: true, section: "基础信息" },
   { key: "company_credit_code", label: "统一社会信用代码", valueType: "string", section: "基础信息" },
-  { key: "company_type", label: "单位类型", valueType: "number", section: "基础信息" },
+  { key: "company_type", label: "单位类型", valueType: "number", control: "select", section: "基础信息", options: companyTypeOptions },
   { key: "register_date", label: "注册日期", valueType: "date", section: "基础信息" },
   { key: "register_area", label: "注册区域", valueType: "string", section: "基础信息" },
   { key: "register_area_list", label: "注册区域名称", valueType: "string", section: "基础信息" },
@@ -265,8 +415,8 @@ export const unitFormFields: ConstructionFormField[] = [
   { key: "legal_person_name", label: "法人姓名", valueType: "string", section: "负责人" },
   { key: "legal_person_id_card", label: "法人身份证", valueType: "string", section: "负责人" },
   { key: "contract_amount", label: "合同金额", valueType: "number", section: "合同计薪" },
-  { key: "salary_calc_type", label: "计薪方式", valueType: "number", section: "合同计薪" },
-  { key: "quantity_unit_type", label: "计量单位", valueType: "number", section: "合同计薪" },
+  { key: "salary_calc_type", label: "计薪方式", valueType: "number", control: "select", section: "合同计薪", options: unitSalaryCalcTypeOptions },
+  { key: "quantity_unit_type", label: "计量单位", valueType: "number", control: "select", section: "合同计薪", options: quantityUnitTypeOptions },
   { key: "timer_set_a", label: "计时设置 A", valueType: "number", section: "合同计薪" },
   { key: "timer_set_b", label: "计时设置 B", valueType: "number", section: "合同计薪" },
   { key: "timer_set_c", label: "计时设置 C", valueType: "number", section: "合同计薪" },
@@ -278,26 +428,31 @@ export const unitFormFields: ConstructionFormField[] = [
 export const teamFormFields: ConstructionFormField[] = [
   { key: "unit_id", label: "参建单位", valueType: "string", control: "select", required: true, section: "基础信息", optionsSource: "units" },
   { key: "name", label: "班组名称", valueType: "string", required: true, section: "基础信息" },
-  { key: "team_no", label: "班组编号", valueType: "string", section: "基础信息" },
-  { key: "work_type", label: "工种", valueType: "number", section: "基础信息" },
+  { key: "work_type", label: "工种", valueType: "number", control: "select", section: "基础信息", options: workTypeOptions },
   { key: "is_manage_team", label: "是否管理班组", valueType: "boolean", control: "select", defaultValue: "false", section: "基础信息", options: yesNoOptions },
-  { key: "settlement_type", label: "结算方式", valueType: "number", section: "结算考勤" },
-  { key: "quantity_unit_type", label: "计量单位", valueType: "number", section: "结算考勤" },
+  { key: "settlement_type", label: "结算方式", valueType: "number", control: "select", section: "结算考勤", options: inheritedSalaryCalcTypeOptions },
+  { key: "quantity_unit_type", label: "计量单位", valueType: "number", control: "select", section: "结算考勤", options: quantityUnitTypeOptions },
   { key: "attendance_start_time", label: "考勤开始时间", valueType: "string", defaultValue: "06:00", section: "结算考勤" },
   { key: "attendance_end_time", label: "考勤结束时间", valueType: "string", defaultValue: "18:00", section: "结算考勤" },
   { key: "attendance_is_next_day", label: "考勤跨天", valueType: "boolean", control: "select", defaultValue: "false", section: "结算考勤", options: yesNoOptions },
-  { key: "leader_id", label: "班组长 ID", valueType: "string", section: "班组长" },
-  { key: "leader_name", label: "班组长姓名", valueType: "string", section: "班组长" },
-  { key: "leader_phone", label: "班组长手机号", valueType: "string", section: "班组长" },
-  { key: "leader_id_card", label: "班组长身份证", valueType: "string", section: "班组长" },
+  { key: "leader_id", label: "班组长", valueType: "string", control: "select", section: "班组长", optionsSource: "workers" },
+  { key: "leader_name", label: "班组长姓名", valueType: "string", section: "班组长", hidden: true },
+  { key: "leader_phone", label: "班组长手机号", valueType: "string", section: "班组长", hidden: true },
+  { key: "leader_id_card", label: "班组长身份证", valueType: "string", section: "班组长", hidden: true },
+  { key: "team_no", label: "班组编号", valueType: "string", section: "班组长" },
   { key: "remark", label: "备注", valueType: "string", control: "textarea", section: "班组长", wide: true },
 ];
 
 export const workerFormFields: ConstructionFormField[] = [
-  { key: "unit_id", label: "参建单位", valueType: "string", control: "select", required: true, section: "基础信息", optionsSource: "units" },
-  { key: "team_id", label: "所属班组", valueType: "string", control: "select", required: true, section: "基础信息", optionsSource: "teams" },
+  { key: "unit_id", label: "参建单位", valueType: "string", control: "select", required: true, section: "班组归属", optionsSource: "units" },
+  { key: "team_id", label: "所属班组", valueType: "string", control: "select", required: true, section: "班组归属", optionsSource: "teams" },
+  { key: "avatar", label: "照片", valueType: "string", control: "upload", uploadKind: "image", section: "证件照片" },
+  { key: "ocr_photo", label: "识别身份证正面", valueType: "string", control: "upload", uploadKind: "image", section: "证件照片" },
+  { key: "id_card_back_file", label: "识别身份证反面", valueType: "string", control: "upload", uploadKind: "image", section: "证件照片" },
+  { key: "signature_photo", label: "人员签字", valueType: "string", control: "upload", uploadKind: "image", signaturePad: true, section: "证件照片" },
+  { key: "signature_time", label: "签名日期", valueType: "date", section: "证件照片" },
   { key: "name", label: "姓名", valueType: "string", required: true, section: "基础信息" },
-  { key: "id_card", label: "身份证号", valueType: "string", section: "基础信息" },
+  { key: "phone", label: "电话", valueType: "string", section: "基础信息" },
   {
     key: "gender",
     label: "性别",
@@ -310,41 +465,34 @@ export const workerFormFields: ConstructionFormField[] = [
       { label: "男", value: "1" },
     ],
   },
+  { key: "id_card", label: "身份证号", valueType: "string", section: "基础信息" },
   { key: "nation", label: "民族", valueType: "string", section: "基础信息" },
-  { key: "phone", label: "手机号", valueType: "string", section: "基础信息" },
-  { key: "address", label: "户籍地址", valueType: "string", section: "基础信息", wide: true },
-  { key: "current_address", label: "现居地址", valueType: "string", section: "基础信息", wide: true },
-  { key: "native_place", label: "籍贯", valueType: "number", section: "基础信息" },
-  { key: "visa_office", label: "签发机关", valueType: "string", section: "证件资料" },
-  { key: "validity_period", label: "证件有效期", valueType: "string", section: "证件资料" },
-  { key: "validity_period_end", label: "证件有效期结束", valueType: "string", section: "证件资料" },
-  { key: "ocr_photo", label: "身份证正面图片", valueType: "string", control: "upload", uploadKind: "image", section: "证件资料" },
-  { key: "id_card_back_file", label: "身份证背面图片", valueType: "string", control: "upload", uploadKind: "image", section: "证件资料" },
-  { key: "avatar", label: "头像", valueType: "string", control: "upload", uploadKind: "image", section: "证件资料" },
-  { key: "signature_photo", label: "签名图片", valueType: "string", control: "upload", uploadKind: "image", section: "证件资料" },
-  { key: "signature_time", label: "签名日期", valueType: "date", section: "证件资料" },
-  { key: "work_type", label: "工种", valueType: "number", section: "用工信息" },
-  { key: "worker_type", label: "工人类型", valueType: "number", section: "用工信息" },
-  { key: "political_status", label: "政治面貌", valueType: "number", section: "用工信息" },
-  { key: "education", label: "学历", valueType: "number", section: "用工信息" },
-  { key: "manager_type", label: "管理人员类型", valueType: "string", section: "用工信息" },
-  { key: "work_status", label: "在场状态", valueType: "number", defaultValue: "1", section: "用工信息" },
-  { key: "auth_status", label: "实名状态", valueType: "number", defaultValue: "1", section: "用工信息" },
-  { key: "auth_fail_reason", label: "认证失败原因", valueType: "string", section: "用工信息", wide: true },
-  { key: "entry_time", label: "进场日期", valueType: "date", section: "用工信息" },
-  { key: "exit_time", label: "退场日期", valueType: "date", section: "用工信息" },
-  { key: "is_manage_team", label: "是否班组管理", valueType: "boolean", control: "select", defaultValue: "false", section: "用工信息", options: yesNoOptions },
-  { key: "is_key_personnel", label: "是否关键人员", valueType: "boolean", control: "select", defaultValue: "false", section: "用工信息", options: yesNoOptions },
-  { key: "settlement_type", label: "结算方式", valueType: "number", section: "薪资保险" },
-  { key: "quantity_unit_type", label: "计量单位", valueType: "number", section: "薪资保险" },
-  { key: "unit_price", label: "单价", valueType: "number", section: "薪资保险" },
-  { key: "salary_bank_card", label: "工资卡号", valueType: "string", section: "薪资保险" },
-  { key: "salary_bank", label: "开户行", valueType: "string", section: "薪资保险" },
-  { key: "has_insurance", label: "是否参保", valueType: "boolean", control: "select", defaultValue: "false", section: "薪资保险", options: yesNoOptions },
-  { key: "has_major_medical_history", label: "重大病史", valueType: "boolean", control: "select", defaultValue: "false", section: "薪资保险", options: yesNoOptions },
+  { key: "address", label: "住址", valueType: "string", section: "基础信息", wide: true },
+  { key: "native_place", label: "籍贯", valueType: "number", control: "select", section: "证件信息", options: nativePlaceOptions },
+  { key: "validity_period", label: "开始日期", valueType: "string", section: "证件信息" },
+  { key: "validity_period_end", label: "结束日期", valueType: "string", section: "证件信息" },
+  { key: "visa_office", label: "签发机关", valueType: "string", section: "证件信息" },
+  { key: "is_manage_team", label: "是否带班", valueType: "boolean", control: "select", defaultValue: "false", section: "证件信息", options: yesNoOptions },
+  { key: "is_key_personnel", label: "重点人员", valueType: "boolean", control: "select", defaultValue: "false", section: "证件信息", options: yesNoOptions },
+  { key: "work_type", label: "工种", valueType: "number", control: "select", section: "用工信息", options: workTypeOptions },
+  { key: "worker_type", label: "工人类型", valueType: "number", control: "select", section: "用工信息", options: workerTypeOptions },
+  { key: "political_status", label: "政治面貌", valueType: "number", control: "select", section: "用工信息", options: politicalStatusOptions },
+  { key: "manager_type", label: "管理人员类型", valueType: "string", control: "select", section: "用工信息", options: managerTypeOptions },
+  { key: "settlement_type", label: "结算方式", valueType: "number", control: "select", section: "结算银行卡", options: inheritedSalaryCalcTypeOptions },
+  { key: "quantity_unit_type", label: "计量单位", valueType: "number", control: "select", section: "结算银行卡", options: quantityUnitTypeOptions },
+  { key: "unit_price", label: "单价", valueType: "number", section: "结算银行卡" },
+  { key: "salary_bank_card", label: "工资银行卡", valueType: "string", section: "结算银行卡" },
+  { key: "salary_bank", label: "工资银行", valueType: "string", control: "select", section: "结算银行卡", options: salaryBankOptions },
+  { key: "education", label: "文化程度", valueType: "number", control: "select", section: "保险与状态", options: educationOptions },
+  { key: "has_major_medical_history", label: "重大病史", valueType: "boolean", control: "select", defaultValue: "false", section: "保险与状态", options: yesNoOptions },
+  { key: "current_address", label: "现住址", valueType: "string", section: "保险与状态", wide: true },
+  { key: "has_insurance", label: "工伤或意外伤害保险是否购买", valueType: "boolean", control: "select", defaultValue: "false", section: "保险与状态", options: yesNoOptions },
+  { key: "work_status", label: "在场状态", valueType: "number", control: "select", defaultValue: "1", section: "保险与状态", options: workStatusOptions },
+  { key: "entry_time", label: "进场日期", valueType: "date", section: "保险与状态" },
+  { key: "exit_time", label: "退场日期", valueType: "date", section: "保险与状态" },
   { key: "dormitory_id", label: "宿舍 ID", valueType: "string", section: "资料附件" },
+  { key: "settlement_file", label: "离场结算单", valueType: "json", control: "upload", uploadKind: "file", uploadMultiple: true, section: "资料附件", wide: true },
   { key: "labor_contract_file", label: "劳动合同", valueType: "json", control: "upload", uploadKind: "file", uploadMultiple: true, section: "资料附件", wide: true },
-  { key: "settlement_file", label: "结算资料", valueType: "json", control: "upload", uploadKind: "file", uploadMultiple: true, section: "资料附件", wide: true },
 ];
 
 export const attendanceFormFields: ConstructionFormField[] = [
@@ -465,8 +613,27 @@ export function getFieldsBySection(fields: ConstructionFormField[]) {
   );
 }
 
+export function getFieldOptionLabel(
+  fields: ConstructionFormField[],
+  key: string,
+  value: string | number | boolean | null | undefined,
+  fallback = "未填写"
+) {
+  if (value === null || value === undefined || value === "") return fallback;
+
+  const field = fields.find((item) => item.key === key);
+  const option = field?.options?.find((item) => item.value === String(value));
+
+  return option?.label ?? String(value);
+}
+
 export function datetimeLocalNow() {
   return toDatetimeLocal(new Date().toISOString());
+}
+
+export function dateInputToday(date = new Date()) {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 10);
 }
 
 function valueToFormString(field: ConstructionFormField, value: unknown) {

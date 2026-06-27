@@ -18,6 +18,25 @@ fn admin_token() -> String {
         .access_token
 }
 
+async fn persisted_admin_token(pool: &sqlx::PgPool) -> String {
+    let user_id = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        INSERT INTO users (email, username, role, is_active, email_verified)
+        VALUES ($1, $2, 'admin', TRUE, TRUE)
+        RETURNING id
+        "#,
+    )
+    .bind(format!("admin-{}@example.com", Uuid::new_v4()))
+    .bind(format!("admin-{}", Uuid::new_v4()))
+    .fetch_one(pool)
+    .await
+    .expect("insert admin user");
+
+    create_token_pair(user_id, "admin@example.com", &[Role::Admin])
+        .expect("admin token")
+        .access_token
+}
+
 async fn authed_json(
     app: axum::Router,
     method: &str,
@@ -49,6 +68,86 @@ async fn delete_authed(
         .unwrap();
     let (status, _, json) = raw_request(app, req).await;
     (status, json)
+}
+
+async fn raw_get_authed(
+    app: axum::Router,
+    uri: &str,
+    token: &str,
+) -> (StatusCode, axum::http::HeaderMap, serde_json::Value) {
+    let req = Request::builder()
+        .method("GET")
+        .uri(uri)
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .body(Body::empty())
+        .unwrap();
+    raw_request(app, req).await
+}
+
+#[tokio::test]
+async fn admin_can_search_and_paginate_projects_on_backend() {
+    let (app, _c) = build_test_app().await;
+    let token = admin_token();
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        "/api/v1/admin/projects",
+        &token,
+        json!({
+            "name": "后端分页搜索目标项目",
+            "address": "分页搜索路 1 号",
+            "status": 1
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let target_project_id = body["data"]["id"].as_str().expect("target project id");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        "/api/v1/admin/projects",
+        &token,
+        json!({
+            "name": "后端分页搜索干扰项目",
+            "address": "普通路 2 号",
+            "status": 4
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let other_project_id = body["data"]["id"].as_str().expect("other project id");
+
+    let (status, body) = get_authed(
+        app.clone(),
+        "/api/v1/admin/projects?page=1&page_size=1&keyword=%E7%9B%AE%E6%A0%87&status=1",
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["total"], 1);
+    assert_eq!(body["data"]["page"], 1);
+    assert_eq!(body["data"]["page_size"], 1);
+    let items = body["data"]["items"].as_array().expect("project items");
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], target_project_id);
+    assert_eq!(items[0]["name"], "后端分页搜索目标项目");
+
+    let (status, _) = delete_authed(
+        app.clone(),
+        &format!("/api/v1/admin/projects/{target_project_id}"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = delete_authed(
+        app.clone(),
+        &format!("/api/v1/admin/projects/{other_project_id}"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
 }
 
 #[tokio::test]
@@ -131,7 +230,8 @@ async fn admin_can_manage_project_nested_resources_and_fake_attendance() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let units = body["data"].as_array().expect("units array");
+    assert_eq!(body["data"]["total"], 1);
+    let units = body["data"]["items"].as_array().expect("units array");
     assert_eq!(units.len(), 1);
     assert_eq!(units[0]["id"], unit_id);
 
@@ -179,7 +279,8 @@ async fn admin_can_manage_project_nested_resources_and_fake_attendance() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let teams = body["data"].as_array().expect("teams array");
+    assert_eq!(body["data"]["total"], 1);
+    let teams = body["data"]["items"].as_array().expect("teams array");
     assert_eq!(teams.len(), 1);
     assert_eq!(teams[0]["id"], team_id);
 
@@ -229,7 +330,8 @@ async fn admin_can_manage_project_nested_resources_and_fake_attendance() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let workers = body["data"].as_array().expect("workers array");
+    assert_eq!(body["data"]["total"], 1);
+    let workers = body["data"]["items"].as_array().expect("workers array");
     assert_eq!(workers.len(), 1);
     assert_eq!(workers[0]["id"], worker_id);
 
@@ -282,7 +384,10 @@ async fn admin_can_manage_project_nested_resources_and_fake_attendance() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let attendance_records = body["data"].as_array().expect("attendance records array");
+    assert_eq!(body["data"]["total"], 1);
+    let attendance_records = body["data"]["items"]
+        .as_array()
+        .expect("attendance records array");
     assert_eq!(attendance_records.len(), 1);
     assert_eq!(attendance_records[0]["id"], attendance_id);
 
@@ -344,6 +449,441 @@ async fn admin_can_manage_project_nested_resources_and_fake_attendance() {
             .iter()
             .any(|project| project["id"].as_str() == Some(project_id))
     );
+}
+
+#[tokio::test]
+async fn admin_project_resource_lists_filter_paginate_and_summarize_attendance_on_backend() {
+    let (app, _c) = build_test_app().await;
+    let token = admin_token();
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        "/api/v1/admin/projects",
+        &token,
+        json!({
+            "name": "资源分页筛选测试项目",
+            "address": "资源测试路 1 号",
+            "status": 1
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let project_id = body["data"]["id"].as_str().expect("project id");
+
+    let mut unit_ids = Vec::new();
+    for index in 0..12 {
+        let (status, body) = authed_json(
+            app.clone(),
+            "POST",
+            &format!("/api/v1/admin/projects/{project_id}/units"),
+            &token,
+            json!({
+                "company_name": format!("分页单位{:02}", index),
+                "company_credit_code": format!("91320000PAGE{:04}", index),
+                "company_type": if index % 2 == 0 { 1 } else { 2 },
+                "salary_calc_type": if index % 2 == 0 { 1 } else { 2 },
+                "manager_name": format!("单位负责人{:02}", index),
+                "manager_phone": format!("1391000{:04}", index)
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+        unit_ids.push(body["data"]["id"].as_str().expect("unit id").to_string());
+    }
+    let target_unit_id = unit_ids[11].clone();
+
+    let (status, body) = get_authed(
+        app.clone(),
+        &format!("/api/v1/admin/projects/{project_id}/units"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["total"], 12);
+    assert_eq!(body["data"]["page_size"], 10);
+    assert_eq!(body["data"]["items"].as_array().expect("units").len(), 10);
+
+    let (status, body) = get_authed(
+        app.clone(),
+        &format!(
+            "/api/v1/admin/projects/{project_id}/units?keyword=%E5%88%86%E9%A1%B5%E5%8D%95%E4%BD%8D11&company_type=2&salary_calc_type=2"
+        ),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["total"], 1);
+    assert_eq!(body["data"]["items"][0]["id"], target_unit_id);
+
+    let mut team_ids = Vec::new();
+    for index in 0..12 {
+        let (status, body) = authed_json(
+            app.clone(),
+            "POST",
+            &format!("/api/v1/admin/projects/{project_id}/teams"),
+            &token,
+            json!({
+                "unit_id": target_unit_id,
+                "name": format!("分页班组{:02}", index),
+                "work_type": if index == 11 { 77 } else { 10 },
+                "settlement_type": if index % 2 == 0 { 1 } else { 2 },
+                "leader_name": format!("班组长{:02}", index),
+                "leader_phone": format!("1392000{:04}", index),
+                "team_no": format!("TEAM-PAGE-{index:02}"),
+                "attendance_start_time": if index == 5 { "" } else { "06:00" },
+                "attendance_end_time": if index == 5 { "" } else { "18:00" }
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+        team_ids.push(body["data"]["id"].as_str().expect("team id").to_string());
+    }
+    let target_team_id = team_ids[11].clone();
+
+    let (status, body) = get_authed(
+        app.clone(),
+        &format!("/api/v1/admin/projects/{project_id}/teams?unit_id={target_unit_id}"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["total"], 12);
+    assert_eq!(body["data"]["page_size"], 10);
+    assert_eq!(body["data"]["items"].as_array().expect("teams").len(), 10);
+
+    let (status, body) = get_authed(
+        app.clone(),
+        &format!(
+            "/api/v1/admin/projects/{project_id}/teams?unit_id={target_unit_id}&keyword=TEAM-PAGE-11&work_type=77&attendance_configured=true"
+        ),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["total"], 1);
+    assert_eq!(body["data"]["items"][0]["id"], target_team_id);
+
+    let mut worker_ids = Vec::new();
+    for index in 0..12 {
+        let (status, body) = authed_json(
+            app.clone(),
+            "POST",
+            &format!("/api/v1/admin/projects/{project_id}/workers"),
+            &token,
+            json!({
+                "unit_id": target_unit_id,
+                "team_id": target_team_id,
+                "id_card": format!("32080019900101{:04}", index),
+                "name": format!("分页工人{:02}", index),
+                "gender": 1,
+                "phone": format!("1393000{:04}", index),
+                "work_type": if index == 11 { 88 } else { 10 },
+                "work_status": if index == 11 { 2 } else { 1 }
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+        worker_ids.push(body["data"]["id"].as_str().expect("worker id").to_string());
+    }
+    let target_worker_id = worker_ids[11].clone();
+
+    let (status, body) = get_authed(
+        app.clone(),
+        &format!("/api/v1/admin/projects/{project_id}/workers?team_id={target_team_id}"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["total"], 12);
+    assert_eq!(body["data"]["page_size"], 10);
+    assert_eq!(body["data"]["items"].as_array().expect("workers").len(), 10);
+
+    let (status, body) = get_authed(
+        app.clone(),
+        &format!(
+            "/api/v1/admin/projects/{project_id}/workers?team_id={target_team_id}&keyword=13930000011&work_type=88&work_status=2"
+        ),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["total"], 1);
+    assert_eq!(body["data"]["items"][0]["id"], target_worker_id);
+
+    for payload in [
+        json!({
+            "worker_id": target_worker_id,
+            "direction": 0,
+            "trigger_time": "2026-06-09T23:30:00Z",
+            "equipment_id": "gate-in",
+            "serial_number": "SN-TARGET-IN-1"
+        }),
+        json!({
+            "worker_id": target_worker_id,
+            "direction": 0,
+            "trigger_time": "2026-06-10T00:30:00Z",
+            "equipment_id": "gate-in",
+            "serial_number": "SN-TARGET-IN-2"
+        }),
+        json!({
+            "worker_id": target_worker_id,
+            "direction": 1,
+            "trigger_time": "2026-06-10T09:00:00Z",
+            "equipment_id": "gate-out",
+            "serial_number": "SN-TARGET-OUT-1"
+        }),
+        json!({
+            "worker_id": target_worker_id,
+            "direction": 1,
+            "trigger_time": "2026-06-10T10:05:00Z",
+            "equipment_id": "gate-out",
+            "serial_number": "SN-TARGET-OUT-2"
+        }),
+        json!({
+            "worker_id": worker_ids[0],
+            "direction": 0,
+            "trigger_time": "2026-06-10T00:00:00Z",
+            "equipment_id": "other-gate",
+            "serial_number": "SN-OTHER-IN"
+        }),
+    ] {
+        let (status, body) = authed_json(
+            app.clone(),
+            "POST",
+            &format!("/api/v1/admin/projects/{project_id}/attendance-records"),
+            &token,
+            payload,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+    }
+
+    let (status, body) = get_authed(
+        app.clone(),
+        &format!(
+            "/api/v1/admin/projects/{project_id}/attendance-records?page=1&page_size=1&keyword=%E5%88%86%E9%A1%B5%E5%B7%A5%E4%BA%BA11&direction=0&attendance_date=2026-06-10"
+        ),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["total"], 2);
+    assert_eq!(body["data"]["page_size"], 1);
+    assert_eq!(
+        body["data"]["items"].as_array().expect("attendance").len(),
+        1
+    );
+
+    let (status, body) = get_authed(
+        app,
+        &format!(
+            "/api/v1/admin/projects/{project_id}/attendance-records?view=calendar&month=2026-06&keyword=%E5%88%86%E9%A1%B5%E5%B7%A5%E4%BA%BA11"
+        ),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let rows = body["data"]["items"].as_array().expect("calendar rows");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["worker_id"], target_worker_id);
+    let day = rows[0]["days"]
+        .as_array()
+        .expect("calendar days")
+        .iter()
+        .find(|day| day["day"] == 10)
+        .expect("day 10");
+    assert_eq!(day["first_in_time"], "07:30");
+    assert_eq!(day["last_out_time"], "18:05");
+    assert_eq!(day["working_hours"], 10.58);
+}
+
+#[tokio::test]
+async fn admin_can_manage_project_wage_batches_with_rows_import_export_and_delete() {
+    let (app, pool, _c) = build_test_app_with_pool().await;
+    let token = persisted_admin_token(&pool).await;
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        "/api/v1/admin/projects",
+        &token,
+        json!({
+            "name": "工资单接口测试项目",
+            "status": 1
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let project_id = body["data"]["id"].as_str().expect("project id");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/wage-batches"),
+        &token,
+        json!({
+            "payroll_month": "2026-05",
+            "company_name": "工资测试单位",
+            "status": "confirmed",
+            "remark": "手动工资单",
+            "rows": [
+                {
+                    "worker_name": "工资工人甲",
+                    "id_card": "332603197912123456",
+                    "team_name": "木工班组",
+                    "attendance_days": "22",
+                    "monthly_settlement": "是",
+                    "daily_settlement": "否",
+                    "wage_card_number": "6222020202020202020",
+                    "wage_bank": "中国银行",
+                    "payable_amount": "5000",
+                    "paid_amount": "4500",
+                    "adjustment_amount": "100",
+                    "adjustment_reason": "预留"
+                },
+                {
+                    "worker_name": "工资工人乙",
+                    "id_card": "332603198001012222",
+                    "team_name": "钢筋班组",
+                    "payable_amount_cents": 300000,
+                    "paid_amount_cents": 300000
+                }
+            ]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let batch_id = body["data"]["id"].as_str().expect("wage batch id");
+    assert_eq!(body["data"]["employee_count"], 2);
+    assert_eq!(body["data"]["payable_amount_cents"], 800000);
+    assert_eq!(body["data"]["paid_amount_cents"], 750000);
+    assert_eq!(body["data"]["unpaid_amount_cents"], 50000);
+
+    let (status, body) = get_authed(
+        app.clone(),
+        &format!("/api/v1/admin/projects/{project_id}/wage-batches?page=1&page_size=1"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["total"], 1);
+    assert_eq!(body["data"]["page_size"], 1);
+    let batches = body["data"]["items"].as_array().expect("wage batch array");
+    assert_eq!(batches.len(), 1);
+    assert_eq!(batches[0]["id"], batch_id);
+    let wage_items = batches[0]["items"].as_array().expect("wage items");
+    assert_eq!(wage_items.len(), 2);
+    let wage_worker_names = wage_items
+        .iter()
+        .filter_map(|item| item["worker_name"].as_str())
+        .collect::<Vec<_>>();
+    assert!(wage_worker_names.contains(&"工资工人甲"));
+    assert!(wage_worker_names.contains(&"工资工人乙"));
+    assert_eq!(body["data"]["summary"]["employee_count"], 2);
+    assert_eq!(body["data"]["summary"]["payable_amount_cents"], 800000);
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "PATCH",
+        &format!("/api/v1/admin/projects/{project_id}/wage-batches/{batch_id}"),
+        &token,
+        json!({
+            "payroll_month": "2026-06",
+            "status": "paid",
+            "rows": [
+                {
+                    "worker_name": "工资工人甲",
+                    "id_card": "332603197912123456",
+                    "team_name": "木工班组",
+                    "payable_amount": "5200",
+                    "paid_amount": "5200"
+                }
+            ]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["status"], "paid");
+    assert_eq!(body["data"]["employee_count"], 1);
+    assert_eq!(body["data"]["paid_amount_cents"], 520000);
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/wage-batches/import"),
+        &token,
+        json!({
+            "payroll_month": "2026-06",
+            "company_name": "工资测试单位",
+            "status": "imported",
+            "rows": [
+                {
+                    "worker_name": "导入工人",
+                    "id_card": "332603198806061111",
+                    "team_name": "水电班组",
+                    "payable_amount": "4100",
+                    "paid_amount": "3900"
+                }
+            ]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let import_batch_id = body["data"]["id"].as_str().expect("import batch id");
+    assert_eq!(body["data"]["employee_count"], 1);
+    assert_eq!(body["data"]["payable_amount_cents"], 410000);
+
+    let (status, headers, body) = raw_get_authed(
+        app.clone(),
+        &format!("/api/v1/admin/projects/{project_id}/wage-batches/export?payroll_month=2026-06"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        headers
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("text/csv; charset=utf-8")
+    );
+    let csv = body["raw"].as_str().expect("csv body");
+    assert!(csv.contains("工资工人甲"), "{csv}");
+    assert!(csv.contains("导入工人"), "{csv}");
+    assert!(csv.contains("=\"332603197912123456\""), "{csv}");
+
+    let (status, body) = delete_authed(
+        app.clone(),
+        &format!("/api/v1/admin/projects/{project_id}/wage-batches/{import_batch_id}"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let (status, body) = delete_authed(
+        app.clone(),
+        &format!("/api/v1/admin/projects/{project_id}/wage-batches/{batch_id}"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let (status, body) = get_authed(
+        app.clone(),
+        &format!("/api/v1/admin/projects/{project_id}/wage-batches"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["total"], 0);
+
+    let (status, _) = delete_authed(
+        app.clone(),
+        &format!("/api/v1/admin/projects/{project_id}"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
 }
 
 #[tokio::test]
@@ -410,7 +950,9 @@ async fn admin_can_manage_project_attendance_device_bindings() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    let devices = body["data"].as_array().expect("attendance devices array");
+    let devices = body["data"]["items"]
+        .as_array()
+        .expect("attendance devices array");
     assert_eq!(devices.len(), 1);
     assert_eq!(devices[0]["id"], device_id);
 
@@ -441,12 +983,292 @@ async fn admin_can_manage_project_attendance_device_bindings() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
-        body["data"]
+        body["data"]["items"]
             .as_array()
             .expect("attendance devices after delete")
             .len(),
         0
     );
+
+    let (status, _) = delete_authed(
+        app.clone(),
+        &format!("/api/v1/admin/projects/{project_id}"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn admin_can_search_and_paginate_project_attendance_devices_on_backend() {
+    let (app, _c) = build_test_app().await;
+    let token = admin_token();
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        "/api/v1/admin/projects",
+        &token,
+        json!({
+            "name": "考勤机分页测试项目",
+            "status": 1
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let project_id = body["data"]["id"].as_str().expect("project id");
+
+    let mut target_device_id = String::new();
+    for index in 0..12 {
+        let (status, body) = authed_json(
+            app.clone(),
+            "POST",
+            &format!("/api/v1/admin/projects/{project_id}/attendance-devices"),
+            &token,
+            json!({
+                "device_type": if index == 11 { "分页厂家" } else { "A厂家" },
+                "serial_number": format!("SN-PAGE-{index:02}"),
+                "device_name": format!("分页设备{:02}", index),
+                "direction": if index == 11 { 1 } else { 0 },
+                "remark": if index == 11 { "分页搜索目标" } else { "普通设备" }
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+        if index == 11 {
+            target_device_id = body["data"]["id"].as_str().expect("device id").to_string();
+        }
+    }
+
+    let (status, body) = get_authed(
+        app.clone(),
+        &format!("/api/v1/admin/projects/{project_id}/attendance-devices"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["total"], 12);
+    assert_eq!(body["data"]["page_size"], 10);
+    assert_eq!(body["data"]["items"].as_array().expect("devices").len(), 10);
+
+    let (status, body) = get_authed(
+        app.clone(),
+        &format!(
+            "/api/v1/admin/projects/{project_id}/attendance-devices?keyword=%E5%88%86%E9%A1%B5%E6%90%9C%E7%B4%A2%E7%9B%AE%E6%A0%87&direction=1&page=1&page_size=5"
+        ),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["total"], 1);
+    assert_eq!(body["data"]["items"][0]["id"], target_device_id);
+
+    let (status, _) = delete_authed(
+        app.clone(),
+        &format!("/api/v1/admin/projects/{project_id}"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn admin_can_crud_search_paginate_attendance_device_issue_reports() {
+    let (app, _c) = build_test_app().await;
+    let token = admin_token();
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        "/api/v1/admin/projects",
+        &token,
+        json!({
+            "name": "人员下发报告测试项目",
+            "status": 1
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let project_id = body["data"]["id"].as_str().expect("project id");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/units"),
+        &token,
+        json!({
+            "company_name": "人员下发测试单位",
+            "company_type": 1
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let unit_id = body["data"]["id"].as_str().expect("unit id");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/teams"),
+        &token,
+        json!({
+            "unit_id": unit_id,
+            "name": "人员下发测试班组",
+            "work_type": 10
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let team_id = body["data"]["id"].as_str().expect("team id");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/workers"),
+        &token,
+        json!({
+            "unit_id": unit_id,
+            "team_id": team_id,
+            "id_card": "320800199201019999",
+            "name": "人员下发工人",
+            "gender": 1,
+            "phone": "13999990000",
+            "avatar": "https://static.example.test/avatar.png",
+            "work_status": 1
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let worker_id = body["data"]["id"].as_str().expect("worker id");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/attendance-devices"),
+        &token,
+        json!({
+            "device_type": "实名制平台",
+            "serial_number": "ISSUE-DEVICE-001",
+            "device_name": "南门下发考勤机",
+            "direction": 0,
+            "remark": "下发目标设备"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let device_id = body["data"]["id"].as_str().expect("device id");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        "/api/v1/admin/attendance-device-issue-reports",
+        &token,
+        json!({
+            "project_id": project_id,
+            "worker_id": worker_id,
+            "attendance_device_id": device_id,
+            "action": "create",
+            "status": "pending",
+            "issued_at": "2026-06-20T08:30:00Z",
+            "message": "等待设备回执",
+            "remark": "首条下发"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let report_id = body["data"]["id"].as_str().expect("report id");
+    assert_eq!(body["data"]["project_id"], project_id);
+    assert_eq!(body["data"]["worker_name"], "人员下发工人");
+    assert_eq!(body["data"]["device_name"], "南门下发考勤机");
+    assert_eq!(body["data"]["serial_number"], "ISSUE-DEVICE-001");
+
+    for index in 0..11 {
+        let (status, body) = authed_json(
+            app.clone(),
+            "POST",
+            "/api/v1/admin/attendance-device-issue-reports",
+            &token,
+            json!({
+                "project_id": project_id,
+                "worker_id": worker_id,
+                "attendance_device_id": device_id,
+                "action": if index % 2 == 0 { "update" } else { "delete" },
+                "status": "success",
+                "issued_at": format!("2026-06-20T09:{index:02}:00Z"),
+                "message": format!("批量下发{index:02}")
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+    }
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "PATCH",
+        &format!("/api/v1/admin/attendance-device-issue-reports/{report_id}"),
+        &token,
+        json!({
+            "status": "failed",
+            "message": "设备离线，等待重试"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["status"], "failed");
+    assert_eq!(body["data"]["message"], "设备离线，等待重试");
+
+    let (status, body) = get_authed(
+        app.clone(),
+        "/api/v1/admin/attendance-device-issue-reports?page=1&page_size=10",
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["total"], 12);
+    assert_eq!(body["data"]["page_size"], 10);
+    assert_eq!(body["data"]["items"].as_array().expect("reports").len(), 10);
+
+    let (status, body) = get_authed(
+        app.clone(),
+        &format!(
+            "/api/v1/admin/attendance-device-issue-reports?page=1&page_size=1&keyword=%E5%8D%97%E9%97%A8&project_id={project_id}&status=failed&action=create"
+        ),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["total"], 1);
+    assert_eq!(body["data"]["items"][0]["id"], report_id);
+    assert_eq!(body["data"]["items"][0]["worker_name"], "人员下发工人");
+
+    let (status, body) = get_authed(
+        app.clone(),
+        &format!("/api/v1/admin/attendance-device-issue-reports/{report_id}"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["id"], report_id);
+    assert_eq!(body["data"]["project_name"], "人员下发报告测试项目");
+
+    let (status, body) = delete_authed(
+        app.clone(),
+        &format!("/api/v1/admin/attendance-device-issue-reports/{report_id}"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["success"], true);
+
+    let (status, body) = get_authed(
+        app.clone(),
+        &format!(
+            "/api/v1/admin/attendance-device-issue-reports?project_id={project_id}&status=failed"
+        ),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["total"], 0);
 
     let (status, _) = delete_authed(
         app.clone(),
@@ -678,6 +1500,8 @@ async fn admin_api_accepts_full_normalized_non_platform_payloads() {
     assert_eq!(worker["name"], "全字段工人");
     assert_eq!(worker["has_insurance"], true);
     assert_eq!(worker["native_place"], 320800);
+    assert_eq!(worker["auth_status"], 2);
+    assert_eq!(worker["auth_fail_reason"], Value::Null);
     assert!(worker.get("woAdmitGuid").is_none());
 
     let (status, body) = authed_json(
@@ -828,15 +1652,79 @@ async fn admin_api_accepts_form_style_nulls_by_column_type() {
         json!({
             "unit_id": unit_id,
             "team_id": team_id,
+            "name": "无手机号工人",
+            "id_card": "320800199001018888",
+            "gender": 1,
+            "worker_type": 1,
+            "work_type": 10
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["message"], "请填写手机号");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/workers"),
+        &token,
+        json!({
+            "unit_id": unit_id,
+            "team_id": team_id,
+            "name": "无工种建筑工人",
+            "id_card": "320800199001017777",
+            "gender": 1,
+            "phone": "13800000001",
+            "worker_type": 1
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["message"], "请选择工种");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/workers"),
+        &token,
+        json!({
+            "unit_id": unit_id,
+            "team_id": team_id,
+            "name": "无人员类型管理人员",
+            "id_card": "320800199001016666",
+            "gender": 1,
+            "phone": "13800000002",
+            "worker_type": 1001
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["message"], "请选择人员类型");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/workers"),
+        &token,
+        json!({
+            "unit_id": unit_id,
+            "team_id": team_id,
             "name": "表单空值工人",
             "id_card": "320800199001019999",
             "gender": 1,
+            "phone": "13800000000",
             "work_status": 1
         }),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED);
     let worker_id = body["data"]["id"].as_str().expect("worker id");
+    assert_eq!(body["data"]["auth_status"], 2);
+    assert_eq!(body["data"]["auth_fail_reason"], Value::Null);
+    assert_eq!(
+        body["data"]["entry_time"],
+        chrono::Local::now().format("%Y-%m-%d").to_string()
+    );
 
     let (status, body) = authed_json(
         app.clone(),

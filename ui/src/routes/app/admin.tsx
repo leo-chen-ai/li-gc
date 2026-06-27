@@ -54,7 +54,7 @@ function AdminContent() {
   return (
     <SidebarProvider
       style={{
-        "--sidebar-width": "12rem",
+        "--sidebar-width": "11rem",
         "--sidebar-width-icon": "3.25rem",
       } as CSSProperties}
     >
@@ -134,7 +134,7 @@ function AdminContent() {
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 bg-muted/20 p-4 md:p-5">
+        <main className="flex-1 bg-muted/20 p-3 md:p-4">
           <Outlet />
         </main>
       </SidebarInset>

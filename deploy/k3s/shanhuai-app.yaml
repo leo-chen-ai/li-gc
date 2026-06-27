@@ -12,7 +12,7 @@ data:
   RUST_ENV: production
   RUST_LOG: info
   SERVER_PORT: "8080"
-  CORS_ALLOWED_ORIGINS: "http://36.151.143.235:30081"
+  CORS_ALLOWED_ORIGINS: "http://36.151.143.235:30081,http://admin.shanhuai.top,https://admin.shanhuai.top"
   DB_MAX_CONNECTIONS: "5"
   DB_MIN_CONNECTIONS: "1"
   BOOTSTRAP_ENABLED: "true"
@@ -22,7 +22,7 @@ data:
   STORAGE_DRIVER: jdcloud_oss
   UPLOAD_DIR: /app/uploads
   MAX_AVATAR_SIZE: "2097152"
-  MAX_UPLOAD_SIZE: "20971520"
+  MAX_UPLOAD_SIZE: "52428800"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -175,3 +175,25 @@ spec:
       port: 80
       targetPort: http
       nodePort: 30081
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shanhuai-admin
+  namespace: shanhuai-app
+  labels:
+    app.kubernetes.io/name: shanhuai-admin
+    app.kubernetes.io/part-of: shanhuai-gc
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: admin.shanhuai.top
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: shanhuai-ui
+                port:
+                  name: http

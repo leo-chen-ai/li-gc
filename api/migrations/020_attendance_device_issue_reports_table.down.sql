@@ -1,0 +1,1 @@
+DROP TABLE IF EXISTS construction_attendance_device_issue_reports;

@@ -87,14 +87,18 @@ export function ProjectSearchSelect({
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-[--radix-popover-trigger-width] min-w-[320px] p-0">
+      <PopoverContent
+        align="start"
+        portalled={false}
+        className="max-h-[var(--radix-popover-content-available-height)] w-[--radix-popover-trigger-width] min-w-[320px] overflow-hidden p-0"
+      >
         <Command shouldFilter={false}>
           <CommandInput
             value={keyword}
             onValueChange={setKeyword}
             placeholder={placeholder}
           />
-          <CommandList>
+          <CommandList className="max-h-72 overflow-y-auto">
             <CommandEmpty>
               {optionsQuery.isFetching
                 ? "项目搜索中..."

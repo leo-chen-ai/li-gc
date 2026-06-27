@@ -38,6 +38,11 @@ impl StorageProvider for LocalStorage {
         Ok(())
     }
 
+    async fn get(&self, key: &str) -> Result<Bytes, StorageError> {
+        let path = self.upload_dir.join(key);
+        Ok(Bytes::from(fs::read(path).await?))
+    }
+
     async fn delete(&self, key: &str) -> Result<(), StorageError> {
         let path = self.upload_dir.join(key);
         match fs::remove_file(&path).await {

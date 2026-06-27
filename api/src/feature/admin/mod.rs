@@ -1,5 +1,6 @@
 pub mod api_key;
 pub mod construction;
+pub mod enterprise;
 pub mod log;
 pub mod role;
 pub mod routes;

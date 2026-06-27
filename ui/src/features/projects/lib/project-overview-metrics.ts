@@ -115,8 +115,8 @@ export function buildProjectOverviewAudit(
 function buildRealNameAttendanceCompleteness(workers: Worker[], attendance: AttendanceRecord[]) {
   if (workers.length === 0) return 0;
 
-  const authenticatedWorkerCount = workers.filter((worker) => worker.status !== "未认证").length;
-  const workerCompleteness = authenticatedWorkerCount / workers.length;
+  const activeWorkerCount = workers.filter((worker) => worker.status === "在场").length;
+  const workerCompleteness = activeWorkerCount / workers.length;
   const attendanceCompleteness =
     attendance.length === 0
       ? 0
