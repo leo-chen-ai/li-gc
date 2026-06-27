@@ -294,8 +294,15 @@ pub fn admin_routes() -> Router<AppState> {
         .route("/roles/{id}", delete(role::handler::delete_role))
         .route("/roles/{id}/menus", put(role::handler::update_role_menus))
         .route("/uploads", get(upload::handler::list_uploads))
-        .route("/users", get(user::handler::list_users))
+        .route(
+            "/users",
+            get(user::handler::list_users).post(user::handler::create_user),
+        )
         .route("/users/{id}/role", post(user::handler::update_user_role))
+        .route(
+            "/users/{id}/projects",
+            put(user::handler::update_user_projects),
+        )
         .route("/stats", get(stats::handler::get_dashboard_stats))
         .route_layer(middleware::from_fn(admin_middleware))
         .route_layer(middleware::from_fn(auth_middleware))

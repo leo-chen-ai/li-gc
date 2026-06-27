@@ -7,32 +7,45 @@
    
   </view>
 
+  <view class="project-card">
+    <image class="project-card-bg" src="{{projectCardBg}}" mode="aspectFill" />
+    <view class="project-card-content">
+      <view class="project-label">当前项目</view>
+      <view class="project-title">{{selectedProject.title}}</view>
+      <view class="project-meta">
+        <text>{{selectedProject.developerName}}</text>
+      </view>
+    </view>
+    <view class="project-switch-button" bind:tap="openProjectSwitcher">切换</view>
+  </view>
+
   <view class="feature-board">
     <view
       class="feature-card feature-primary {{primaryFeature.tone}}"
       bind:tap="navigateToModule"
+      data-key="{{primaryFeature.key}}"
       data-title="{{primaryFeature.title}}"
     >
       <view class="feature-title">{{primaryFeature.title}}</view>
-      <view class="feature-note">{{primaryFeature.note}}</view>
+      <view class="feature-note" wx:if="{{primaryFeature.note}}">{{primaryFeature.note}}</view>
       <image class="feature-primary-image" src="{{primaryFeature.image}}" mode="aspectFit" />
     </view>
 
     <view class="feature-side">
       <view class="feature-mini-row">
         <block wx:for="{{miniFeatures}}" wx:key="key">
-          <view class="feature-card feature-mini {{item.tone}}" bind:tap="navigateToModule" data-title="{{item.title}}">
+          <view class="feature-card feature-mini {{item.tone}}" bind:tap="navigateToModule" data-key="{{item.key}}" data-title="{{item.title}}">
             <view class="feature-title">{{item.title}}</view>
             <image class="feature-mini-image" src="{{item.image}}" mode="aspectFit" />
           </view>
         </block>
       </view>
 
-      <view class="feature-card feature-wide {{wideFeature.tone}}" bind:tap="navigateToModule" data-title="{{wideFeature.title}}">
+      <view class="feature-card feature-wide {{wideFeature.tone}}" bind:tap="navigateToModule" data-key="{{wideFeature.key}}" data-title="{{wideFeature.title}}">
         <image class="feature-wide-image" src="{{wideFeature.image}}" mode="aspectFit" />
         <view>
           <view class="feature-title accent">{{wideFeature.title}}</view>
-          <view class="feature-note">{{wideFeature.note}}</view>
+          <view class="feature-note" wx:if="{{wideFeature.note}}">{{wideFeature.note}}</view>
         </view>
       </view>
     </view>
@@ -45,7 +58,7 @@
     </view>
     <view class="section-grid two">
       <block wx:for="{{attendanceModules}}" wx:key="key">
-        <view class="section-item" bind:tap="navigateToModule" data-title="{{item.title}}">
+        <view class="section-item" bind:tap="navigateToModule" data-key="{{item.key}}" data-title="{{item.title}}">
           <view class="icon-disc">
             <image class="section-icon" src="{{item.image}}" mode="aspectFit" />
           </view>
@@ -61,9 +74,49 @@
       <view class="nav-mark nav-home"></view>
       <text>首页</text>
     </view>
-    <view class="nav-item" bind:tap="navigateToModule" data-title="我的">
+    <view class="nav-item" bind:tap="openProfile">
       <view class="nav-mark nav-user"></view>
       <text>我的</text>
     </view>
+  </view>
+
+  <view class="project-modal-mask" wx:if="{{projectSwitcherVisible}}" catchtap="closeProjectSwitcher"></view>
+  <view class="project-modal {{projectSwitcherVisible ? 'show' : ''}}">
+    <view class="modal-handle"></view>
+    <view class="modal-header">
+      <view>
+        <view class="modal-title">切换项目</view>
+        <view class="modal-subtitle">选择后首页数据按当前项目展示</view>
+      </view>
+      <view class="modal-close" bind:tap="closeProjectSwitcher">×</view>
+    </view>
+    <view class="project-search">
+      <text class="project-search-dot"></text>
+      <input
+        class="project-search-input"
+        value="{{projectKeyword}}"
+        placeholder="搜索项目名称、区域、状态"
+        placeholder-class="muted-placeholder"
+        bindinput="onProjectKeywordInput"
+      />
+    </view>
+    <scroll-view class="project-list" scroll-y>
+      <block wx:if="{{filteredProjects.length}}">
+        <block wx:for="{{filteredProjects}}" wx:key="id">
+          <view
+            class="project-option {{selectedProject.id === item.id ? 'active' : ''}}"
+            data-id="{{item.id}}"
+            bind:tap="selectProject"
+          >
+            <view class="project-option-main">
+              <view class="project-option-title">{{item.title}}</view>
+              <view class="project-option-meta">{{item.developerName}} · {{item.location}}</view>
+            </view>
+            <view class="project-option-check" wx:if="{{selectedProject.id === item.id}}">✓</view>
+          </view>
+        </block>
+      </block>
+      <view class="project-empty" wx:else>暂无匹配项目</view>
+    </scroll-view>
   </view>
 </view>

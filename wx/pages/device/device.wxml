@@ -1,0 +1,141 @@
+<view class="module-page">
+  <view class="module-hero">
+    <image class="module-hero-bg" src="{{pageHeaderBg}}" mode="aspectFill" />
+    <view class="hero-topline">
+      <view class="back-button" bind:tap="goBack">‹</view>
+      <view class="hero-kicker">{{module.kicker}}</view>
+    </view>
+    <view class="hero-title-row">
+      <view>
+        <view class="hero-title">{{module.title}}</view>
+        <view class="hero-subtitle">{{module.subtitle}}</view>
+      </view>
+      <view class="hero-count">
+        <text>{{records.length}}</text>
+        <text>条</text>
+      </view>
+    </view>
+    <view class="metric-strip">
+      <view class="metric-item">
+        <view class="metric-value">{{summary.primary}}</view>
+        <view class="metric-label">{{module.primaryMetric}}</view>
+      </view>
+      <view class="metric-item">
+        <view class="metric-value">{{summary.secondary}}</view>
+        <view class="metric-label">{{module.secondaryMetric}}</view>
+      </view>
+      <view class="metric-item">
+        <view class="metric-value accent">{{summary.attention}}</view>
+        <view class="metric-label">{{module.attentionMetric}}</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="toolbar-card">
+    <view class="search-box">
+      <text class="search-dot"></text>
+      <input
+        class="search-input"
+        value="{{keyword}}"
+        placeholder="{{module.searchPlaceholder}}"
+        placeholder-class="muted-placeholder"
+        bindinput="onKeywordInput"
+      />
+    </view>
+    <view class="toolbar-button" bind:tap="openCreate">新增</view>
+  </view>
+
+  <view class="filter-row" wx:if="{{module.filters.length}}">
+    <block wx:for="{{module.filters}}" wx:key="value">
+      <view class="filter-chip {{filterValue === item.value ? 'active' : ''}}" data-value="{{item.value}}" bind:tap="setFilter">
+        {{item.label}}
+      </view>
+    </block>
+  </view>
+
+  <view class="record-list">
+    <block wx:if="{{filteredRecords.length}}">
+      <block wx:for="{{filteredRecords}}" wx:key="id">
+        <view class="record-card" data-id="{{item.id}}" bind:tap="openEdit">
+          <view class="record-main">
+            <view class="record-title">{{item._title}}</view>
+            <view class="record-subtitle">{{item._subtitle}}</view>
+          </view>
+          <view class="status-badge {{item._statusTone}}">{{item._status}}</view>
+          <view class="record-grid">
+            <block wx:for="{{item._details}}" wx:key="label">
+              <view class="detail-cell">
+                <view class="detail-label">{{item.label}}</view>
+                <view class="detail-value">{{item.value}}</view>
+              </view>
+            </block>
+          </view>
+          <view class="record-footer">
+            <view class="record-note">{{item._note}}</view>
+            <view class="record-actions">
+              <view class="text-button" data-id="{{item.id}}" catchtap="openEdit">编辑</view>
+              <view class="text-button danger" data-id="{{item.id}}" catchtap="deleteRecord">删除</view>
+            </view>
+          </view>
+        </view>
+      </block>
+    </block>
+    <view class="empty-state" wx:else>
+      <view class="empty-title">暂无匹配记录</view>
+      <view class="empty-copy">调整筛选条件，或新增一条业务记录。</view>
+      <view class="empty-button" bind:tap="openCreate">新增{{module.shortTitle}}</view>
+    </view>
+  </view>
+
+  <view class="form-mask" wx:if="{{formVisible}}" catchtap="closeForm"></view>
+  <view class="form-sheet {{formVisible ? 'show' : ''}}">
+    <view class="sheet-handle"></view>
+    <view class="sheet-header">
+      <view>
+        <view class="sheet-title">{{formTitle}}</view>
+        <view class="sheet-subtitle">{{module.formHint}}</view>
+      </view>
+      <view class="sheet-close" bind:tap="closeForm">×</view>
+    </view>
+    <scroll-view class="form-scroll" scroll-y>
+      <block wx:for="{{formFields}}" wx:key="key">
+        <view class="form-field {{item.wide ? 'wide' : ''}}">
+          <view class="field-label">
+            <text>{{item.label}}</text>
+            <text class="required" wx:if="{{item.required}}">*</text>
+          </view>
+          <block wx:if="{{item.control === 'select'}}">
+            <picker range="{{item.options}}" range-key="label" value="{{item.optionIndex}}" data-key="{{item.key}}" bindchange="onPickerChange">
+              <view class="select-value {{item.valueLabel ? '' : 'placeholder'}}">{{item.displayValue}}</view>
+            </picker>
+          </block>
+          <block wx:elif="{{item.control === 'textarea'}}">
+            <textarea
+              class="native-textarea"
+              value="{{item.value}}"
+              placeholder="{{item.placeholder}}"
+              placeholder-class="muted-placeholder"
+              data-key="{{item.key}}"
+              bindinput="onFormInput"
+            />
+          </block>
+          <block wx:else>
+            <input
+              class="native-field"
+              value="{{item.value}}"
+              type="{{item.inputType}}"
+              placeholder="{{item.placeholder}}"
+              placeholder-class="muted-placeholder"
+              data-key="{{item.key}}"
+              bindinput="onFormInput"
+            />
+          </block>
+        </view>
+      </block>
+    </scroll-view>
+    <view class="sheet-footer">
+      <view class="ghost-button" bind:tap="closeForm">取消</view>
+      <view class="primary-button" bind:tap="saveRecord">保存</view>
+    </view>
+  </view>
+</view>

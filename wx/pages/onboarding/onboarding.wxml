@@ -1,0 +1,187 @@
+<view class="onboarding-page">
+  <view class="topbar">
+    <view class="back-button" bind:tap="goBack">‹</view>
+    <view class="topbar-title">实名入职</view>
+    <view class="topbar-spacer"></view>
+  </view>
+
+  <view class="intro-panel">
+    <image class="intro-bg" src="{{pageHeaderBg}}" mode="aspectFill" />
+    <view class="intro-kicker">人员入场</view>
+    <view class="intro-title">实名入职登记</view>
+    <view class="intro-copy">先用手机号查询人员信息，已有实名资料会自动带出，再确认班组、工种和进场日期。</view>
+  </view>
+
+  <view class="onboarding-form">
+    <view class="form-section personal-section">
+      <view class="section-title">个人信息</view>
+      <view class="photo-tips">拍照要求：一寸标准头像；2.不能戴安全帽，不能戴口罩；3.清晰、完整、无遮挡。</view>
+      <view class="face-upload-card" bind:tap="chooseFaceImage">
+        <image class="face-image" src="{{faceImage}}" mode="aspectFill" />
+        <view class="face-upload-copy">
+          <view class="upload-title">点击上传头像</view>
+          <view class="upload-subtitle">拍照或从相册选择</view>
+        </view>
+      </view>
+      <view class="id-ocr-title">身份证识别</view>
+      <view class="id-upload-card" bind:tap="chooseIdFrontImage">
+        <view class="id-image-wrap">
+          <image class="id-illustration" src="{{idFrontImage}}" mode="aspectFill" />
+          <view class="id-upload-action">
+            <view class="upload-title">点击上传正面</view>
+            <view class="upload-subtitle">用于识别姓名和身份证号</view>
+          </view>
+        </view>
+        <view class="id-upload-footer">
+          <view class="id-upload-title">身份证正面</view>
+          <view class="id-upload-line">姓名 {{form.name}}　身份证号 {{form.idCard}}</view>
+        </view>
+      </view>
+      <view class="id-upload-card back" bind:tap="chooseIdBackImage">
+        <view class="id-image-wrap">
+          <image class="id-illustration" src="{{idBackImage}}" mode="aspectFill" />
+          <view class="id-upload-action">
+            <view class="upload-title">点击上传反面</view>
+            <view class="upload-subtitle">用于识别签发机关和有效期</view>
+          </view>
+        </view>
+        <view class="id-upload-footer">
+          <view class="id-upload-title">身份证反面</view>
+          <view class="id-upload-line">签发机关 {{form.issuingAuthority}}</view>
+        </view>
+      </view>
+      <view class="field-row">
+        <view class="field half">
+          <view class="field-label">姓名 <text>*</text></view>
+          <input class="field-input" value="{{form.name}}" data-field="name" placeholder="请输入姓名" placeholder-class="muted-placeholder" bindinput="onFormInput" />
+        </view>
+        <view class="field half">
+          <view class="field-label">性别 <text>*</text></view>
+          <picker range="{{genderOptions}}" value="{{genderIndex}}" bindchange="onGenderChange">
+            <view class="select-value">{{form.gender}}</view>
+          </picker>
+        </view>
+      </view>
+      <view class="field">
+        <view class="field-label">身份证号 <text>*</text></view>
+        <input class="field-input" value="{{form.idCard}}" data-field="idCard" placeholder="请输入身份证号" placeholder-class="muted-placeholder" bindinput="onFormInput" />
+      </view>
+      <view class="field">
+        <view class="field-label">民族</view>
+        <input class="field-input" value="{{form.nation}}" data-field="nation" placeholder="例如：汉族" placeholder-class="muted-placeholder" bindinput="onFormInput" />
+      </view>
+      <view class="field">
+        <view class="field-label">住址</view>
+        <textarea class="field-textarea" value="{{form.address}}" data-field="address" placeholder="请输入现住址" placeholder-class="muted-placeholder" bindinput="onFormInput" />
+      </view>
+      <view class="field">
+        <view class="field-label">籍贯</view>
+        <input class="field-input" value="{{form.nativePlace}}" data-field="nativePlace" placeholder="请输入籍贯" placeholder-class="muted-placeholder" bindinput="onFormInput" />
+      </view>
+      <view class="field">
+        <view class="field-label">签证机关</view>
+        <input class="field-input" value="{{form.issuingAuthority}}" data-field="issuingAuthority" placeholder="请输入签证机关" placeholder-class="muted-placeholder" bindinput="onFormInput" />
+      </view>
+      <view class="field-row">
+        <view class="field half">
+          <view class="field-label">有效期开始</view>
+          <picker mode="date" value="{{form.validStart}}" bindchange="onValidStartChange">
+            <view class="select-value">{{form.validStart}}</view>
+          </picker>
+        </view>
+        <view class="field half">
+          <view class="field-label">有效期结束</view>
+          <picker mode="date" value="{{form.validEnd}}" bindchange="onValidEndChange">
+            <view class="select-value">{{form.validEnd}}</view>
+          </picker>
+        </view>
+      </view>
+      <view class="field">
+        <view class="field-label">备注</view>
+        <textarea class="field-textarea compact" value="{{form.remark}}" data-field="remark" placeholder="可填写证件、合同或现场确认情况" placeholder-class="muted-placeholder" bindinput="onFormInput" />
+      </view>
+    </view>
+
+    <view class="form-section">
+      <view class="section-title">工作信息</view>
+      <view class="field">
+        <view class="field-label">手机号 <text>*</text></view>
+        <input class="field-input" type="number" value="{{form.phone}}" data-field="phone" placeholder="请输入手机号" placeholder-class="muted-placeholder" bindinput="onFormInput" />
+      </view>
+      <view class="project-readonly">
+        <view class="readonly-label">项目</view>
+        <view class="readonly-value">宁波诺丁汉大学2026暑期工程项目13#楼装修工程</view>
+      </view>
+      <view class="field">
+        <view class="field-label">班组 <text>*</text></view>
+        <input class="field-input" value="{{form.teamName}}" data-field="teamName" placeholder="请选择班组" placeholder-class="muted-placeholder" bindinput="onFormInput" />
+      </view>
+      <view class="field-row">
+        <view class="field half">
+          <view class="field-label">工种 <text>*</text></view>
+          <picker range="{{workTypeOptions}}" value="{{workTypeIndex}}" bindchange="onWorkTypeChange">
+            <view class="select-value">{{form.workType}}</view>
+          </picker>
+        </view>
+        <view class="field half">
+          <view class="field-label">工人类型 <text>*</text></view>
+          <picker range="{{workerTypeOptions}}" value="{{workerTypeIndex}}" bindchange="onWorkerTypeChange">
+            <view class="select-value">{{form.workerType}}</view>
+          </picker>
+        </view>
+      </view>
+      <view class="field-row">
+        <view class="field half">
+          <view class="field-label">管理人员角色</view>
+          <picker range="{{managerRoleOptions}}" value="{{managerRoleIndex}}" bindchange="onManagerRoleChange">
+            <view class="select-value">{{form.managerRole}}</view>
+          </picker>
+        </view>
+        <view class="field half">
+          <view class="field-label">文化程度 <text>*</text></view>
+          <picker range="{{educationOptions}}" value="{{educationIndex}}" bindchange="onEducationChange">
+            <view class="select-value">{{form.education}}</view>
+          </picker>
+        </view>
+      </view>
+      <view class="field-row">
+        <view class="field half">
+          <view class="field-label">政治面貌 <text>*</text></view>
+          <picker range="{{politicalOptions}}" value="{{politicalIndex}}" bindchange="onPoliticalChange">
+            <view class="select-value">{{form.politicalStatus}}</view>
+          </picker>
+        </view>
+        <view class="field half">
+          <view class="field-label">结算方式 <text>*</text></view>
+          <picker range="{{settlementOptions}}" value="{{settlementIndex}}" bindchange="onSettlementChange">
+            <view class="select-value">{{form.settlement}}</view>
+          </picker>
+        </view>
+      </view>
+      <view class="field">
+        <view class="field-label">单价 <text>*</text></view>
+        <view class="price-row">
+          <input class="field-input" type="number" value="{{form.unitPrice}}" data-field="unitPrice" placeholder="请输入单价" placeholder-class="muted-placeholder" bindinput="onFormInput" />
+          <view class="price-unit">元</view>
+        </view>
+      </view>
+    </view>
+
+    <view class="submit-notice" wx:if="{{submitNotice}}">{{submitNotice}}</view>
+    <view class="submit-button" bind:tap="submitOnboarding">提交实名入职</view>
+  </view>
+
+  <view class="phone-mask" wx:if="{{phoneModalVisible}}"></view>
+  <view class="phone-modal {{phoneModalVisible ? 'show' : ''}}">
+    <view class="phone-modal-title">先查询手机号</view>
+    <view class="phone-modal-copy">输入手机号后，系统会先查找已有实名资料。调试示例：输入 1 可自动带出人员信息。</view>
+    <view class="phone-input-wrap">
+      <input class="phone-input" type="number" value="{{phoneLookupValue}}" focus="{{phoneModalVisible}}" placeholder="请输入手机号" placeholder-class="muted-placeholder" bindinput="onPhoneLookupInput" />
+    </view>
+    <view class="phone-match-tip" wx:if="{{lookupMatchedPreview}}">检测到已有人员，确认后自动带出资料。</view>
+    <view class="phone-modal-actions">
+      <view class="modal-ghost" bind:tap="goBack">返回</view>
+      <view class="modal-primary" bind:tap="confirmPhoneLookup">确认并填写</view>
+    </view>
+  </view>
+</view>

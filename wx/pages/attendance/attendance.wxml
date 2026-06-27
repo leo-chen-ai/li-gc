@@ -1,0 +1,74 @@
+<view class="attendance-page">
+  <view class="page-top">
+    <view class="back-button" bind:tap="goBack">‹</view>
+    <view class="page-title">出勤统计</view>
+    <view class="top-spacer"></view>
+  </view>
+
+  <view class="project-strip">
+    <image class="project-bg" src="{{pageHeaderBg}}" mode="aspectFill" />
+    <view class="project-label">项目名称</view>
+    <view class="project-name">{{projectName}}</view>
+  </view>
+
+  <view class="stats-card">
+    <view class="month-title">{{month}}⌄</view>
+    <view class="stats-grid">
+      <view><view class="stat-value">{{stats.total}}</view><view class="stat-label">总人数</view></view>
+      <view><view class="stat-value present">{{stats.present}}</view><view class="stat-label">出勤</view></view>
+      <view><view class="stat-value absent">{{stats.absent}}</view><view class="stat-label">缺勤</view></view>
+      <view><view class="stat-value rate">{{stats.rate}}</view><view class="stat-label">出勤率</view></view>
+    </view>
+  </view>
+
+  <view class="filter-card">
+    <view class="filter-grid">
+      <view class="filter-pill">{{teamFilter}}⌄</view>
+      <view class="filter-pill">{{companyFilter}}⌄</view>
+    </view>
+    <view class="search-row">
+      <input class="search-input" value="{{keyword}}" placeholder="搜索姓名" placeholder-class="muted-placeholder" bindinput="onKeywordInput" />
+      <view class="search-button" bind:tap="refresh">搜索</view>
+      <view class="reset-button" bind:tap="resetFilters">重置</view>
+    </view>
+  </view>
+
+  <view class="attendance-body">
+    <scroll-view class="date-rail" scroll-y>
+      <block wx:for="{{dateItems}}" wx:key="label">
+        <view class="date-item {{activeDate === item.label ? 'active' : ''}}" data-date="{{item.label}}" bind:tap="setDate">
+          {{item.label}}<text>({{item.count}})</text>
+        </view>
+      </block>
+    </scroll-view>
+
+    <view class="attendance-main">
+      <view class="tab-row">
+        <block wx:for="{{tabs}}" wx:key="*this">
+          <view class="tab-item {{activeTab === item ? 'active' : ''}}" data-tab="{{item}}" bind:tap="setTab">{{item}}（{{item === '已出勤' ? stats.present : stats.absent}}）</view>
+        </block>
+      </view>
+      <scroll-view class="worker-scroll" scroll-y>
+        <block wx:for="{{filteredWorkers}}" wx:key="id">
+          <view class="attendance-worker">
+            <image class="worker-avatar" src="{{item.avatar}}" mode="aspectFill" />
+            <view class="worker-main">
+              <view class="worker-name-row">
+                <view class="worker-name">{{item.name}}</view>
+                <view class="phone-action" data-name="电话" bind:tap="showAction">电话</view>
+              </view>
+              <view class="worker-meta">{{item.workType}}</view>
+              <view class="worker-phone">{{item.phone}}</view>
+              <view class="time-row" wx:if="{{item.status === '已出勤'}}">
+                <view class="time-pill in">签入 {{item.signIn}}</view>
+                <view class="time-pill out">签出 {{item.signOut}}</view>
+              </view>
+              <view class="absent-note" wx:else>今日暂无进出场记录</view>
+            </view>
+          </view>
+        </block>
+        <view class="empty-state" wx:if="{{!filteredWorkers.length}}">暂无匹配记录</view>
+      </scroll-view>
+    </view>
+  </view>
+</view>

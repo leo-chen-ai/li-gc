@@ -1,0 +1,87 @@
+<view class="profile-page">
+  <image class="profile-bg-image" src="{{profilePageBg}}" mode="aspectFill" />
+  <view class="profile-bg-tint"></view>
+  <view class="profile-top-visual">
+    <image class="profile-top-visual-image" src="{{profileVisual}}" mode="aspectFill" />
+  </view>
+
+  <view class="profile-content">
+    <view class="profile-header">
+      <view>
+        <view class="profile-title">我的</view>
+        <view class="profile-subtitle">账号安全与项目身份</view>
+      </view>
+    </view>
+
+    <view class="account-hero">
+      <view class="avatar-ring">
+        <view class="avatar-mark">山</view>
+      </view>
+      <view class="account-main">
+        <view class="user-name">{{userName}}</view>
+        <view class="user-account">{{account}}</view>
+        <view class="phone-row">
+          <text>手机号码</text>
+          <text class="phone-number">{{phoneNumber}}</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="info-grid">
+      <view class="info-card">
+        <view class="info-icon mint">
+          <t-icon name="home" size="34rpx" color="#0a9875" />
+        </view>
+        <view class="info-title">当前项目</view>
+        <view class="info-value">{{projectName}}</view>
+      </view>
+      <view class="info-card">
+        <view class="info-icon deep">
+          <t-icon name="usergroup" size="34rpx" color="#0f6b5d" />
+        </view>
+        <view class="info-title">所属单位</view>
+        <view class="info-value">{{companyName}}</view>
+      </view>
+    </view>
+
+    <view class="contact-card" bind:tap="contactUs">
+      <view class="contact-card-content">
+        <image class="contact-icon" src="{{contactIcon}}" mode="aspectFill" />
+        <view class="contact-main">
+          <view class="contact-title">联系我们</view>
+          <view class="contact-copy">账号、权限或项目使用问题，可联系管理员协助处理。</view>
+        </view>
+        <view class="contact-button">联系</view>
+      </view>
+    </view>
+
+    <view class="tool-section">
+      <view class="section-title">常用功能</view>
+      <view class="tool-grid">
+        <view class="tool-item" bind:tap="changePassword">
+          <view class="tool-icon">
+            <t-icon name="user-password" size="42rpx" color="#0a9875" />
+          </view>
+          <view class="tool-label">修改密码</view>
+        </view>
+        <view class="tool-item danger" bind:tap="logout">
+          <view class="tool-icon danger">
+            <t-icon name="logout" size="42rpx" color="#d93026" />
+          </view>
+          <view class="tool-label">退出登录</view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="bottom-nav">
+    <view class="nav-item" bind:tap="goHome">
+      <view class="nav-mark nav-home"></view>
+      <text>首页</text>
+    </view>
+    <view class="nav-item active">
+      <view class="nav-mark nav-user"></view>
+      <text>我的</text>
+    </view>
+  </view>
+</view>

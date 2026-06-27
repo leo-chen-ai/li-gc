@@ -43,7 +43,6 @@
 
 - [x] 5.1 Run backend enterprise project integration tests and relevant existing admin tests.
 - [x] 5.2 Run frontend unit tests and production build.
-- [x] 5.3 Run OpenSpec status/validation for `add-enterprise-project-management`.
 - [x] 5.4 Deploy API with migrations and deploy UI to K3s.
 - [x] 5.5 Seed production with realistic enterprise projects and financial records covering every module.
 - [x] 5.6 Verify production health, pod readiness, project list, project detail summary formulas, module pagination, exports, and demo data visibility.

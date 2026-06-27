@@ -1,6 +1,7 @@
 import { createFileRoute, Outlet, useNavigate, useLocation } from "@tanstack/react-router";
 import { AuthProvider } from "@/providers/AuthProvider";
 import { useIsAuthenticated, useAuthUser } from "@/stores/use-auth-store";
+import { readStoredAdminActivePath } from "@/components/layout/admin-window-storage";
 import { useEffect } from "react";
 
 export const Route = createFileRoute("/app")({
@@ -35,7 +36,7 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
         // 2. Authenticated users should not access login/register again
         if (isAuth && isPublicRoute) {
             if (user?.role === "admin") {
-                navigate({ to: "/app/admin/projects", replace: true });
+                navigate({ to: readStoredAdminActivePath(), replace: true });
             } else {
                 navigate({ to: "/app", replace: true });
             }

@@ -14,7 +14,7 @@ pub use handlers::{
 pub use repository::AuthError;
 pub use routes::{auth_routes, auth_sensitive_routes};
 pub use types::{
-    AuthResponse, AuthUser, Claims, LoginCredentials, RegisterRequest, Role, TokenType,
-    UserResponse,
+    AuthManagedProjectResponse, AuthResponse, AuthUser, Claims, LoginCredentials, RegisterRequest,
+    Role, TokenType, UserResponse,
 };
 pub use utils::REFRESH_TOKEN_COOKIE;

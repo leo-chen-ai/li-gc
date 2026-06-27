@@ -66,6 +66,15 @@ pub struct TokenPair {
     pub session_iat: i64,
 }
 
+/// Miniapp access token response. It is intentionally long-lived and Redis-backed.
+#[derive(Debug, Clone)]
+pub struct MiniappAccessToken {
+    pub access_token: String,
+    pub expires_in: i64,
+    pub jti: String,
+    pub session_id: String,
+}
+
 /// Create token pair with existing session (for refresh)
 pub fn create_token_pair_with_session(
     user_id: Uuid,
@@ -174,6 +183,43 @@ pub fn create_token_pair(
         expires_in: access_expiry_secs(),
         session_id,
         session_iat,
+    })
+}
+
+/// Create a long-lived miniapp access token.
+pub fn create_miniapp_access_token(
+    user_id: Uuid,
+    roles: &[Role],
+) -> Result<MiniappAccessToken, JwtError> {
+    let now = Utc::now();
+    let expires_in = 30 * 24 * 60 * 60;
+    let exp = now + Duration::seconds(expires_in);
+    let jti = Uuid::new_v4().to_string();
+    let session_id = format!("miniapp:{}", Uuid::new_v4());
+
+    let claims = Claims {
+        sub: user_id.to_string(),
+        jti: jti.clone(),
+        exp: exp.timestamp(),
+        iat: now.timestamp(),
+        roles: roles.to_vec(),
+        token_type: TokenType::Access,
+        sid: session_id.clone(),
+        s_iat: now.timestamp(),
+    };
+
+    let access_token = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(&access_secret()),
+    )
+    .map_err(|_| JwtError::CreationFailed)?;
+
+    Ok(MiniappAccessToken {
+        access_token,
+        expires_in,
+        jti,
+        session_id,
     })
 }
 

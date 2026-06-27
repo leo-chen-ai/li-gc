@@ -7,6 +7,8 @@ pub struct LoginCredentials {
     #[serde(alias = "account")]
     pub email: String,
     pub password: String,
+    #[serde(alias = "client_type")]
+    pub client: Option<String>,
 }
 
 /// Register request
@@ -58,11 +60,21 @@ pub struct TokenResponse {
     pub expires_in: i64, // in seconds
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct AuthManagedProjectResponse {
+    pub id: uuid::Uuid,
+    pub name: String,
+}
+
 /// Auth response
 #[derive(Debug, Clone, Serialize)]
 pub struct AuthResponse {
     pub user: UserResponse,
     pub token: TokenResponse,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub managed_projects: Option<Vec<AuthManagedProjectResponse>>,
 }
 
 /// Request body for change password

@@ -4,6 +4,21 @@ import type { User } from "@/features/auth/types/auth-types";
 export interface UserWithTimestamps extends User {
   created_at?: string;
   updated_at?: string;
+  managed_projects?: ManagedProject[];
+}
+
+export interface ManagedProject {
+  id: string;
+  name: string;
+}
+
+export interface CreateAdminUserRequest {
+  name: string;
+  email?: string;
+  username?: string;
+  role: "admin" | "user";
+  password: string;
+  project_ids: string[];
 }
 
 // Log level request

@@ -16,6 +16,9 @@ pub enum AuthError {
     #[error("Session expired - please login again")]
     SessionExpired,
 
+    #[error("Redis is required for miniapp login")]
+    RedisUnavailable,
+
     #[error("User not found")]
     UserNotFound,
 

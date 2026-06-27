@@ -29,6 +29,17 @@ pub trait SessionBlacklist: Send + Sync {
 
     /// Check if session is blacklisted
     async fn is_blacklisted(&self, jti: &str) -> eyre::Result<bool>;
+
+    /// Store a miniapp access token until it expires
+    async fn store_miniapp_token(
+        &self,
+        jti: &str,
+        user_id: Uuid,
+        ttl_secs: u64,
+    ) -> eyre::Result<()>;
+
+    /// Check if a miniapp access token is still active
+    async fn is_miniapp_token_active(&self, jti: &str) -> eyre::Result<bool>;
 }
 
 /// Cache implementation using Redis
@@ -103,6 +114,10 @@ impl RedisSessionBlacklist {
     fn blacklist_key(jti: &str) -> String {
         format!("blacklist:session:{jti}")
     }
+
+    fn miniapp_token_key(jti: &str) -> String {
+        format!("miniapp:token:{jti}")
+    }
 }
 
 #[async_trait]
@@ -151,6 +166,51 @@ impl SessionBlacklist for RedisSessionBlacklist {
             .await
             .map_err(|e| {
                 error!(key = %key, "Failed to check blacklist: {e}");
+                eyre::eyre!("Redis EXISTS error")
+            })?;
+
+        Ok(exists)
+    }
+
+    async fn store_miniapp_token(
+        &self,
+        jti: &str,
+        user_id: Uuid,
+        ttl_secs: u64,
+    ) -> eyre::Result<()> {
+        let mut conn = self.pool.get().await.map_err(|e| {
+            error!("Failed to get Redis connection: {e}");
+            eyre::eyre!("Redis connection error")
+        })?;
+
+        let key = Self::miniapp_token_key(jti);
+        redis::cmd("SETEX")
+            .arg(&key)
+            .arg(ttl_secs)
+            .arg(user_id.to_string())
+            .query_async::<()>(&mut *conn)
+            .await
+            .map_err(|e| {
+                error!(key = %key, "Failed to store miniapp token: {e}");
+                eyre::eyre!("Redis SETEX error")
+            })?;
+
+        Ok(())
+    }
+
+    async fn is_miniapp_token_active(&self, jti: &str) -> eyre::Result<bool> {
+        let mut conn = self.pool.get().await.map_err(|e| {
+            error!("Failed to get Redis connection: {e}");
+            eyre::eyre!("Redis connection error")
+        })?;
+
+        let key = Self::miniapp_token_key(jti);
+        let exists: bool = redis::cmd("EXISTS")
+            .arg(&key)
+            .query_async(&mut *conn)
+            .await
+            .map_err(|e| {
+                error!(key = %key, "Failed to check miniapp token: {e}");
                 eyre::eyre!("Redis EXISTS error")
             })?;
 
@@ -206,5 +266,11 @@ mod tests {
         let key = UserCache::user_key(user_id);
         assert!(key.starts_with("user:"));
         assert!(key.contains("550e8400"));
+    }
+
+    #[test]
+    fn test_miniapp_token_key_format() {
+        let key = RedisSessionBlacklist::miniapp_token_key("token-id");
+        assert_eq!(key, "miniapp:token:token-id");
     }
 }

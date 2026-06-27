@@ -25,8 +25,27 @@ pub async fn auth_middleware(
 
     let claims = validate_access_token(token).map_err(|_| StatusCode::UNAUTHORIZED)?;
 
-    // Check if session is blacklisted (if Redis is configured)
-    if let Some(ref blacklist) = blacklist {
+    // Check if session is blacklisted (if Redis is configured).
+    // Miniapp tokens are long-lived and must also exist in Redis.
+    if claims.sid.starts_with("miniapp:") {
+        let Some(ref blacklist) = blacklist else {
+            return Err(StatusCode::UNAUTHORIZED);
+        };
+
+        let is_active = blacklist
+            .is_miniapp_token_active(&claims.jti)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+        let is_blacklisted = blacklist
+            .is_blacklisted(&claims.jti)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+        if !is_active || is_blacklisted {
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+    } else if let Some(ref blacklist) = blacklist {
         let is_blacklisted = blacklist
             .is_blacklisted(&claims.jti)
             .await
@@ -63,8 +82,18 @@ pub async fn optional_auth_middleware(
         .and_then(|v| v.strip_prefix("Bearer "))
         && let Ok(claims) = validate_access_token(token)
     {
-        // Check blacklist if available
-        let is_blacklisted = if let Some(ref blacklist) = blacklist {
+        let is_blacklisted = if claims.sid.starts_with("miniapp:") {
+            match blacklist.as_ref() {
+                Some(blacklist) => {
+                    !blacklist
+                        .is_miniapp_token_active(&claims.jti)
+                        .await
+                        .unwrap_or(false)
+                        || blacklist.is_blacklisted(&claims.jti).await.unwrap_or(false)
+                }
+                None => true,
+            }
+        } else if let Some(ref blacklist) = blacklist {
             blacklist.is_blacklisted(&claims.jti).await.unwrap_or(false)
         } else {
             false

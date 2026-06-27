@@ -1,7 +1,14 @@
 {
   "pages": [
     "pages/login/login",
-    "pages/home/home"
+    "pages/home/home",
+    "pages/profile/profile",
+    "pages/onboarding/onboarding",
+    "pages/teams/teams",
+    "pages/workers/workers",
+    "pages/companies/companies",
+    "pages/attendance/attendance",
+    "pages/device/device"
   ],
   "window": {
     "navigationStyle": "custom",

@@ -5,6 +5,7 @@ import { Link } from "@tanstack/react-router";
 
 import { Button } from "@/components/ui/button";
 import { CommandMenu, CommandMenuTrigger } from "@/components/layout/CommandMenu";
+import { readStoredAdminActivePath } from "@/components/layout/admin-window-storage";
 import { useAuthUser } from "@/stores/use-auth-store";
 import { HeaderUserMenu } from "@/components/layout/HeaderUserMenu";
 import {
@@ -25,7 +26,7 @@ function UserDashboard() {
     const [commandOpen, setCommandOpen] = useState(false);
 
     if (user?.role === "admin") {
-        navigate({ to: "/app/admin/projects", replace: true });
+        navigate({ to: readStoredAdminActivePath(), replace: true });
         return null;
     }
 

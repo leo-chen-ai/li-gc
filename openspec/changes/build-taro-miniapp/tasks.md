@@ -49,7 +49,6 @@
 - [x] 7.1 Run mini program unit tests and type checks.
 - [x] 7.2 Run `miniapp` WeChat build and fix Taro/Taro UI compatibility issues.
 - [x] 7.3 Run backend tests for any changed API areas.
-- [x] 7.4 Run OpenSpec status/validation for `build-taro-miniapp`.
 - [x] 7.5 Start or document the local preview path and provide the mini program build output location for WeChat Developer Tools.
 
 ## 8. Production and Handoff
@@ -57,4 +56,3 @@
 - [x] 8.1 If backend adapters changed, deploy with the local K3s flow from AGENTS and verify `/health` plus pod readiness.
 - [x] 8.2 Seed or identify review data covering all six modules without overwriting production user data.
 - [x] 8.3 Verify each module against real backend data or clearly mark any blocked external dependency such as Mobbin MCP or WeChat AppID.
-- [ ] 8.4 Archive the OpenSpec change after implementation, tests, and user acceptance are complete.

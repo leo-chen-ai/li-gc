@@ -1,0 +1,121 @@
+<view class="workers-page">
+  <block wx:if="{{!detailVisible}}">
+    <view class="page-top">
+      <view class="back-button" bind:tap="goBack">‹</view>
+      <view class="page-title">在场人数（128）</view>
+      <view class="top-action" data-name="批量退场" bind:tap="showAction">批量退场</view>
+    </view>
+
+    <view class="project-strip">
+      <image class="project-bg" src="{{pageHeaderBg}}" mode="aspectFill" />
+      <view class="project-label">项目名称</view>
+      <view class="project-name">{{projectName}}</view>
+    </view>
+
+    <view class="search-card">
+      <view class="search-box">
+        <text class="search-dot"></text>
+        <input class="search-input" value="{{keyword}}" placeholder="请输入姓名或手机号" placeholder-class="muted-placeholder" bindinput="onKeywordInput" />
+      </view>
+      <view class="search-button" bind:tap="refresh">搜索</view>
+    </view>
+
+    <view class="filter-card">
+      <picker range="{{teamOptions}}" value="{{teamIndex}}" bindchange="onTeamFilterChange">
+        <view class="filter-item">班组：<text>{{teamFilter}}</text></view>
+      </picker>
+      <view class="filter-divider"></view>
+      <picker range="{{authOptions}}" value="{{authIndex}}" bindchange="onAuthFilterChange">
+        <view class="filter-item">认证状态：<text>{{authFilter}}</text></view>
+      </picker>
+    </view>
+
+    <view class="worker-list">
+      <block wx:for="{{filteredWorkers}}" wx:key="id">
+        <view class="worker-card" data-id="{{item.id}}" bind:tap="openWorkerDetail">
+          <view class="auth-ribbon {{item.authStatus === '已认证' ? 'ok' : 'warn'}}">{{item.authStatus}}</view>
+          <image class="worker-avatar" src="{{item.avatar}}" mode="aspectFill" />
+          <view class="worker-info">
+            <view class="worker-name">{{item.name}}</view>
+            <view class="worker-line">{{item.gender}} · {{item.age}}岁</view>
+            <view class="worker-line">工种：{{item.workType}}　手机号：{{item.phone}}</view>
+            <view class="worker-line">班组：{{item.team}}</view>
+          </view>
+          <view class="worker-actions">
+            <view class="worker-action edit" data-name="编辑" catchtap="showAction">编辑</view>
+            <view class="worker-action issue" data-name="下发" catchtap="showAction">下发</view>
+          </view>
+        </view>
+      </block>
+      <view class="empty-state" wx:if="{{!filteredWorkers.length}}">暂无匹配工人</view>
+    </view>
+  </block>
+
+  <block wx:else>
+    <view class="page-top detail">
+      <view class="back-button" bind:tap="goBack">‹</view>
+      <view class="page-title">工人详情</view>
+      <view class="top-action" bind:tap="saveWorker">保存</view>
+    </view>
+
+    <view class="detail-card identity-card">
+      <image class="detail-avatar" src="{{currentWorker.avatar}}" mode="aspectFill" />
+      <view class="identity-main">
+        <view class="identity-name-row">
+          <view class="identity-name">{{currentWorker.name}}</view>
+          <view class="edit-mark" data-name="姓名" bind:tap="showAction">编辑</view>
+        </view>
+        <view class="identity-sub">{{currentWorker.gender}}　　{{currentWorker.age}}岁</view>
+      </view>
+    </view>
+
+    <view class="detail-card">
+      <view class="detail-label">身份证号码</view>
+      <view class="detail-value">{{currentWorker.idCard}}</view>
+      <view class="detail-label">详细地址</view>
+      <view class="detail-value">{{currentWorker.address}}</view>
+      <view class="info-grid">
+        <view>
+          <view class="detail-label">籍贯</view>
+          <view class="detail-value">{{currentWorker.nativePlace}}</view>
+        </view>
+        <view>
+          <view class="detail-label">签证机关</view>
+          <view class="detail-value">{{currentWorker.issuingAuthority}}</view>
+        </view>
+      </view>
+      <view class="detail-label">有效期</view>
+      <view class="detail-value">{{currentWorker.validPeriod}}</view>
+    </view>
+
+    <view class="info-list">
+      <view class="info-row"><text>工种</text><text>{{currentWorker.workType}}</text></view>
+      <view class="info-row"><text>工人类型</text><text>{{currentWorker.workerType}}</text></view>
+      <view class="info-row"><text>班组</text><text>{{currentWorker.team}}</text></view>
+      <view class="info-row"><text>结算方式</text><text>{{currentWorker.settlement}}  ›</text></view>
+      <view class="info-row"><text>默认单价（元）</text><text>{{currentWorker.unitPrice}} <text class="row-link" data-name="单价" catchtap="showAction">修改</text></text></view>
+      <view class="info-row"><text>手机号</text><text>{{currentWorker.phone}} <text class="row-link" data-name="手机号" catchtap="showAction">修改</text></text></view>
+      <view class="info-row"><text>劳务合同</text><text class="row-link" data-name="劳务合同" bind:tap="showAction">签字</text></view>
+    </view>
+
+    <view class="detail-card file-card">
+      <view class="section-title">相关文件</view>
+      <view class="file-label">身份证正面</view>
+      <view class="id-preview">
+        <view class="id-name">姓名　{{currentWorker.name}}</view>
+        <view class="id-line">性别　{{currentWorker.gender}}　民族　汉</view>
+        <view class="id-line">住址　{{currentWorker.address}}</view>
+        <view class="id-number">公民身份号码　{{currentWorker.idCard}}</view>
+      </view>
+      <view class="file-label">身份证反面</view>
+      <view class="id-preview back">
+        <view class="id-title">中华人民共和国 居民身份证</view>
+        <view class="id-line">签发机关　{{currentWorker.issuingAuthority}}</view>
+        <view class="id-line">有效期限　{{currentWorker.validPeriod}}</view>
+      </view>
+      <view class="file-label">人员签字</view>
+      <view class="signature-button" data-name="人员签字" bind:tap="showAction">签字</view>
+      <view class="signature-box">未签字</view>
+    </view>
+  </block>
+</view>

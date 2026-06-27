@@ -7,7 +7,8 @@ use crate::{
         repository::AuthError,
         session::DeviceInfo,
         types::{
-            AuthResponse, AuthUser, LoginCredentials, RegisterRequest, TokenResponse, UserResponse,
+            AuthManagedProjectResponse, AuthResponse, AuthUser, LoginCredentials, RegisterRequest,
+            TokenResponse, UserResponse,
         },
         utils::REFRESH_TOKEN_COOKIE,
     },
@@ -84,6 +85,51 @@ pub async fn login(
     headers: axum::http::HeaderMap,
     Json(creds): Json<LoginCredentials>,
 ) -> ApiResult<AuthResponse> {
+    if creds
+        .client
+        .as_deref()
+        .map(|value| value.eq_ignore_ascii_case("miniapp"))
+        .unwrap_or(false)
+    {
+        let mut response = state
+            .auth_service
+            .login_miniapp(&creds.email, &creds.password)
+            .await
+            .map_err(|e: AuthError| match e {
+                AuthError::InvalidCredentials => ApiError::default()
+                    .with_code(StatusCode::UNAUTHORIZED)
+                    .with_error_code(auth_codes::INVALID_CREDENTIALS)
+                    .with_message("Invalid account or password"),
+                AuthError::RedisUnavailable => ApiError::default()
+                    .with_code(StatusCode::INTERNAL_SERVER_ERROR)
+                    .with_error_code(auth_codes::INTERNAL_ERROR)
+                    .with_message("Miniapp login requires Redis"),
+                _ => ApiError::default()
+                    .with_code(StatusCode::INTERNAL_SERVER_ERROR)
+                    .with_error_code(auth_codes::INTERNAL_ERROR)
+                    .with_message("Login failed"),
+            })?;
+
+        let managed_projects = state
+            .admin_user_repo
+            .list_managed_projects(state.db.pool(), response.user.id)
+            .await
+            .map_err(|e| ApiError::default().log_only(e))?;
+        response.managed_projects = Some(
+            managed_projects
+                .into_iter()
+                .map(|project| AuthManagedProjectResponse {
+                    id: project.id,
+                    name: project.name,
+                })
+                .collect(),
+        );
+
+        return Ok(ApiSuccess::default()
+            .with_data(response)
+            .with_message("Miniapp login successful"));
+    }
+
     // Check existing refresh token to avoid concurrent login issues
     if let Some(_cookie) = jar.get(REFRESH_TOKEN_COOKIE) {
         let _ = state.auth_service.logout(None, None).await;

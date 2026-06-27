@@ -11,6 +11,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/AppSidebar";
+import { AdminWindowTabs } from "@/components/layout/AdminWindowTabs";
 import { useAuthUser } from "@/stores/use-auth-store";
 import { HeaderUserMenu } from "@/components/layout/HeaderUserMenu";
 import {
@@ -59,7 +60,7 @@ function AdminContent() {
       } as CSSProperties}
     >
       <AppSidebar />
-      <SidebarInset>
+      <SidebarInset className="min-w-0 overflow-x-hidden">
         {/* Top Header */}
         <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b bg-background px-4 transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-14">
           <div className="flex items-center gap-2">
@@ -132,9 +133,10 @@ function AdminContent() {
             <HeaderUserMenu />
           </div>
         </header>
+        <AdminWindowTabs />
 
         {/* Page Content */}
-        <main className="flex-1 bg-muted/20 p-3 md:p-4">
+        <main className="admin-surface min-w-0 flex-1 overflow-x-hidden bg-muted/20 p-3 md:p-4">
           <Outlet />
         </main>
       </SidebarInset>

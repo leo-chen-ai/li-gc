@@ -36,7 +36,16 @@
         "type": "folder"
       }
     ],
-    "include": []
+    "include": [
+      {
+        "value": "config/api.js",
+        "type": "file"
+      },
+      {
+        "value": "utils/module-page.js",
+        "type": "file"
+      }
+    ]
   },
   "simulatorPluginLibVersion": {},
   "editorSetting": {}

@@ -25,6 +25,7 @@ import {
   X,
   Settings2,
   ChevronDown,
+  FolderKanban,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -61,6 +62,7 @@ const columnLabels: Record<string, string> = {
   name: "用户",
   email: "邮箱",
   role: "角色",
+  managed_projects: "可管理项目",
   created_at: "创建时间",
 };
 
@@ -71,6 +73,7 @@ interface UsersTableProps {
   onResetPassword: (user: UserWithTimestamps) => void;
   onBlockAccount: (user: UserWithTimestamps) => void;
   onDeleteAccount: (user: UserWithTimestamps) => void;
+  onManageProjects: (user: UserWithTimestamps) => void;
   onBulkBlock: (count: number) => void;
   onBulkDelete: (count: number) => void;
 }
@@ -82,6 +85,7 @@ export function UsersTable({
   onResetPassword,
   onBlockAccount,
   onDeleteAccount,
+  onManageProjects,
   onBulkBlock,
   onBulkDelete,
 }: UsersTableProps) {
@@ -203,6 +207,29 @@ export function UsersTable({
       },
     },
     {
+      accessorKey: "managed_projects",
+      header: "可管理项目",
+      cell: ({ row }) => {
+        const projects = row.original.managed_projects ?? [];
+        if (projects.length === 0) {
+          return <span className="text-sm text-muted-foreground">未分配</span>;
+        }
+
+        return (
+          <div className="flex max-w-[260px] flex-wrap gap-1">
+            {projects.slice(0, 2).map((project) => (
+              <Badge key={project.id} variant="outline" className="max-w-[120px] truncate">
+                {project.name}
+              </Badge>
+            ))}
+            {projects.length > 2 ? (
+              <Badge variant="secondary">+{projects.length - 2}</Badge>
+            ) : null}
+          </div>
+        );
+      },
+    },
+    {
       accessorKey: "created_at",
       header: ({ column }) => (
         <Button
@@ -251,6 +278,10 @@ export function UsersTable({
                 </DropdownMenuItem>
               )}
               <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => onManageProjects(user)}>
+                <FolderKanban className="mr-2 h-4 w-4" />
+                管理项目
+              </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => onResetPassword(user)}
                 disabled={isSelf || !user.email}

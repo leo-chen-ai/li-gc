@@ -24,6 +24,7 @@ export const API_ENDPOINTS = {
     UPLOADS: "/admin/uploads",
     LOG_LEVEL: "/admin/log/level",
     STATS: "/admin/stats",
+    USER_PROJECTS: (id: string) => `/admin/users/${id}/projects`,
     USER_ROLE: (id: string) => `/admin/users/${id}/role`,
     API_KEYS: "/admin/api-keys",
     API_KEY_REVOKE: (id: string) => `/admin/api-keys/${id}/revoke`,

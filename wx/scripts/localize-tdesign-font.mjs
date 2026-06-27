@@ -11,6 +11,11 @@ if (!existsSync(iconWxssPath)) {
 }
 
 const source = readFileSync(iconWxssPath, "utf8");
+if (source.includes(remoteFontUrl)) {
+  console.log(`TDesign icon font already localized: ${remoteFontUrl}`);
+  process.exit(0);
+}
+
 const localized = source.replace(
   /@font-face\{font-family:t;src:[^}]+}/,
   `@font-face{font-family:t;src:url(${remoteFontUrl}) format('woff');font-weight:400;font-style:normal;}`,

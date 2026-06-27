@@ -10,8 +10,8 @@ use crate::{
             session::{DeviceInfo, SessionService},
             types::{AuthResponse, TokenResponse, UserResponse},
             utils::{
-                create_cleared_cookie, create_refresh_cookie, create_token_pair, extract_user_id,
-                validate_refresh_token,
+                create_cleared_cookie, create_miniapp_access_token, create_refresh_cookie,
+                create_token_pair, extract_user_id, validate_refresh_token,
             },
         },
         user::{UserProfileRepository, repository::UserRepository},
@@ -141,6 +141,8 @@ impl AuthService {
                 access_token: tokens.access_token,
                 expires_in: tokens.expires_in,
             },
+            client: None,
+            managed_projects: None,
         };
 
         Ok((response, refresh_cookie))
@@ -255,9 +257,98 @@ impl AuthService {
                 access_token: tokens.access_token,
                 expires_in: tokens.expires_in,
             },
+            client: None,
+            managed_projects: None,
         };
 
         Ok((response, refresh_cookie))
+    }
+
+    /// Login user for WeChat mini program. The access token lasts 30 days and is
+    /// stored in Redis, so deleting the Redis key revokes it before JWT expiry.
+    pub async fn login_miniapp(
+        &self,
+        account: &str,
+        password: &str,
+    ) -> Result<AuthResponse, AuthError> {
+        let account = account.trim();
+        let user = match self
+            .user_repo
+            .find_by_email(self.db.pool(), account)
+            .await
+            .map_err(|_| AuthError::Database(sqlx::Error::RowNotFound))?
+        {
+            Some(user) => user,
+            None => self
+                .user_repo
+                .find_by_username(self.db.pool(), account)
+                .await
+                .map_err(|_| AuthError::Database(sqlx::Error::RowNotFound))?
+                .ok_or(AuthError::InvalidCredentials)?,
+        };
+
+        if !user.is_active {
+            return Err(AuthError::InvalidCredentials);
+        }
+
+        let auth_method = self
+            .auth_method_service
+            .find_by_user_and_provider(user.id, AuthProvider::Password)
+            .await
+            .map_err(|_| AuthError::Database(sqlx::Error::RowNotFound))?
+            .ok_or(AuthError::InvalidCredentials)?;
+
+        if !auth_method
+            .verify_password(password)
+            .map_err(|_| AuthError::HashError)?
+        {
+            return Err(AuthError::InvalidCredentials);
+        }
+
+        let _ = self.auth_method_service.touch(auth_method.id).await;
+
+        let profile = self
+            .profile_repo
+            .find_by_user_id(self.db.pool(), user.id)
+            .await
+            .ok()
+            .flatten();
+
+        let roles = vec![user.role()];
+        let token =
+            create_miniapp_access_token(user.id, &roles).map_err(|_| AuthError::HashError)?;
+
+        let blacklist = self
+            .session_blacklist
+            .as_ref()
+            .ok_or(AuthError::RedisUnavailable)?;
+        blacklist
+            .store_miniapp_token(&token.jti, user.id, token.expires_in as u64)
+            .await
+            .map_err(|_| AuthError::RedisUnavailable)?;
+
+        let username = user.username.clone();
+        let role = user.role().to_string();
+
+        Ok(AuthResponse {
+            user: UserResponse {
+                id: user.id,
+                email: user.email,
+                username,
+                name: profile
+                    .as_ref()
+                    .and_then(|p| p.full_name.clone())
+                    .unwrap_or_default(),
+                avatar_url: profile.as_ref().and_then(|p| p.avatar_url.clone()),
+                role,
+            },
+            token: TokenResponse {
+                access_token: token.access_token,
+                expires_in: token.expires_in,
+            },
+            client: Some("miniapp".to_string()),
+            managed_projects: None,
+        })
     }
 
     /// OAuth login/register
@@ -321,6 +412,8 @@ impl AuthService {
                     access_token: tokens.access_token,
                     expires_in: tokens.expires_in,
                 },
+                client: None,
+                managed_projects: None,
             };
 
             return Ok((response, refresh_cookie));
@@ -381,6 +474,8 @@ impl AuthService {
                     access_token: tokens.access_token,
                     expires_in: tokens.expires_in,
                 },
+                client: None,
+                managed_projects: None,
             };
 
             return Ok((response, refresh_cookie));
@@ -445,6 +540,8 @@ impl AuthService {
                 access_token: tokens.access_token,
                 expires_in: tokens.expires_in,
             },
+            client: None,
+            managed_projects: None,
         };
 
         Ok((response, refresh_cookie))

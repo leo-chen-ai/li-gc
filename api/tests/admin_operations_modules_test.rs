@@ -892,9 +892,17 @@ async fn admin_overview_returns_construction_metrics_and_chart_data() {
             >= 9
     );
     assert!(body["data"]["wage_unpaid_amount_cents"].as_i64().is_some());
-    assert!(body["data"]["wage_paid_rate_basis_points"].as_i64().is_some());
+    assert!(
+        body["data"]["wage_paid_rate_basis_points"]
+            .as_i64()
+            .is_some()
+    );
     assert!(body["data"]["attendance_7day_count"].as_i64().is_some());
-    assert!(body["data"]["platform_success_rate_basis_points"].as_i64().is_some());
+    assert!(
+        body["data"]["platform_success_rate_basis_points"]
+            .as_i64()
+            .is_some()
+    );
     assert!(
         body["data"]["project_status_distribution"]
             .as_array()

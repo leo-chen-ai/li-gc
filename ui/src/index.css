@@ -145,3 +145,74 @@
     cursor: pointer !important;
   }
 }
+
+@layer utilities {
+  .admin-window-tabs-scroll {
+    overscroll-behavior-x: contain;
+    scrollbar-color: color-mix(in oklab, var(--primary) 42%, transparent) transparent;
+    scrollbar-width: thin;
+  }
+
+  .admin-window-tabs-scroll::-webkit-scrollbar {
+    height: 6px;
+  }
+
+  .admin-window-tabs-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .admin-window-tabs-scroll::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklab, var(--primary) 34%, transparent);
+    border-radius: 999px;
+  }
+
+  .admin-window-tabs-scroll::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklab, var(--primary) 56%, transparent);
+  }
+
+  .dark .admin-surface .bg-white,
+  .dark .admin-surface .bg-white\/70 {
+    background-color: var(--card);
+  }
+
+  .dark .admin-surface .bg-\[\#f8faf9\],
+  .dark .admin-surface .bg-\[\#fbfcfc\],
+  .dark .admin-surface .bg-\[\#fcfdfc\],
+  .dark .admin-surface .bg-slate-50,
+  .dark .admin-surface .bg-slate-100 {
+    background-color: color-mix(in oklab, var(--card) 76%, var(--muted));
+  }
+
+  .dark .admin-surface .border-slate-100,
+  .dark .admin-surface .border-slate-200 {
+    border-color: var(--border);
+  }
+
+  .dark .admin-surface .text-slate-950,
+  .dark .admin-surface .text-slate-900,
+  .dark .admin-surface .text-slate-800 {
+    color: var(--foreground);
+  }
+
+  .dark .admin-surface .text-slate-700,
+  .dark .admin-surface .text-slate-600 {
+    color: color-mix(in oklab, var(--foreground) 78%, transparent);
+  }
+
+  .dark .admin-surface .text-slate-500,
+  .dark .admin-surface .text-slate-400 {
+    color: var(--muted-foreground);
+  }
+
+  .dark .admin-surface .bg-emerald-50 {
+    background-color: color-mix(in oklab, var(--primary) 18%, transparent);
+  }
+
+  .dark .admin-surface .border-emerald-200 {
+    border-color: color-mix(in oklab, var(--primary) 36%, transparent);
+  }
+
+  .dark .admin-surface .text-emerald-700 {
+    color: #7eead7;
+  }
+}

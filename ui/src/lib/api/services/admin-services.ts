@@ -3,6 +3,7 @@ import type { ApiResponse } from "@/lib/api/types";
 import type {
   AdminRole,
   AdminUploadFile,
+  CreateAdminUserRequest,
   CreateRoleRequest,
   UserWithTimestamps,
 } from "@/features/admin/types/admin-types";
@@ -87,6 +88,37 @@ export const adminService = {
       API_ENDPOINTS.ADMIN.USER_ROLE(userId),
       { role }
     );
+  },
+
+  createUser: async (payload: CreateAdminUserRequest): Promise<UserWithTimestamps> => {
+    const response = await apiClient.post<ApiResponse<UserWithTimestamps>>(
+      API_ENDPOINTS.ADMIN.USERS,
+      payload
+    );
+
+    const data = response.data.data;
+    if (!data) {
+      throw new Error("Failed to create user");
+    }
+
+    return data;
+  },
+
+  updateUserProjects: async (
+    userId: string,
+    projectIds: string[]
+  ): Promise<UserWithTimestamps> => {
+    const response = await apiClient.put<ApiResponse<UserWithTimestamps>>(
+      API_ENDPOINTS.ADMIN.USER_PROJECTS(userId),
+      { project_ids: projectIds }
+    );
+
+    const data = response.data.data;
+    if (!data) {
+      throw new Error("Failed to update user projects");
+    }
+
+    return data;
   },
 
   getRoles: async (): Promise<AdminRole[]> => {

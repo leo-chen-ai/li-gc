@@ -15,6 +15,7 @@ import {
   UserRound,
 } from "lucide-react";
 import { useLogin } from "@/features/auth/hooks/use-login";
+import { readStoredAdminActivePath } from "@/components/layout/admin-window-storage";
 import {
   createMathCaptcha,
   isMathCaptchaAnswerValid,
@@ -40,7 +41,7 @@ export function LoginForm() {
 
     try {
       await login.mutateAsync({ account, password });
-      navigate({ to: "/app/admin/projects", replace: true });
+      navigate({ to: readStoredAdminActivePath(), replace: true });
     } catch {
       // Error handled by hook
     }
