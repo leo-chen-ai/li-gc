@@ -276,7 +276,7 @@ export function AttendanceDeviceIssueReportsPage() {
           <div className="min-w-0">
             <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300">
               <FileClock className="size-3.5" />
-              考勤机管理
+              劳务管理
             </div>
             <h1 className="mt-3 text-2xl font-semibold tracking-normal">考勤机人员下发报告</h1>
             <p className="mt-1 text-sm text-slate-500 dark:text-muted-foreground">

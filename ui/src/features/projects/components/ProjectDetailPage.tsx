@@ -775,7 +775,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
               </Link>
             </Button>
             <div className="min-w-0 border-l border-slate-200 pl-3 dark:border-border">
-              <div className="text-xs font-medium text-[#0f6b5d] dark:text-primary">项目管理模块</div>
+              <div className="text-xs font-medium text-[#0f6b5d] dark:text-primary">劳务管理模块</div>
               <div className="truncate text-sm font-semibold text-slate-950 dark:text-foreground">{activeTab}</div>
             </div>
           </div>

@@ -13,6 +13,21 @@ export type MenuPermissionKey =
   | "platform_integrations"
   | "attendance_devices"
   | "attendance_device_issue_reports"
+  | "environment_monitoring"
+  | "video_monitoring"
+  | "quality_safety"
+  | "safety_management"
+  | "material_management"
+  | "construction_site"
+  | "party_building"
+  | "emergency_management"
+  | "personnel_workers"
+  | "personnel_contracts"
+  | "personnel_qualifications"
+  | "personnel_registrations"
+  | "personnel_bad_records"
+  | "personnel_approvers"
+  | "registration_leads"
   | "users"
   | "roles"
   | "uploads";
@@ -20,7 +35,7 @@ export type MenuPermissionKey =
 export interface MenuPermission {
   key: MenuPermissionKey;
   name: string;
-  group: "工作台" | "项目管理" | "企业经营管理" | "考勤机管理" | "系统";
+  group: "工作台" | "劳务管理" | "施工管理" | "人员管理" | "企业经营管理" | "系统";
   path: string;
   description: string;
 }
@@ -40,8 +55,8 @@ export const menuPermissions: MenuPermission[] = [
   },
   {
     key: "projects",
-    name: "项目管理",
-    group: "项目管理",
+    name: "项目列表",
+    group: "劳务管理",
     path: "/app/admin/projects",
     description: "查看项目台账、单位、班组、人员和考勤",
   },
@@ -96,38 +111,143 @@ export const menuPermissions: MenuPermission[] = [
   },
   {
     key: "contract_templates",
-    name: "合同模板管理",
-    group: "项目管理",
+    name: "劳务分包合同模板",
+    group: "劳务管理",
     path: "/app/admin/contract-templates",
     description: "维护工人合同模板和项目默认模板",
   },
   {
     key: "work_hour_configs",
     name: "工时配置",
-    group: "项目管理",
+    group: "劳务管理",
     path: "/app/admin/work-hour-configs",
     description: "配置项目标准工时、加班和考勤容差规则",
   },
   {
     key: "platform_integrations",
     name: "平台对接管理",
-    group: "项目管理",
+    group: "劳务管理",
     path: "/app/admin/platform-integrations",
     description: "维护平台配置和平台推送日志",
   },
   {
     key: "attendance_devices",
     name: "考勤机绑定",
-    group: "考勤机管理",
+    group: "劳务管理",
     path: "/app/admin/attendance-devices",
     description: "维护项目考勤机绑定、进出方向和设备备注",
   },
   {
     key: "attendance_device_issue_reports",
     name: "考勤机人员下发报告",
-    group: "考勤机管理",
+    group: "劳务管理",
     path: "/app/admin/attendance-device-issue-reports",
     description: "查看人员下发到考勤机的动作、时间和状态",
+  },
+  {
+    key: "environment_monitoring",
+    name: "环境检测",
+    group: "劳务管理",
+    path: "/app/admin/environment-monitoring",
+    description: "查看温湿度、风向、风速、PM 等环境检测数据",
+  },
+  {
+    key: "video_monitoring",
+    name: "视频监控",
+    group: "劳务管理",
+    path: "/app/admin/video-monitoring",
+    description: "查看施工现场视频监控点位",
+  },
+  {
+    key: "quality_safety",
+    name: "质安管理",
+    group: "施工管理",
+    path: "/app/admin/quality-safety",
+    description: "质安巡检和整改闭环",
+  },
+  {
+    key: "safety_management",
+    name: "安全管理",
+    group: "施工管理",
+    path: "/app/admin/safety-management",
+    description: "安全教育、隐患和风险管理",
+  },
+  {
+    key: "material_management",
+    name: "材料管理",
+    group: "施工管理",
+    path: "/app/admin/material-management",
+    description: "材料进退场和库存管理",
+  },
+  {
+    key: "construction_site",
+    name: "施工现场",
+    group: "施工管理",
+    path: "/app/admin/construction-site",
+    description: "施工现场形象进度和现场事件",
+  },
+  {
+    key: "party_building",
+    name: "智慧党建",
+    group: "施工管理",
+    path: "/app/admin/party-building",
+    description: "党建活动和党员信息",
+  },
+  {
+    key: "emergency_management",
+    name: "应急管理",
+    group: "施工管理",
+    path: "/app/admin/emergency-management",
+    description: "应急预案、演练和事件处置",
+  },
+  {
+    key: "personnel_workers",
+    name: "人员信息列表",
+    group: "人员管理",
+    path: "/app/admin/personnel-workers",
+    description: "汇总现有项目人员数据",
+  },
+  {
+    key: "personnel_contracts",
+    name: "人员合同信息",
+    group: "人员管理",
+    path: "/app/admin/personnel-contracts",
+    description: "查看人员合同信息",
+  },
+  {
+    key: "personnel_qualifications",
+    name: "人员资格信息",
+    group: "人员管理",
+    path: "/app/admin/personnel-qualifications",
+    description: "查看人员资格证书信息",
+  },
+  {
+    key: "personnel_registrations",
+    name: "人员注册信息",
+    group: "人员管理",
+    path: "/app/admin/personnel-registrations",
+    description: "查看人员注册信息",
+  },
+  {
+    key: "personnel_bad_records",
+    name: "人员不良信息",
+    group: "人员管理",
+    path: "/app/admin/personnel-bad-records",
+    description: "查看人员不良信息",
+  },
+  {
+    key: "personnel_approvers",
+    name: "审批人员设置",
+    group: "人员管理",
+    path: "/app/admin/personnel-approvers",
+    description: "维护审批人员配置",
+  },
+  {
+    key: "registration_leads",
+    name: "注册列表",
+    group: "系统",
+    path: "/app/admin/registration-leads",
+    description: "查看登录页提交的注册姓名和手机号",
   },
   {
     key: "users",
@@ -171,6 +291,21 @@ export function getMenuKeysForUserRole(
     "platform_integrations",
     "attendance_devices",
     "attendance_device_issue_reports",
+    "environment_monitoring",
+    "video_monitoring",
+    "quality_safety",
+    "safety_management",
+    "material_management",
+    "construction_site",
+    "party_building",
+    "emergency_management",
+    "personnel_workers",
+    "personnel_contracts",
+    "personnel_qualifications",
+    "personnel_registrations",
+    "personnel_bad_records",
+    "personnel_approvers",
+    "registration_leads",
     "users",
     "roles",
     "uploads",

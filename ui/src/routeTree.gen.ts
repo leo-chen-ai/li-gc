@@ -22,11 +22,24 @@ import { Route as AppSettingsSessionsRouteImport } from './routes/app/settings/s
 import { Route as AppSettingsSecurityRouteImport } from './routes/app/settings/security'
 import { Route as AppSettingsProfileRouteImport } from './routes/app/settings/profile'
 import { Route as AppAdminWorkHourConfigsRouteImport } from './routes/app/admin/work-hour-configs'
+import { Route as AppAdminVideoMonitoringRouteImport } from './routes/app/admin/video-monitoring'
 import { Route as AppAdminUsersRouteImport } from './routes/app/admin/users'
 import { Route as AppAdminUploadsRouteImport } from './routes/app/admin/uploads'
+import { Route as AppAdminSafetyManagementRouteImport } from './routes/app/admin/safety-management'
 import { Route as AppAdminRolesRouteImport } from './routes/app/admin/roles'
+import { Route as AppAdminRegistrationLeadsRouteImport } from './routes/app/admin/registration-leads'
+import { Route as AppAdminQualitySafetyRouteImport } from './routes/app/admin/quality-safety'
 import { Route as AppAdminProjectsRouteImport } from './routes/app/admin/projects'
 import { Route as AppAdminPlatformIntegrationsRouteImport } from './routes/app/admin/platform-integrations'
+import { Route as AppAdminPersonnelWorkersRouteImport } from './routes/app/admin/personnel-workers'
+import { Route as AppAdminPersonnelRegistrationsRouteImport } from './routes/app/admin/personnel-registrations'
+import { Route as AppAdminPersonnelQualificationsRouteImport } from './routes/app/admin/personnel-qualifications'
+import { Route as AppAdminPersonnelContractsRouteImport } from './routes/app/admin/personnel-contracts'
+import { Route as AppAdminPersonnelBadRecordsRouteImport } from './routes/app/admin/personnel-bad-records'
+import { Route as AppAdminPersonnelApproversRouteImport } from './routes/app/admin/personnel-approvers'
+import { Route as AppAdminPartyBuildingRouteImport } from './routes/app/admin/party-building'
+import { Route as AppAdminMaterialManagementRouteImport } from './routes/app/admin/material-management'
+import { Route as AppAdminEnvironmentMonitoringRouteImport } from './routes/app/admin/environment-monitoring'
 import { Route as AppAdminEnterpriseReceivedInvoicesRouteImport } from './routes/app/admin/enterprise-received-invoices'
 import { Route as AppAdminEnterpriseProjectsRouteImport } from './routes/app/admin/enterprise-projects'
 import { Route as AppAdminEnterprisePaymentsRouteImport } from './routes/app/admin/enterprise-payments'
@@ -34,7 +47,9 @@ import { Route as AppAdminEnterpriseOwnEntitiesRouteImport } from './routes/app/
 import { Route as AppAdminEnterpriseIssuedInvoicesRouteImport } from './routes/app/admin/enterprise-issued-invoices'
 import { Route as AppAdminEnterpriseCustomersRouteImport } from './routes/app/admin/enterprise-customers'
 import { Route as AppAdminEnterpriseCollectionsRouteImport } from './routes/app/admin/enterprise-collections'
+import { Route as AppAdminEmergencyManagementRouteImport } from './routes/app/admin/emergency-management'
 import { Route as AppAdminContractTemplatesRouteImport } from './routes/app/admin/contract-templates'
+import { Route as AppAdminConstructionSiteRouteImport } from './routes/app/admin/construction-site'
 import { Route as AppAdminAttendanceDevicesRouteImport } from './routes/app/admin/attendance-devices'
 import { Route as AppAdminAttendanceDeviceIssueReportsRouteImport } from './routes/app/admin/attendance-device-issue-reports'
 import { Route as AppAdminApiKeysRouteImport } from './routes/app/admin/api-keys'
@@ -107,6 +122,11 @@ const AppAdminWorkHourConfigsRoute = AppAdminWorkHourConfigsRouteImport.update({
   path: '/work-hour-configs',
   getParentRoute: () => AppAdminRoute,
 } as any)
+const AppAdminVideoMonitoringRoute = AppAdminVideoMonitoringRouteImport.update({
+  id: '/video-monitoring',
+  path: '/video-monitoring',
+  getParentRoute: () => AppAdminRoute,
+} as any)
 const AppAdminUsersRoute = AppAdminUsersRouteImport.update({
   id: '/users',
   path: '/users',
@@ -117,9 +137,26 @@ const AppAdminUploadsRoute = AppAdminUploadsRouteImport.update({
   path: '/uploads',
   getParentRoute: () => AppAdminRoute,
 } as any)
+const AppAdminSafetyManagementRoute =
+  AppAdminSafetyManagementRouteImport.update({
+    id: '/safety-management',
+    path: '/safety-management',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
 const AppAdminRolesRoute = AppAdminRolesRouteImport.update({
   id: '/roles',
   path: '/roles',
+  getParentRoute: () => AppAdminRoute,
+} as any)
+const AppAdminRegistrationLeadsRoute =
+  AppAdminRegistrationLeadsRouteImport.update({
+    id: '/registration-leads',
+    path: '/registration-leads',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminQualitySafetyRoute = AppAdminQualitySafetyRouteImport.update({
+  id: '/quality-safety',
+  path: '/quality-safety',
   getParentRoute: () => AppAdminRoute,
 } as any)
 const AppAdminProjectsRoute = AppAdminProjectsRouteImport.update({
@@ -131,6 +168,59 @@ const AppAdminPlatformIntegrationsRoute =
   AppAdminPlatformIntegrationsRouteImport.update({
     id: '/platform-integrations',
     path: '/platform-integrations',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminPersonnelWorkersRoute =
+  AppAdminPersonnelWorkersRouteImport.update({
+    id: '/personnel-workers',
+    path: '/personnel-workers',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminPersonnelRegistrationsRoute =
+  AppAdminPersonnelRegistrationsRouteImport.update({
+    id: '/personnel-registrations',
+    path: '/personnel-registrations',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminPersonnelQualificationsRoute =
+  AppAdminPersonnelQualificationsRouteImport.update({
+    id: '/personnel-qualifications',
+    path: '/personnel-qualifications',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminPersonnelContractsRoute =
+  AppAdminPersonnelContractsRouteImport.update({
+    id: '/personnel-contracts',
+    path: '/personnel-contracts',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminPersonnelBadRecordsRoute =
+  AppAdminPersonnelBadRecordsRouteImport.update({
+    id: '/personnel-bad-records',
+    path: '/personnel-bad-records',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminPersonnelApproversRoute =
+  AppAdminPersonnelApproversRouteImport.update({
+    id: '/personnel-approvers',
+    path: '/personnel-approvers',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminPartyBuildingRoute = AppAdminPartyBuildingRouteImport.update({
+  id: '/party-building',
+  path: '/party-building',
+  getParentRoute: () => AppAdminRoute,
+} as any)
+const AppAdminMaterialManagementRoute =
+  AppAdminMaterialManagementRouteImport.update({
+    id: '/material-management',
+    path: '/material-management',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminEnvironmentMonitoringRoute =
+  AppAdminEnvironmentMonitoringRouteImport.update({
+    id: '/environment-monitoring',
+    path: '/environment-monitoring',
     getParentRoute: () => AppAdminRoute,
   } as any)
 const AppAdminEnterpriseReceivedInvoicesRoute =
@@ -175,10 +265,22 @@ const AppAdminEnterpriseCollectionsRoute =
     path: '/enterprise-collections',
     getParentRoute: () => AppAdminRoute,
   } as any)
+const AppAdminEmergencyManagementRoute =
+  AppAdminEmergencyManagementRouteImport.update({
+    id: '/emergency-management',
+    path: '/emergency-management',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
 const AppAdminContractTemplatesRoute =
   AppAdminContractTemplatesRouteImport.update({
     id: '/contract-templates',
     path: '/contract-templates',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminConstructionSiteRoute =
+  AppAdminConstructionSiteRouteImport.update({
+    id: '/construction-site',
+    path: '/construction-site',
     getParentRoute: () => AppAdminRoute,
   } as any)
 const AppAdminAttendanceDevicesRoute =
@@ -228,7 +330,9 @@ export interface FileRoutesByFullPath {
   '/app/admin/api-keys': typeof AppAdminApiKeysRoute
   '/app/admin/attendance-device-issue-reports': typeof AppAdminAttendanceDeviceIssueReportsRoute
   '/app/admin/attendance-devices': typeof AppAdminAttendanceDevicesRoute
+  '/app/admin/construction-site': typeof AppAdminConstructionSiteRoute
   '/app/admin/contract-templates': typeof AppAdminContractTemplatesRoute
+  '/app/admin/emergency-management': typeof AppAdminEmergencyManagementRoute
   '/app/admin/enterprise-collections': typeof AppAdminEnterpriseCollectionsRoute
   '/app/admin/enterprise-customers': typeof AppAdminEnterpriseCustomersRouteWithChildren
   '/app/admin/enterprise-issued-invoices': typeof AppAdminEnterpriseIssuedInvoicesRoute
@@ -236,11 +340,24 @@ export interface FileRoutesByFullPath {
   '/app/admin/enterprise-payments': typeof AppAdminEnterprisePaymentsRoute
   '/app/admin/enterprise-projects': typeof AppAdminEnterpriseProjectsRouteWithChildren
   '/app/admin/enterprise-received-invoices': typeof AppAdminEnterpriseReceivedInvoicesRoute
+  '/app/admin/environment-monitoring': typeof AppAdminEnvironmentMonitoringRoute
+  '/app/admin/material-management': typeof AppAdminMaterialManagementRoute
+  '/app/admin/party-building': typeof AppAdminPartyBuildingRoute
+  '/app/admin/personnel-approvers': typeof AppAdminPersonnelApproversRoute
+  '/app/admin/personnel-bad-records': typeof AppAdminPersonnelBadRecordsRoute
+  '/app/admin/personnel-contracts': typeof AppAdminPersonnelContractsRoute
+  '/app/admin/personnel-qualifications': typeof AppAdminPersonnelQualificationsRoute
+  '/app/admin/personnel-registrations': typeof AppAdminPersonnelRegistrationsRoute
+  '/app/admin/personnel-workers': typeof AppAdminPersonnelWorkersRoute
   '/app/admin/platform-integrations': typeof AppAdminPlatformIntegrationsRoute
   '/app/admin/projects': typeof AppAdminProjectsRouteWithChildren
+  '/app/admin/quality-safety': typeof AppAdminQualitySafetyRoute
+  '/app/admin/registration-leads': typeof AppAdminRegistrationLeadsRoute
   '/app/admin/roles': typeof AppAdminRolesRoute
+  '/app/admin/safety-management': typeof AppAdminSafetyManagementRoute
   '/app/admin/uploads': typeof AppAdminUploadsRoute
   '/app/admin/users': typeof AppAdminUsersRoute
+  '/app/admin/video-monitoring': typeof AppAdminVideoMonitoringRoute
   '/app/admin/work-hour-configs': typeof AppAdminWorkHourConfigsRoute
   '/app/settings/profile': typeof AppSettingsProfileRoute
   '/app/settings/security': typeof AppSettingsSecurityRoute
@@ -259,7 +376,9 @@ export interface FileRoutesByTo {
   '/app/admin/api-keys': typeof AppAdminApiKeysRoute
   '/app/admin/attendance-device-issue-reports': typeof AppAdminAttendanceDeviceIssueReportsRoute
   '/app/admin/attendance-devices': typeof AppAdminAttendanceDevicesRoute
+  '/app/admin/construction-site': typeof AppAdminConstructionSiteRoute
   '/app/admin/contract-templates': typeof AppAdminContractTemplatesRoute
+  '/app/admin/emergency-management': typeof AppAdminEmergencyManagementRoute
   '/app/admin/enterprise-collections': typeof AppAdminEnterpriseCollectionsRoute
   '/app/admin/enterprise-customers': typeof AppAdminEnterpriseCustomersRouteWithChildren
   '/app/admin/enterprise-issued-invoices': typeof AppAdminEnterpriseIssuedInvoicesRoute
@@ -267,11 +386,24 @@ export interface FileRoutesByTo {
   '/app/admin/enterprise-payments': typeof AppAdminEnterprisePaymentsRoute
   '/app/admin/enterprise-projects': typeof AppAdminEnterpriseProjectsRouteWithChildren
   '/app/admin/enterprise-received-invoices': typeof AppAdminEnterpriseReceivedInvoicesRoute
+  '/app/admin/environment-monitoring': typeof AppAdminEnvironmentMonitoringRoute
+  '/app/admin/material-management': typeof AppAdminMaterialManagementRoute
+  '/app/admin/party-building': typeof AppAdminPartyBuildingRoute
+  '/app/admin/personnel-approvers': typeof AppAdminPersonnelApproversRoute
+  '/app/admin/personnel-bad-records': typeof AppAdminPersonnelBadRecordsRoute
+  '/app/admin/personnel-contracts': typeof AppAdminPersonnelContractsRoute
+  '/app/admin/personnel-qualifications': typeof AppAdminPersonnelQualificationsRoute
+  '/app/admin/personnel-registrations': typeof AppAdminPersonnelRegistrationsRoute
+  '/app/admin/personnel-workers': typeof AppAdminPersonnelWorkersRoute
   '/app/admin/platform-integrations': typeof AppAdminPlatformIntegrationsRoute
   '/app/admin/projects': typeof AppAdminProjectsRouteWithChildren
+  '/app/admin/quality-safety': typeof AppAdminQualitySafetyRoute
+  '/app/admin/registration-leads': typeof AppAdminRegistrationLeadsRoute
   '/app/admin/roles': typeof AppAdminRolesRoute
+  '/app/admin/safety-management': typeof AppAdminSafetyManagementRoute
   '/app/admin/uploads': typeof AppAdminUploadsRoute
   '/app/admin/users': typeof AppAdminUsersRoute
+  '/app/admin/video-monitoring': typeof AppAdminVideoMonitoringRoute
   '/app/admin/work-hour-configs': typeof AppAdminWorkHourConfigsRoute
   '/app/settings/profile': typeof AppSettingsProfileRoute
   '/app/settings/security': typeof AppSettingsSecurityRoute
@@ -294,7 +426,9 @@ export interface FileRoutesById {
   '/app/admin/api-keys': typeof AppAdminApiKeysRoute
   '/app/admin/attendance-device-issue-reports': typeof AppAdminAttendanceDeviceIssueReportsRoute
   '/app/admin/attendance-devices': typeof AppAdminAttendanceDevicesRoute
+  '/app/admin/construction-site': typeof AppAdminConstructionSiteRoute
   '/app/admin/contract-templates': typeof AppAdminContractTemplatesRoute
+  '/app/admin/emergency-management': typeof AppAdminEmergencyManagementRoute
   '/app/admin/enterprise-collections': typeof AppAdminEnterpriseCollectionsRoute
   '/app/admin/enterprise-customers': typeof AppAdminEnterpriseCustomersRouteWithChildren
   '/app/admin/enterprise-issued-invoices': typeof AppAdminEnterpriseIssuedInvoicesRoute
@@ -302,11 +436,24 @@ export interface FileRoutesById {
   '/app/admin/enterprise-payments': typeof AppAdminEnterprisePaymentsRoute
   '/app/admin/enterprise-projects': typeof AppAdminEnterpriseProjectsRouteWithChildren
   '/app/admin/enterprise-received-invoices': typeof AppAdminEnterpriseReceivedInvoicesRoute
+  '/app/admin/environment-monitoring': typeof AppAdminEnvironmentMonitoringRoute
+  '/app/admin/material-management': typeof AppAdminMaterialManagementRoute
+  '/app/admin/party-building': typeof AppAdminPartyBuildingRoute
+  '/app/admin/personnel-approvers': typeof AppAdminPersonnelApproversRoute
+  '/app/admin/personnel-bad-records': typeof AppAdminPersonnelBadRecordsRoute
+  '/app/admin/personnel-contracts': typeof AppAdminPersonnelContractsRoute
+  '/app/admin/personnel-qualifications': typeof AppAdminPersonnelQualificationsRoute
+  '/app/admin/personnel-registrations': typeof AppAdminPersonnelRegistrationsRoute
+  '/app/admin/personnel-workers': typeof AppAdminPersonnelWorkersRoute
   '/app/admin/platform-integrations': typeof AppAdminPlatformIntegrationsRoute
   '/app/admin/projects': typeof AppAdminProjectsRouteWithChildren
+  '/app/admin/quality-safety': typeof AppAdminQualitySafetyRoute
+  '/app/admin/registration-leads': typeof AppAdminRegistrationLeadsRoute
   '/app/admin/roles': typeof AppAdminRolesRoute
+  '/app/admin/safety-management': typeof AppAdminSafetyManagementRoute
   '/app/admin/uploads': typeof AppAdminUploadsRoute
   '/app/admin/users': typeof AppAdminUsersRoute
+  '/app/admin/video-monitoring': typeof AppAdminVideoMonitoringRoute
   '/app/admin/work-hour-configs': typeof AppAdminWorkHourConfigsRoute
   '/app/settings/profile': typeof AppSettingsProfileRoute
   '/app/settings/security': typeof AppSettingsSecurityRoute
@@ -330,7 +477,9 @@ export interface FileRouteTypes {
     | '/app/admin/api-keys'
     | '/app/admin/attendance-device-issue-reports'
     | '/app/admin/attendance-devices'
+    | '/app/admin/construction-site'
     | '/app/admin/contract-templates'
+    | '/app/admin/emergency-management'
     | '/app/admin/enterprise-collections'
     | '/app/admin/enterprise-customers'
     | '/app/admin/enterprise-issued-invoices'
@@ -338,11 +487,24 @@ export interface FileRouteTypes {
     | '/app/admin/enterprise-payments'
     | '/app/admin/enterprise-projects'
     | '/app/admin/enterprise-received-invoices'
+    | '/app/admin/environment-monitoring'
+    | '/app/admin/material-management'
+    | '/app/admin/party-building'
+    | '/app/admin/personnel-approvers'
+    | '/app/admin/personnel-bad-records'
+    | '/app/admin/personnel-contracts'
+    | '/app/admin/personnel-qualifications'
+    | '/app/admin/personnel-registrations'
+    | '/app/admin/personnel-workers'
     | '/app/admin/platform-integrations'
     | '/app/admin/projects'
+    | '/app/admin/quality-safety'
+    | '/app/admin/registration-leads'
     | '/app/admin/roles'
+    | '/app/admin/safety-management'
     | '/app/admin/uploads'
     | '/app/admin/users'
+    | '/app/admin/video-monitoring'
     | '/app/admin/work-hour-configs'
     | '/app/settings/profile'
     | '/app/settings/security'
@@ -361,7 +523,9 @@ export interface FileRouteTypes {
     | '/app/admin/api-keys'
     | '/app/admin/attendance-device-issue-reports'
     | '/app/admin/attendance-devices'
+    | '/app/admin/construction-site'
     | '/app/admin/contract-templates'
+    | '/app/admin/emergency-management'
     | '/app/admin/enterprise-collections'
     | '/app/admin/enterprise-customers'
     | '/app/admin/enterprise-issued-invoices'
@@ -369,11 +533,24 @@ export interface FileRouteTypes {
     | '/app/admin/enterprise-payments'
     | '/app/admin/enterprise-projects'
     | '/app/admin/enterprise-received-invoices'
+    | '/app/admin/environment-monitoring'
+    | '/app/admin/material-management'
+    | '/app/admin/party-building'
+    | '/app/admin/personnel-approvers'
+    | '/app/admin/personnel-bad-records'
+    | '/app/admin/personnel-contracts'
+    | '/app/admin/personnel-qualifications'
+    | '/app/admin/personnel-registrations'
+    | '/app/admin/personnel-workers'
     | '/app/admin/platform-integrations'
     | '/app/admin/projects'
+    | '/app/admin/quality-safety'
+    | '/app/admin/registration-leads'
     | '/app/admin/roles'
+    | '/app/admin/safety-management'
     | '/app/admin/uploads'
     | '/app/admin/users'
+    | '/app/admin/video-monitoring'
     | '/app/admin/work-hour-configs'
     | '/app/settings/profile'
     | '/app/settings/security'
@@ -395,7 +572,9 @@ export interface FileRouteTypes {
     | '/app/admin/api-keys'
     | '/app/admin/attendance-device-issue-reports'
     | '/app/admin/attendance-devices'
+    | '/app/admin/construction-site'
     | '/app/admin/contract-templates'
+    | '/app/admin/emergency-management'
     | '/app/admin/enterprise-collections'
     | '/app/admin/enterprise-customers'
     | '/app/admin/enterprise-issued-invoices'
@@ -403,11 +582,24 @@ export interface FileRouteTypes {
     | '/app/admin/enterprise-payments'
     | '/app/admin/enterprise-projects'
     | '/app/admin/enterprise-received-invoices'
+    | '/app/admin/environment-monitoring'
+    | '/app/admin/material-management'
+    | '/app/admin/party-building'
+    | '/app/admin/personnel-approvers'
+    | '/app/admin/personnel-bad-records'
+    | '/app/admin/personnel-contracts'
+    | '/app/admin/personnel-qualifications'
+    | '/app/admin/personnel-registrations'
+    | '/app/admin/personnel-workers'
     | '/app/admin/platform-integrations'
     | '/app/admin/projects'
+    | '/app/admin/quality-safety'
+    | '/app/admin/registration-leads'
     | '/app/admin/roles'
+    | '/app/admin/safety-management'
     | '/app/admin/uploads'
     | '/app/admin/users'
+    | '/app/admin/video-monitoring'
     | '/app/admin/work-hour-configs'
     | '/app/settings/profile'
     | '/app/settings/security'
@@ -517,6 +709,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdminWorkHourConfigsRouteImport
       parentRoute: typeof AppAdminRoute
     }
+    '/app/admin/video-monitoring': {
+      id: '/app/admin/video-monitoring'
+      path: '/video-monitoring'
+      fullPath: '/app/admin/video-monitoring'
+      preLoaderRoute: typeof AppAdminVideoMonitoringRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
     '/app/admin/users': {
       id: '/app/admin/users'
       path: '/users'
@@ -531,11 +730,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdminUploadsRouteImport
       parentRoute: typeof AppAdminRoute
     }
+    '/app/admin/safety-management': {
+      id: '/app/admin/safety-management'
+      path: '/safety-management'
+      fullPath: '/app/admin/safety-management'
+      preLoaderRoute: typeof AppAdminSafetyManagementRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
     '/app/admin/roles': {
       id: '/app/admin/roles'
       path: '/roles'
       fullPath: '/app/admin/roles'
       preLoaderRoute: typeof AppAdminRolesRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/registration-leads': {
+      id: '/app/admin/registration-leads'
+      path: '/registration-leads'
+      fullPath: '/app/admin/registration-leads'
+      preLoaderRoute: typeof AppAdminRegistrationLeadsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/quality-safety': {
+      id: '/app/admin/quality-safety'
+      path: '/quality-safety'
+      fullPath: '/app/admin/quality-safety'
+      preLoaderRoute: typeof AppAdminQualitySafetyRouteImport
       parentRoute: typeof AppAdminRoute
     }
     '/app/admin/projects': {
@@ -550,6 +770,69 @@ declare module '@tanstack/react-router' {
       path: '/platform-integrations'
       fullPath: '/app/admin/platform-integrations'
       preLoaderRoute: typeof AppAdminPlatformIntegrationsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/personnel-workers': {
+      id: '/app/admin/personnel-workers'
+      path: '/personnel-workers'
+      fullPath: '/app/admin/personnel-workers'
+      preLoaderRoute: typeof AppAdminPersonnelWorkersRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/personnel-registrations': {
+      id: '/app/admin/personnel-registrations'
+      path: '/personnel-registrations'
+      fullPath: '/app/admin/personnel-registrations'
+      preLoaderRoute: typeof AppAdminPersonnelRegistrationsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/personnel-qualifications': {
+      id: '/app/admin/personnel-qualifications'
+      path: '/personnel-qualifications'
+      fullPath: '/app/admin/personnel-qualifications'
+      preLoaderRoute: typeof AppAdminPersonnelQualificationsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/personnel-contracts': {
+      id: '/app/admin/personnel-contracts'
+      path: '/personnel-contracts'
+      fullPath: '/app/admin/personnel-contracts'
+      preLoaderRoute: typeof AppAdminPersonnelContractsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/personnel-bad-records': {
+      id: '/app/admin/personnel-bad-records'
+      path: '/personnel-bad-records'
+      fullPath: '/app/admin/personnel-bad-records'
+      preLoaderRoute: typeof AppAdminPersonnelBadRecordsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/personnel-approvers': {
+      id: '/app/admin/personnel-approvers'
+      path: '/personnel-approvers'
+      fullPath: '/app/admin/personnel-approvers'
+      preLoaderRoute: typeof AppAdminPersonnelApproversRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/party-building': {
+      id: '/app/admin/party-building'
+      path: '/party-building'
+      fullPath: '/app/admin/party-building'
+      preLoaderRoute: typeof AppAdminPartyBuildingRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/material-management': {
+      id: '/app/admin/material-management'
+      path: '/material-management'
+      fullPath: '/app/admin/material-management'
+      preLoaderRoute: typeof AppAdminMaterialManagementRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/environment-monitoring': {
+      id: '/app/admin/environment-monitoring'
+      path: '/environment-monitoring'
+      fullPath: '/app/admin/environment-monitoring'
+      preLoaderRoute: typeof AppAdminEnvironmentMonitoringRouteImport
       parentRoute: typeof AppAdminRoute
     }
     '/app/admin/enterprise-received-invoices': {
@@ -601,11 +884,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdminEnterpriseCollectionsRouteImport
       parentRoute: typeof AppAdminRoute
     }
+    '/app/admin/emergency-management': {
+      id: '/app/admin/emergency-management'
+      path: '/emergency-management'
+      fullPath: '/app/admin/emergency-management'
+      preLoaderRoute: typeof AppAdminEmergencyManagementRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
     '/app/admin/contract-templates': {
       id: '/app/admin/contract-templates'
       path: '/contract-templates'
       fullPath: '/app/admin/contract-templates'
       preLoaderRoute: typeof AppAdminContractTemplatesRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/construction-site': {
+      id: '/app/admin/construction-site'
+      path: '/construction-site'
+      fullPath: '/app/admin/construction-site'
+      preLoaderRoute: typeof AppAdminConstructionSiteRouteImport
       parentRoute: typeof AppAdminRoute
     }
     '/app/admin/attendance-devices': {
@@ -698,7 +995,9 @@ interface AppAdminRouteChildren {
   AppAdminApiKeysRoute: typeof AppAdminApiKeysRoute
   AppAdminAttendanceDeviceIssueReportsRoute: typeof AppAdminAttendanceDeviceIssueReportsRoute
   AppAdminAttendanceDevicesRoute: typeof AppAdminAttendanceDevicesRoute
+  AppAdminConstructionSiteRoute: typeof AppAdminConstructionSiteRoute
   AppAdminContractTemplatesRoute: typeof AppAdminContractTemplatesRoute
+  AppAdminEmergencyManagementRoute: typeof AppAdminEmergencyManagementRoute
   AppAdminEnterpriseCollectionsRoute: typeof AppAdminEnterpriseCollectionsRoute
   AppAdminEnterpriseCustomersRoute: typeof AppAdminEnterpriseCustomersRouteWithChildren
   AppAdminEnterpriseIssuedInvoicesRoute: typeof AppAdminEnterpriseIssuedInvoicesRoute
@@ -706,11 +1005,24 @@ interface AppAdminRouteChildren {
   AppAdminEnterprisePaymentsRoute: typeof AppAdminEnterprisePaymentsRoute
   AppAdminEnterpriseProjectsRoute: typeof AppAdminEnterpriseProjectsRouteWithChildren
   AppAdminEnterpriseReceivedInvoicesRoute: typeof AppAdminEnterpriseReceivedInvoicesRoute
+  AppAdminEnvironmentMonitoringRoute: typeof AppAdminEnvironmentMonitoringRoute
+  AppAdminMaterialManagementRoute: typeof AppAdminMaterialManagementRoute
+  AppAdminPartyBuildingRoute: typeof AppAdminPartyBuildingRoute
+  AppAdminPersonnelApproversRoute: typeof AppAdminPersonnelApproversRoute
+  AppAdminPersonnelBadRecordsRoute: typeof AppAdminPersonnelBadRecordsRoute
+  AppAdminPersonnelContractsRoute: typeof AppAdminPersonnelContractsRoute
+  AppAdminPersonnelQualificationsRoute: typeof AppAdminPersonnelQualificationsRoute
+  AppAdminPersonnelRegistrationsRoute: typeof AppAdminPersonnelRegistrationsRoute
+  AppAdminPersonnelWorkersRoute: typeof AppAdminPersonnelWorkersRoute
   AppAdminPlatformIntegrationsRoute: typeof AppAdminPlatformIntegrationsRoute
   AppAdminProjectsRoute: typeof AppAdminProjectsRouteWithChildren
+  AppAdminQualitySafetyRoute: typeof AppAdminQualitySafetyRoute
+  AppAdminRegistrationLeadsRoute: typeof AppAdminRegistrationLeadsRoute
   AppAdminRolesRoute: typeof AppAdminRolesRoute
+  AppAdminSafetyManagementRoute: typeof AppAdminSafetyManagementRoute
   AppAdminUploadsRoute: typeof AppAdminUploadsRoute
   AppAdminUsersRoute: typeof AppAdminUsersRoute
+  AppAdminVideoMonitoringRoute: typeof AppAdminVideoMonitoringRoute
   AppAdminWorkHourConfigsRoute: typeof AppAdminWorkHourConfigsRoute
   AppAdminIndexRoute: typeof AppAdminIndexRoute
 }
@@ -720,7 +1032,9 @@ const AppAdminRouteChildren: AppAdminRouteChildren = {
   AppAdminAttendanceDeviceIssueReportsRoute:
     AppAdminAttendanceDeviceIssueReportsRoute,
   AppAdminAttendanceDevicesRoute: AppAdminAttendanceDevicesRoute,
+  AppAdminConstructionSiteRoute: AppAdminConstructionSiteRoute,
   AppAdminContractTemplatesRoute: AppAdminContractTemplatesRoute,
+  AppAdminEmergencyManagementRoute: AppAdminEmergencyManagementRoute,
   AppAdminEnterpriseCollectionsRoute: AppAdminEnterpriseCollectionsRoute,
   AppAdminEnterpriseCustomersRoute:
     AppAdminEnterpriseCustomersRouteWithChildren,
@@ -730,11 +1044,24 @@ const AppAdminRouteChildren: AppAdminRouteChildren = {
   AppAdminEnterpriseProjectsRoute: AppAdminEnterpriseProjectsRouteWithChildren,
   AppAdminEnterpriseReceivedInvoicesRoute:
     AppAdminEnterpriseReceivedInvoicesRoute,
+  AppAdminEnvironmentMonitoringRoute: AppAdminEnvironmentMonitoringRoute,
+  AppAdminMaterialManagementRoute: AppAdminMaterialManagementRoute,
+  AppAdminPartyBuildingRoute: AppAdminPartyBuildingRoute,
+  AppAdminPersonnelApproversRoute: AppAdminPersonnelApproversRoute,
+  AppAdminPersonnelBadRecordsRoute: AppAdminPersonnelBadRecordsRoute,
+  AppAdminPersonnelContractsRoute: AppAdminPersonnelContractsRoute,
+  AppAdminPersonnelQualificationsRoute: AppAdminPersonnelQualificationsRoute,
+  AppAdminPersonnelRegistrationsRoute: AppAdminPersonnelRegistrationsRoute,
+  AppAdminPersonnelWorkersRoute: AppAdminPersonnelWorkersRoute,
   AppAdminPlatformIntegrationsRoute: AppAdminPlatformIntegrationsRoute,
   AppAdminProjectsRoute: AppAdminProjectsRouteWithChildren,
+  AppAdminQualitySafetyRoute: AppAdminQualitySafetyRoute,
+  AppAdminRegistrationLeadsRoute: AppAdminRegistrationLeadsRoute,
   AppAdminRolesRoute: AppAdminRolesRoute,
+  AppAdminSafetyManagementRoute: AppAdminSafetyManagementRoute,
   AppAdminUploadsRoute: AppAdminUploadsRoute,
   AppAdminUsersRoute: AppAdminUsersRoute,
+  AppAdminVideoMonitoringRoute: AppAdminVideoMonitoringRoute,
   AppAdminWorkHourConfigsRoute: AppAdminWorkHourConfigsRoute,
   AppAdminIndexRoute: AppAdminIndexRoute,
 }

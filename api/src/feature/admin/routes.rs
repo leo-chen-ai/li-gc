@@ -8,7 +8,7 @@ use crate::{
     state::AppState,
 };
 
-use super::{construction, enterprise, log, role, stats, upload, user};
+use super::{construction, enterprise, log, registration_lead, role, stats, upload, user};
 
 pub fn admin_routes() -> Router<AppState> {
     Router::new()
@@ -293,6 +293,10 @@ pub fn admin_routes() -> Router<AppState> {
         .route("/roles", post(role::handler::create_role))
         .route("/roles/{id}", delete(role::handler::delete_role))
         .route("/roles/{id}/menus", put(role::handler::update_role_menus))
+        .route(
+            "/registration-leads",
+            get(registration_lead::handler::list_registration_leads),
+        )
         .route("/uploads", get(upload::handler::list_uploads))
         .route(
             "/users",

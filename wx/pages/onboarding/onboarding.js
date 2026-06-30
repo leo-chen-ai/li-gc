@@ -1,75 +1,31 @@
 const { assetPath } = require("../../config/assets.js");
+const {
+  createResource,
+  getSelectedProject,
+  listResource,
+  updateResource,
+} = require("../../utils/construction-api.js");
+const { fieldSets } = require("../../utils/construction-fields.js");
+const {
+  buildDefaultForm,
+  buildFormFields,
+  buildPayloadFromForm,
+  nextUploadValue,
+  today,
+  uploadForField,
+} = require("../../utils/form-utils.js");
 
-const genderOptions = ["男", "女"];
-const workTypeOptions = ["钢筋工", "木工", "安装工", "电工", "架子工", "混凝土工", "其他"];
-const workerTypeOptions = ["建筑工人", "管理人员"];
-const managerRoleOptions = ["请选择", "项目经理", "安全员", "施工员", "质量员"];
-const educationOptions = ["初中", "高中", "中专", "大专", "本科"];
-const politicalOptions = ["群众", "党员", "团员"];
-const settlementOptions = ["日结", "月结", "按量", "计件"];
-
-const knownWorkerByPhone = {
-  1: {
-    phone: "1",
-    name: "张建国",
-    gender: "男",
-    idCard: "320826198803121132",
-    unitName: "苏北劳务工程有限公司",
-    teamName: "钢筋一班",
-    workType: "钢筋工",
-    workerType: "建筑工人",
-    managerRole: "请选择",
-    education: "初中",
-    politicalStatus: "群众",
-    settlement: "日结",
-    unitPrice: "200",
-    nation: "汉族",
-    entryDate: "2026-06-28",
-    address: "淮安市清江浦区项目生活区",
-    nativePlace: "江苏",
-    issuingAuthority: "句容市公安局",
-    validStart: "2022-05-16",
-    validEnd: "2099-12-12",
-    remark: "系统已有实名资料，本次仅确认入职信息。",
-  },
-};
-
-function today() {
-  const now = new Date();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${now.getFullYear()}-${month}-${day}`;
-}
-
-function emptyForm(phone = "") {
-  return {
-    phone,
-    name: "",
-    gender: "男",
-    idCard: "",
-    unitName: "",
-    teamName: "",
-    workType: "钢筋工",
-    workerType: "建筑工人",
-    managerRole: "请选择",
-    education: "初中",
-    politicalStatus: "群众",
-    settlement: "日结",
-    unitPrice: "200",
-    nation: "",
-    entryDate: today(),
-    address: "",
-    nativePlace: "",
-    issuingAuthority: "",
-    validStart: today(),
-    validEnd: "2099-12-12",
-    remark: "",
-  };
-}
-
-function optionIndex(options, value) {
-  const index = options.indexOf(value);
-  return index >= 0 ? index : 0;
+function buildSections(formFields) {
+  return formFields.reduce((sections, field) => {
+    const name = field.section || "其他";
+    let section = sections.find((item) => item.name === name);
+    if (!section) {
+      section = { name, fields: [] };
+      sections.push(section);
+    }
+    section.fields.push(field);
+    return sections;
+  }, []);
 }
 
 Page({
@@ -77,33 +33,80 @@ Page({
     phoneModalVisible: true,
     phoneLookupValue: "",
     pageHeaderBg: assetPath("/page-header-bg-v1.png"),
-    faceImage: assetPath("/onboarding-face-upload-v1.png"),
-    idFrontImage: assetPath("/id-card-front-construction-v2.png"),
-    idBackImage: assetPath("/id-card-back-construction-v2.png"),
     lookupMatchedPreview: false,
-    form: emptyForm(),
-    genderOptions,
-    genderIndex: 0,
-    workTypeOptions,
-    workTypeIndex: 0,
-    workerTypeOptions,
-    workerTypeIndex: 0,
-    managerRoleOptions,
-    managerRoleIndex: 0,
-    educationOptions,
-    educationIndex: 0,
-    politicalOptions,
-    politicalIndex: 0,
-    settlementOptions,
-    settlementIndex: 0,
+    project: null,
+    projectName: "",
+    units: [],
+    teams: [],
+    workers: [],
+    editingId: "",
+    form: {},
+    formFields: [],
+    formSections: [],
     submitNotice: "",
+    saving: false,
+  },
+
+  async onLoad() {
+    await this.loadData();
+  },
+
+  async loadData() {
+    const project = getSelectedProject();
+    if (!project || !project.id) {
+      wx.showToast({ title: "请先选择项目", icon: "none" });
+      wx.redirectTo({ url: "/pages/home/home" });
+      return;
+    }
+
+    this.setData({ project, projectName: project.title || project.name || "已授权项目" });
+    try {
+      const [unitsResult, teamsResult, workersResult] = await Promise.all([
+        listResource(project.id, "units", { page: 1, page_size: 200 }),
+        listResource(project.id, "teams", { page: 1, page_size: 200 }),
+        listResource(project.id, "workers", { page: 1, page_size: 300 }),
+      ]);
+      const units = unitsResult.items || [];
+      const teams = teamsResult.items || [];
+      const workers = workersResult.items || [];
+      const defaultForm = buildDefaultForm(fieldSets.workers, {}, {
+        unit_id: units[0] ? units[0].id : "",
+        team_id: teams[0] ? teams[0].id : "",
+        worker_type: "1",
+        gender: "1",
+        entry_time: today(),
+      });
+      this.setData({ units, teams, workers });
+      this.applyForm(defaultForm);
+    } catch (error) {
+      wx.showToast({ title: error.message || "入职数据加载失败", icon: "none" });
+    }
+  },
+
+  lookupData() {
+    return {
+      units: this.data.units,
+      teams: this.data.teams,
+      workers: this.data.workers,
+    };
+  },
+
+  applyForm(form, extra = {}) {
+    const formFields = buildFormFields(fieldSets.workers, form, this.lookupData());
+    this.setData({
+      form,
+      formFields,
+      formSections: buildSections(formFields),
+      ...extra,
+    });
   },
 
   onPhoneLookupInput(event) {
     const phoneLookupValue = event.detail.value;
+    const phone = String(phoneLookupValue || "").trim();
     this.setData({
       phoneLookupValue,
-      lookupMatchedPreview: Boolean(knownWorkerByPhone[String(phoneLookupValue || "").trim()]),
+      lookupMatchedPreview: Boolean(this.data.workers.find((worker) => String(worker.phone || "") === phone)),
     });
   },
 
@@ -114,166 +117,98 @@ Page({
       return;
     }
 
-    const matched = knownWorkerByPhone[phone];
+    const matched = this.data.workers.find((worker) => String(worker.phone || "") === phone);
     if (matched) {
-      this.applyForm(matched, {
+      const form = buildDefaultForm(fieldSets.workers, matched);
+      this.applyForm(form, {
+        editingId: matched.id,
         phoneModalVisible: false,
-        submitNotice: "",
+        submitNotice: "已带出已有工人信息，本次提交会更新实名入职资料。",
       });
       wx.showToast({ title: "已带出人员信息", icon: "success" });
       return;
     }
 
-    this.applyForm(emptyForm(phone), {
+    const form = {
+      ...this.data.form,
+      phone,
+      entry_time: this.data.form.entry_time || today(),
+    };
+    this.applyForm(form, {
+      editingId: "",
       phoneModalVisible: false,
       submitNotice: "",
     });
   },
 
   onFormInput(event) {
-    const field = event.currentTarget.dataset.field;
-    const form = { ...this.data.form, [field]: event.detail.value };
-    this.setData({ form, submitNotice: "" });
+    this.updateFormValue(event.currentTarget.dataset.key, event.detail.value);
   },
 
-  onGenderChange(event) {
-    const genderIndex = Number(event.detail.value);
-    const form = { ...this.data.form, gender: genderOptions[genderIndex] };
-    this.setData({ genderIndex, form, submitNotice: "" });
+  onPickerChange(event) {
+    const key = event.currentTarget.dataset.key;
+    const field = fieldSets.workers.find((item) => item.key === key);
+    if (!field) return;
+    const options = buildFormFields([field], this.data.form, this.lookupData())[0].options || [];
+    const option = options[Number(event.detail.value)];
+    this.updateFormValue(key, option && option.value || "");
   },
 
-  onWorkTypeChange(event) {
-    const workTypeIndex = Number(event.detail.value);
-    const form = { ...this.data.form, workType: workTypeOptions[workTypeIndex] };
-    this.setData({ workTypeIndex, form, submitNotice: "" });
+  updateFormValue(key, value) {
+    const form = { ...this.data.form, [key]: value };
+    if (key === "unit_id") {
+      const team = this.data.teams.find((item) => item.id === form.team_id);
+      if (team && team.unit_id !== value) form.team_id = "";
+    }
+    this.applyForm(form, { submitNotice: "" });
   },
 
-  onWorkerTypeChange(event) {
-    const workerTypeIndex = Number(event.detail.value);
-    const form = { ...this.data.form, workerType: workerTypeOptions[workerTypeIndex] };
-    this.setData({ workerTypeIndex, form, submitNotice: "" });
-  },
-
-  onManagerRoleChange(event) {
-    const managerRoleIndex = Number(event.detail.value);
-    const form = { ...this.data.form, managerRole: managerRoleOptions[managerRoleIndex] };
-    this.setData({ managerRoleIndex, form, submitNotice: "" });
-  },
-
-  onEducationChange(event) {
-    const educationIndex = Number(event.detail.value);
-    const form = { ...this.data.form, education: educationOptions[educationIndex] };
-    this.setData({ educationIndex, form, submitNotice: "" });
-  },
-
-  onPoliticalChange(event) {
-    const politicalIndex = Number(event.detail.value);
-    const form = { ...this.data.form, politicalStatus: politicalOptions[politicalIndex] };
-    this.setData({ politicalIndex, form, submitNotice: "" });
-  },
-
-  onSettlementChange(event) {
-    const settlementIndex = Number(event.detail.value);
-    const form = { ...this.data.form, settlement: settlementOptions[settlementIndex] };
-    this.setData({ settlementIndex, form, submitNotice: "" });
-  },
-
-  onEntryDateChange(event) {
-    const form = { ...this.data.form, entryDate: event.detail.value };
-    this.setData({ form, submitNotice: "" });
-  },
-
-  onValidStartChange(event) {
-    const form = { ...this.data.form, validStart: event.detail.value };
-    this.setData({ form, submitNotice: "" });
-  },
-
-  onValidEndChange(event) {
-    const form = { ...this.data.form, validEnd: event.detail.value };
-    this.setData({ form, submitNotice: "" });
-  },
-
-  chooseFaceImage() {
-    this.chooseUploadImage("faceImage", "头像照片");
-  },
-
-  chooseIdFrontImage() {
-    this.chooseUploadImage("idFrontImage", "身份证正面");
-  },
-
-  chooseIdBackImage() {
-    this.chooseUploadImage("idBackImage", "身份证反面");
-  },
-
-  chooseUploadImage(field, label) {
-    const onSuccess = (filePath) => {
-      if (!filePath) return;
-      this.setData({ [field]: filePath, submitNotice: "" });
-      wx.showToast({ title: `已选择${label}`, icon: "success" });
-    };
-
-    if (wx.chooseMedia) {
-      wx.chooseMedia({
-        count: 1,
-        mediaType: ["image"],
-        sourceType: ["album", "camera"],
-        success: (res) => {
-          const firstFile = res.tempFiles && res.tempFiles[0];
-          onSuccess(firstFile && firstFile.tempFilePath);
-        },
+  async chooseUpload(event) {
+    const key = event.currentTarget.dataset.key;
+    const field = fieldSets.workers.find((item) => item.key === key);
+    if (!field) return;
+    try {
+      wx.showLoading({ title: "上传中" });
+      const file = await uploadForField(field, {
+        bizType: "workers",
+        bizId: this.data.editingId || this.data.project.id,
       });
+      wx.hideLoading();
+      this.updateFormValue(key, nextUploadValue(field, this.data.form[key], file));
+      wx.showToast({ title: "上传成功", icon: "success" });
+    } catch (error) {
+      wx.hideLoading();
+      wx.showToast({ title: error.message || "上传失败", icon: "none" });
+    }
+  },
+
+  async submitOnboarding() {
+    if (this.data.saving) return;
+    let payload;
+    try {
+      payload = buildPayloadFromForm(fieldSets.workers, this.data.form);
+    } catch (error) {
+      wx.showToast({ title: error.message, icon: "none" });
       return;
     }
 
-    if (wx.chooseImage) {
-      wx.chooseImage({
-        count: 1,
-        sourceType: ["album", "camera"],
-        success: (res) => {
-          onSuccess(res.tempFilePaths && res.tempFilePaths[0]);
-        },
+    this.setData({ saving: true });
+    try {
+      if (this.data.editingId) {
+        await updateResource(this.data.project.id, "workers", this.data.editingId, payload);
+      } else {
+        await createResource(this.data.project.id, "workers", payload);
+      }
+      this.setData({
+        saving: false,
+        submitNotice: this.data.editingId ? "实名入职资料已更新。" : "实名入职已提交。",
       });
-      return;
+      wx.showToast({ title: this.data.editingId ? "已更新" : "已入职", icon: "success" });
+      setTimeout(() => wx.navigateTo({ url: "/pages/workers/workers" }), 450);
+    } catch (error) {
+      this.setData({ saving: false });
+      wx.showToast({ title: error.message || "提交失败", icon: "none" });
     }
-
-    wx.showToast({ title: `点击上传${label}`, icon: "none" });
-  },
-
-  submitOnboarding() {
-    const required = [
-      ["phone", "手机号"],
-      ["name", "姓名"],
-      ["idCard", "身份证号"],
-      ["unitName", "参建单位"],
-      ["teamName", "所属班组"],
-    ];
-    const missed = required.find(([key]) => !String(this.data.form[key] || "").trim());
-    if (missed) {
-      wx.showToast({ title: `请填写${missed[1]}`, icon: "none" });
-      return;
-    }
-
-    const payload = {
-      ...this.data.form,
-      savedAt: new Date().toISOString(),
-    };
-    wx.setStorageSync("shanhuai_onboarding_draft", payload);
-    this.setData({ submitNotice: "实名入职信息已保存到本地调试数据。" });
-    wx.showToast({ title: "入职已保存", icon: "success" });
-  },
-
-  applyForm(form, extraData = {}) {
-    this.setData({
-      form,
-      genderIndex: optionIndex(genderOptions, form.gender),
-      workTypeIndex: optionIndex(workTypeOptions, form.workType),
-      workerTypeIndex: optionIndex(workerTypeOptions, form.workerType),
-      managerRoleIndex: optionIndex(managerRoleOptions, form.managerRole),
-      educationIndex: optionIndex(educationOptions, form.education),
-      politicalIndex: optionIndex(politicalOptions, form.politicalStatus),
-      settlementIndex: optionIndex(settlementOptions, form.settlement),
-      ...extraData,
-    });
   },
 
   goBack() {

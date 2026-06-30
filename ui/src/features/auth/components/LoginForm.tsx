@@ -1,6 +1,13 @@
 import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -15,6 +22,7 @@ import {
   UserRound,
 } from "lucide-react";
 import { useLogin } from "@/features/auth/hooks/use-login";
+import { authService } from "@/lib/api/services/auth-services";
 import { readStoredAdminActivePath } from "@/components/layout/admin-window-storage";
 import {
   createMathCaptcha,
@@ -28,6 +36,11 @@ export function LoginForm() {
   const [captchaAnswer, setCaptchaAnswer] = useState("");
   const [captchaError, setCaptchaError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [registerOpen, setRegisterOpen] = useState(false);
+  const [registerName, setRegisterName] = useState("");
+  const [registerPhone, setRegisterPhone] = useState("");
+  const [registerSubmitting, setRegisterSubmitting] = useState(false);
+  const [registerDone, setRegisterDone] = useState(false);
   const navigate = useNavigate();
   const login = useLogin();
 
@@ -52,6 +65,22 @@ export function LoginForm() {
     setCaptchaAnswer("");
   };
 
+  const submitRegistrationLead = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRegisterSubmitting(true);
+    try {
+      await authService.createRegistrationLead({
+        name: registerName.trim(),
+        phone: registerPhone.trim(),
+      });
+      setRegisterDone(true);
+      setRegisterName("");
+      setRegisterPhone("");
+    } finally {
+      setRegisterSubmitting(false);
+    }
+  };
+
   return (
     <div className="w-full">
       <div className="space-y-6">
@@ -61,10 +90,10 @@ export function LoginForm() {
             安全入口
           </div>
           <h1 className="text-[28px] font-semibold leading-tight tracking-normal text-slate-950 dark:text-white">
-            登录管理后台
+            登录山淮筑
           </h1>
           <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-white/54">
-            账号可使用邮箱或用户名，登录后进入项目管理。
+            账号可使用邮箱或用户名，登录后进入业务工作台。
           </p>
         </div>
 
@@ -170,7 +199,63 @@ export function LoginForm() {
             )}
           </Button>
         </form>
+        <div className="text-center text-sm text-slate-500 dark:text-white/54">
+          没有账号？
+          <button
+            type="button"
+            onClick={() => {
+              setRegisterDone(false);
+              setRegisterOpen(true);
+            }}
+            className="ml-1 font-semibold text-[#0f7d6f] hover:text-[#0b5148] hover:underline dark:text-[#80f3e5]"
+          >
+            注册
+          </button>
+        </div>
       </div>
+      <Dialog open={registerOpen} onOpenChange={setRegisterOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>注册山淮筑</DialogTitle>
+            <DialogDescription>
+              提交后工作人员会根据姓名和手机号联系开通。
+            </DialogDescription>
+          </DialogHeader>
+          {registerDone ? (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">
+              注册信息已提交，请等待工作人员联系。
+            </div>
+          ) : (
+            <form onSubmit={submitRegistrationLead} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="register-name">姓名</Label>
+                <Input
+                  id="register-name"
+                  value={registerName}
+                  onChange={(e) => setRegisterName(e.target.value)}
+                  required
+                  minLength={2}
+                  placeholder="请输入姓名"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="register-phone">手机号</Label>
+                <Input
+                  id="register-phone"
+                  value={registerPhone}
+                  onChange={(e) => setRegisterPhone(e.target.value)}
+                  required
+                  inputMode="tel"
+                  placeholder="请输入手机号"
+                />
+              </div>
+              <Button type="submit" className="w-full bg-[#0f7d6f] hover:bg-[#0b5148]" disabled={registerSubmitting}>
+                {registerSubmitting ? <Loader2 className="size-4 animate-spin" /> : "提交注册"}
+              </Button>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

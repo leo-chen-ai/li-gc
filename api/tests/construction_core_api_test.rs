@@ -18,6 +18,12 @@ fn admin_token() -> String {
         .access_token
 }
 
+fn user_token(user_id: Uuid) -> String {
+    create_token_pair(user_id, "worker-admin@example.com", &[Role::User])
+        .expect("user token")
+        .access_token
+}
+
 async fn persisted_admin_token(pool: &sqlx::PgPool) -> String {
     let user_id = sqlx::query_scalar::<_, Uuid>(
         r#"
@@ -1779,4 +1785,422 @@ async fn admin_api_accepts_form_style_nulls_by_column_type() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["data"]["photo_path"], "2026-03-18");
     assert_eq!(body["data"]["original_time"], Value::Null);
+}
+
+#[tokio::test]
+async fn miniapp_project_routes_require_managed_project_grant() {
+    let (app, pool, _c) = build_test_app_with_pool().await;
+
+    let user_id = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        INSERT INTO users (email, username, role, is_active, email_verified)
+        VALUES ($1, $2, 'user', TRUE, TRUE)
+        RETURNING id
+        "#,
+    )
+    .bind(format!("miniapp-{}@example.com", Uuid::new_v4()))
+    .bind(format!("miniapp-{}", Uuid::new_v4()))
+    .fetch_one(&pool)
+    .await
+    .expect("insert miniapp user");
+
+    let allowed_project_id = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO construction_projects (name, status) VALUES ('授权项目', 5) RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("insert allowed project");
+    let denied_project_id = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO construction_projects (name, status) VALUES ('未授权项目', 5) RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("insert denied project");
+
+    sqlx::query("INSERT INTO user_managed_projects (user_id, project_id) VALUES ($1, $2)")
+        .bind(user_id)
+        .bind(allowed_project_id)
+        .execute(&pool)
+        .await
+        .expect("grant managed project");
+
+    let token = user_token(user_id);
+
+    let (status, body) = get_authed(app.clone(), "/api/v1/miniapp/projects/options", &token).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let projects = body["data"].as_array().expect("miniapp project options");
+    assert_eq!(projects.len(), 1);
+    assert_eq!(projects[0]["id"], allowed_project_id.to_string());
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/miniapp/projects/{allowed_project_id}/units"),
+        &token,
+        json!({
+            "company_name": "小程序授权单位",
+            "company_type": 4
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["data"]["company_name"], "小程序授权单位");
+
+    let (status, body) = get_authed(
+        app.clone(),
+        &format!("/api/v1/miniapp/projects/{denied_project_id}/units"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+}
+
+#[tokio::test]
+async fn miniapp_project_routes_support_construction_crud() {
+    let (app, pool, _c) = build_test_app_with_pool().await;
+
+    let user_id = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        INSERT INTO users (email, username, role, is_active, email_verified)
+        VALUES ($1, $2, 'user', TRUE, TRUE)
+        RETURNING id
+        "#,
+    )
+    .bind(format!("miniapp-crud-{}@example.com", Uuid::new_v4()))
+    .bind(format!("miniapp-crud-{}", Uuid::new_v4()))
+    .fetch_one(&pool)
+    .await
+    .expect("insert miniapp crud user");
+
+    let project_id = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        INSERT INTO construction_projects (name, status, address, build_unit, contractor)
+        VALUES ('小程序 CRUD 项目', 5, '测试地址', '建设单位', '施工单位')
+        RETURNING id
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("insert miniapp crud project");
+
+    sqlx::query("INSERT INTO user_managed_projects (user_id, project_id) VALUES ($1, $2)")
+        .bind(user_id)
+        .bind(project_id)
+        .execute(&pool)
+        .await
+        .expect("grant miniapp crud project");
+
+    let token = user_token(user_id);
+    let base = format!("/api/v1/miniapp/projects/{project_id}");
+
+    let (status, body) = get_authed(app.clone(), &base, &token).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["name"], "小程序 CRUD 项目");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("{base}/units"),
+        &token,
+        json!({
+            "company_name": "小程序参建单位",
+            "company_credit_code": "91320800MINI0001X",
+            "company_type": 4,
+            "register_date": "2026-06-01",
+            "register_area": "淮安市",
+            "company_address": "淮安市测试路 1 号",
+            "manager_name": "单位负责人",
+            "manager_phone": "13800001001",
+            "manager_id_card": "320800199001010001",
+            "legal_person_name": "单位法人",
+            "legal_person_id_card": "320800199001010002",
+            "company_phone": "051700000001",
+            "contract_amount": 1234,
+            "attachment": "unit.zip",
+            "register_area_list": "320800,320812",
+            "attachment_file": [{"name": "unit.pdf", "url": "https://oss.example/unit.pdf"}],
+            "timer_set_a": 1,
+            "timer_set_b": 2,
+            "timer_set_c": 3,
+            "salary_calc_type": 1,
+            "quantity_unit_type": 2,
+            "seal_photo": "seal.png"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let unit_id = body["data"]["id"].as_str().expect("unit id");
+    assert_eq!(body["data"]["company_name"], "小程序参建单位");
+    assert_eq!(body["data"]["attachment_file"][0]["name"], "unit.pdf");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "PATCH",
+        &format!("{base}/units/{unit_id}"),
+        &token,
+        json!({
+            "manager_name": "更新负责人",
+            "contract_amount": 2345
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["manager_name"], "更新负责人");
+    assert_eq!(body["data"]["contract_amount"], 2345);
+
+    let (status, body) = get_authed(
+        app.clone(),
+        &format!("{base}/units?keyword=%E5%B0%8F%E7%A8%8B%E5%BA%8F&page=1&page_size=10"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["total"], 1);
+    assert_eq!(body["data"]["items"][0]["id"], unit_id);
+
+    let leader_id = Uuid::new_v4();
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("{base}/teams"),
+        &token,
+        json!({
+            "unit_id": unit_id,
+            "name": "小程序班组",
+            "work_type": 10,
+            "is_manage_team": false,
+            "settlement_type": 7,
+            "quantity_unit_type": 3,
+            "remark": "小程序班组备注",
+            "attendance_start_time": "06:30",
+            "attendance_end_time": "18:00",
+            "attendance_is_next_day": false,
+            "leader_id": leader_id,
+            "leader_name": "班组长",
+            "leader_phone": "13800001002",
+            "leader_id_card": "320800199001010003",
+            "team_no": "MINI-TEAM-001"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let team_id = body["data"]["id"].as_str().expect("team id");
+    assert_eq!(body["data"]["name"], "小程序班组");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "PATCH",
+        &format!("{base}/teams/{team_id}"),
+        &token,
+        json!({
+            "name": "小程序班组更新",
+            "attendance_is_next_day": true
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["name"], "小程序班组更新");
+    assert_eq!(body["data"]["attendance_is_next_day"], true);
+
+    let (status, body) = get_authed(app.clone(), &format!("{base}/teams/{team_id}"), &token).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["team_no"], "MINI-TEAM-001");
+
+    let dormitory_id = Uuid::new_v4();
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("{base}/workers"),
+        &token,
+        json!({
+            "unit_id": unit_id,
+            "team_id": team_id,
+            "id_card": "320800199001019001",
+            "name": "小程序工人",
+            "gender": 1,
+            "nation": "汉族",
+            "visa_office": "淮安公安",
+            "address": "身份证地址",
+            "validity_period": "2020-01-01 至 2040-01-01",
+            "ocr_photo": "ocr.jpg",
+            "work_type": 10,
+            "worker_type": 1,
+            "political_status": 1,
+            "education": 3,
+            "settlement_type": 7,
+            "quantity_unit_type": 4,
+            "unit_price": 350,
+            "salary_bank_card": "6222000000000000",
+            "salary_bank": "中国银行",
+            "has_insurance": true,
+            "has_major_medical_history": false,
+            "current_address": "现住址",
+            "dormitory_id": dormitory_id,
+            "id_card_back_file": "id-back.jpg",
+            "phone": "13800001003",
+            "is_manage_team": false,
+            "is_key_personnel": true,
+            "avatar": "avatar.jpg",
+            "work_status": 1,
+            "labor_contract_file": [{"name": "contract.pdf", "url": "https://oss.example/contract.pdf"}],
+            "settlement_file": [{"name": "settlement.pdf", "url": "https://oss.example/settlement.pdf"}],
+            "auth_status": 2,
+            "manager_type": "1",
+            "validity_period_end": "2040-01-01",
+            "entry_time": "2026-06-02",
+            "signature_photo": "signature.jpg",
+            "signature_time": "2026-06-02",
+            "native_place": 320800
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let worker_id = body["data"]["id"].as_str().expect("worker id");
+    assert_eq!(body["data"]["name"], "小程序工人");
+    assert_eq!(
+        body["data"]["labor_contract_file"][0]["name"],
+        "contract.pdf"
+    );
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "PATCH",
+        &format!("{base}/workers/{worker_id}"),
+        &token,
+        json!({
+            "name": "小程序工人更新",
+            "phone": "13800001004",
+            "work_status": 2,
+            "exit_time": "2026-06-30"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["name"], "小程序工人更新");
+    assert_eq!(body["data"]["work_status"], 2);
+    assert_eq!(body["data"]["exit_time"], "2026-06-30");
+
+    let (status, body) = get_authed(
+        app.clone(),
+        &format!("{base}/workers?keyword=%E5%B7%A5%E4%BA%BA%E6%9B%B4%E6%96%B0&work_status=2"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["total"], 1);
+    assert_eq!(body["data"]["items"][0]["id"], worker_id);
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("{base}/attendance-records"),
+        &token,
+        json!({
+            "worker_id": worker_id,
+            "direction": 0,
+            "trigger_time": "2026-06-18T06:41:22Z",
+            "equipment_id": "gate-001",
+            "serial_number": "MINI-SN-001",
+            "photo_path": "attendance.jpg",
+            "overall_photo": "overall-base64",
+            "closeup_photo": "closeup-base64",
+            "original_time": "2026-06-18 14:41:22"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let attendance_id = body["data"]["id"].as_str().expect("attendance id");
+    assert_eq!(body["data"]["serial_number"], "MINI-SN-001");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "PATCH",
+        &format!("{base}/attendance-records/{attendance_id}"),
+        &token,
+        json!({
+            "direction": 1,
+            "photo_path": "attendance-updated.jpg"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["direction"], 1);
+    assert_eq!(body["data"]["photo_path"], "attendance-updated.jpg");
+
+    let (status, body) = get_authed(
+        app.clone(),
+        &format!("{base}/attendance-records?attendance_date=2026-06-18&keyword=MINI-SN-001"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["total"], 1);
+    assert_eq!(body["data"]["items"][0]["id"], attendance_id);
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("{base}/attendance-devices"),
+        &token,
+        json!({
+            "device_type": "人脸识别机",
+            "serial_number": "MINI-DEVICE-001",
+            "device_name": "小程序考勤机",
+            "direction": 0,
+            "remark": "小程序新增"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let device_id = body["data"]["id"].as_str().expect("device id");
+    assert_eq!(body["data"]["device_name"], "小程序考勤机");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "PATCH",
+        &format!("{base}/attendance-devices/{device_id}"),
+        &token,
+        json!({
+            "device_name": "小程序考勤机更新",
+            "direction": 2,
+            "remark": "更新备注"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["device_name"], "小程序考勤机更新");
+    assert_eq!(body["data"]["direction"], 2);
+
+    let (status, body) = get_authed(
+        app.clone(),
+        &format!("{base}/attendance-devices?keyword=MINI-DEVICE-001&direction=2"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["total"], 1);
+    assert_eq!(body["data"]["items"][0]["id"], device_id);
+
+    for uri in [
+        format!("{base}/attendance-records/{attendance_id}"),
+        format!("{base}/attendance-devices/{device_id}"),
+        format!("{base}/workers/{worker_id}"),
+        format!("{base}/teams/{team_id}"),
+        format!("{base}/units/{unit_id}"),
+    ] {
+        let (status, body) = delete_authed(app.clone(), &uri, &token).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+
+    for (resource, id) in [
+        ("attendance-records", attendance_id),
+        ("attendance-devices", device_id),
+        ("workers", worker_id),
+        ("teams", team_id),
+        ("units", unit_id),
+    ] {
+        let (status, body) =
+            get_authed(app.clone(), &format!("{base}/{resource}/{id}"), &token).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    }
 }

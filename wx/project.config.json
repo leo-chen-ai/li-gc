@@ -44,6 +44,18 @@
       {
         "value": "utils/module-page.js",
         "type": "file"
+      },
+      {
+        "value": "utils/construction-api.js",
+        "type": "file"
+      },
+      {
+        "value": "utils/construction-fields.js",
+        "type": "file"
+      },
+      {
+        "value": "utils/form-utils.js",
+        "type": "file"
       }
     ]
   },

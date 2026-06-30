@@ -186,7 +186,7 @@ export function ProjectsPage() {
               <ClipboardList className="size-3.5" />
               项目台账
             </div>
-            <h1 className="mt-1 text-xl font-semibold tracking-normal">项目管理</h1>
+            <h1 className="mt-1 text-xl font-semibold tracking-normal">项目列表</h1>
           </div>
 
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">

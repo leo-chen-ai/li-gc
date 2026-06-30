@@ -11,6 +11,7 @@ use crate::{
 pub fn auth_sensitive_routes() -> Router<AppState> {
     Router::new()
         .route("/register", post(handlers::register))
+        .route("/registration-leads", post(handlers::create_registration_lead))
         .route("/login", post(handlers::login))
 }
 

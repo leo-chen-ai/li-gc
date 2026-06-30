@@ -1,0 +1,69 @@
+import { Camera, Leaf } from "lucide-react";
+
+import { Badge } from "@/components/ui/badge";
+
+const environmentMetrics = [
+  { label: "温度", value: "26.4℃", status: "正常" },
+  { label: "湿度", value: "62%", status: "正常" },
+  { label: "风向", value: "东南风", status: "正常" },
+  { label: "风速", value: "2.8m/s", status: "正常" },
+  { label: "PM2.5", value: "38", status: "良" },
+  { label: "噪声", value: "58dB", status: "正常" },
+];
+
+const videoPoints = ["大门入口", "材料堆场", "塔吊作业区", "生活区通道"];
+
+export function EnvironmentMonitoringPage() {
+  return (
+    <div className="space-y-3">
+      <section className="rounded-xl border bg-white px-4 py-3 shadow-sm dark:bg-card">
+        <div className="text-xs font-medium text-[#0f6b5d]">劳务管理 / 环境检测</div>
+        <h1 className="mt-1 text-xl font-semibold tracking-normal">环境检测</h1>
+        <p className="mt-1 text-sm text-muted-foreground">温湿度、风向、风速、颗粒物和噪声数据预览。</p>
+      </section>
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {environmentMetrics.map((item) => (
+          <div key={item.label} className="rounded-xl border bg-white p-4 shadow-sm dark:bg-card">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Leaf className="size-4 text-[#0f6b5d]" />
+                {item.label}
+              </div>
+              <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">
+                {item.status}
+              </Badge>
+            </div>
+            <div className="mt-4 text-2xl font-semibold">{item.value}</div>
+          </div>
+        ))}
+      </section>
+    </div>
+  );
+}
+
+export function VideoMonitoringPage() {
+  return (
+    <div className="space-y-3">
+      <section className="rounded-xl border bg-white px-4 py-3 shadow-sm dark:bg-card">
+        <div className="text-xs font-medium text-[#0f6b5d]">劳务管理 / 视频监控</div>
+        <h1 className="mt-1 text-xl font-semibold tracking-normal">视频监控</h1>
+        <p className="mt-1 text-sm text-muted-foreground">施工现场监控点位预览，后续接入真实视频流。</p>
+      </section>
+      <section className="grid gap-3 md:grid-cols-2">
+        {videoPoints.map((point) => (
+          <div key={point} className="overflow-hidden rounded-xl border bg-white shadow-sm dark:bg-card">
+            <div className="flex aspect-video items-center justify-center bg-[#edf8f1] text-[#0f6b5d] dark:bg-emerald-950/30">
+              <Camera className="size-10" />
+            </div>
+            <div className="flex items-center justify-between px-4 py-3">
+              <div className="font-medium">{point}</div>
+              <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">
+                在线
+              </Badge>
+            </div>
+          </div>
+        ))}
+      </section>
+    </div>
+  );
+}

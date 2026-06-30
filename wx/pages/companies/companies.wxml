@@ -104,7 +104,13 @@
             <text>{{item.label}}</text>
             <text class="required" wx:if="{{item.required}}">*</text>
           </view>
-          <block wx:if="{{item.control === 'select'}}">
+          <block wx:if="{{item.control === 'upload'}}">
+            <view class="upload-field" data-key="{{item.key}}" bind:tap="chooseUpload">
+              <view class="upload-main">{{item.uploadDisplay}}</view>
+              <view class="upload-action">上传</view>
+            </view>
+          </block>
+          <block wx:elif="{{item.control === 'select'}}">
             <picker range="{{item.options}}" range-key="label" value="{{item.optionIndex}}" data-key="{{item.key}}" bindchange="onPickerChange">
               <view class="select-value {{item.valueLabel ? '' : 'placeholder'}}">{{item.displayValue}}</view>
             </picker>
@@ -135,7 +141,7 @@
     </scroll-view>
     <view class="sheet-footer">
       <view class="ghost-button" bind:tap="closeForm">取消</view>
-      <view class="primary-button" bind:tap="saveRecord">保存</view>
+      <view class="primary-button {{saving ? 'disabled' : ''}}" bind:tap="saveRecord">{{saving ? '保存中...' : '保存'}}</view>
     </view>
   </view>
 </view>

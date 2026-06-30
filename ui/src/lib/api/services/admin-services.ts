@@ -5,6 +5,7 @@ import type {
   AdminUploadFile,
   CreateAdminUserRequest,
   CreateRoleRequest,
+  RegistrationLead,
   UserWithTimestamps,
 } from "@/features/admin/types/admin-types";
 
@@ -75,6 +76,19 @@ export const adminService = {
     const data = response.data.data;
     if (!data) {
       throw new Error("Failed to get dashboard stats");
+    }
+
+    return data;
+  },
+
+  getRegistrationLeads: async (): Promise<RegistrationLead[]> => {
+    const response = await apiClient.get<ApiResponse<RegistrationLead[]>>(
+      API_ENDPOINTS.ADMIN.REGISTRATION_LEADS
+    );
+
+    const data = response.data.data;
+    if (!data) {
+      throw new Error("Failed to get registration leads");
     }
 
     return data;

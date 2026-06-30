@@ -228,7 +228,22 @@ const ROLE_SELECT_BASE_SQL: &str = r#"
                         WHEN 'roles' THEN 40
                         WHEN 'attendance_devices' THEN 50
                         WHEN 'attendance_device_issue_reports' THEN 60
-                        WHEN 'uploads' THEN 70
+                        WHEN 'environment_monitoring' THEN 62
+                        WHEN 'video_monitoring' THEN 64
+                        WHEN 'quality_safety' THEN 66
+                        WHEN 'safety_management' THEN 68
+                        WHEN 'material_management' THEN 70
+                        WHEN 'construction_site' THEN 72
+                        WHEN 'party_building' THEN 74
+                        WHEN 'emergency_management' THEN 76
+                        WHEN 'personnel_workers' THEN 78
+                        WHEN 'personnel_contracts' THEN 79
+                        WHEN 'personnel_qualifications' THEN 80
+                        WHEN 'personnel_registrations' THEN 81
+                        WHEN 'personnel_bad_records' THEN 82
+                        WHEN 'personnel_approvers' THEN 83
+                        WHEN 'registration_leads' THEN 84
+                        WHEN 'uploads' THEN 85
                         WHEN 'contract_templates' THEN 80
                         WHEN 'work_hour_configs' THEN 90
                         WHEN 'platform_integrations' THEN 95

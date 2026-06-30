@@ -2,6 +2,7 @@ export const API_ENDPOINTS = {
   AUTH: {
     LOGIN: "/auth/login",
     REGISTER: "/auth/register",
+    REGISTRATION_LEADS: "/auth/registration-leads",
     REFRESH: "/auth/refresh",
     LOGOUT: "/auth/logout",
     ME: "/auth/me",
@@ -24,6 +25,7 @@ export const API_ENDPOINTS = {
     UPLOADS: "/admin/uploads",
     LOG_LEVEL: "/admin/log/level",
     STATS: "/admin/stats",
+    REGISTRATION_LEADS: "/admin/registration-leads",
     USER_PROJECTS: (id: string) => `/admin/users/${id}/projects`,
     USER_ROLE: (id: string) => `/admin/users/${id}/role`,
     API_KEYS: "/admin/api-keys",

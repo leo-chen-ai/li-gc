@@ -30,14 +30,14 @@
     <view class="info-grid">
       <view class="info-card">
         <view class="info-icon mint">
-          <t-icon name="home" size="34rpx" color="#0a9875" />
+          <view class="profile-symbol symbol-home"></view>
         </view>
         <view class="info-title">当前项目</view>
         <view class="info-value">{{projectName}}</view>
       </view>
       <view class="info-card">
         <view class="info-icon deep">
-          <t-icon name="usergroup" size="34rpx" color="#0f6b5d" />
+          <view class="profile-symbol symbol-users"></view>
         </view>
         <view class="info-title">所属单位</view>
         <view class="info-value">{{companyName}}</view>
@@ -60,13 +60,13 @@
       <view class="tool-grid">
         <view class="tool-item" bind:tap="changePassword">
           <view class="tool-icon">
-            <t-icon name="user-password" size="42rpx" color="#0a9875" />
+            <view class="profile-symbol symbol-lock"></view>
           </view>
           <view class="tool-label">修改密码</view>
         </view>
         <view class="tool-item danger" bind:tap="logout">
           <view class="tool-icon danger">
-            <t-icon name="logout" size="42rpx" color="#d93026" />
+            <view class="profile-symbol symbol-logout"></view>
           </view>
           <view class="tool-label">退出登录</view>
         </view>
@@ -82,6 +82,28 @@
     <view class="nav-item active">
       <view class="nav-mark nav-user"></view>
       <text>我的</text>
+    </view>
+  </view>
+
+  <view class="password-mask" wx:if="{{passwordModalVisible}}" catchtap="closePasswordModal"></view>
+  <view class="password-sheet {{passwordModalVisible ? 'show' : ''}}">
+    <view class="sheet-handle"></view>
+    <view class="password-title">修改密码</view>
+    <view class="password-field">
+      <view class="password-label">原密码</view>
+      <input class="password-input" password value="{{currentPassword}}" data-key="currentPassword" placeholder="请输入原密码" placeholder-class="muted-placeholder" bindinput="onPasswordInput" />
+    </view>
+    <view class="password-field">
+      <view class="password-label">新密码</view>
+      <input class="password-input" password value="{{newPassword}}" data-key="newPassword" placeholder="至少8位" placeholder-class="muted-placeholder" bindinput="onPasswordInput" />
+    </view>
+    <view class="password-field">
+      <view class="password-label">确认新密码</view>
+      <input class="password-input" password value="{{confirmPassword}}" data-key="confirmPassword" placeholder="再次输入新密码" placeholder-class="muted-placeholder" bindinput="onPasswordInput" />
+    </view>
+    <view class="password-actions">
+      <view class="password-cancel" bind:tap="closePasswordModal">取消</view>
+      <view class="password-submit {{passwordSaving ? 'disabled' : ''}}" bind:tap="submitPassword">{{passwordSaving ? '提交中...' : '确认修改'}}</view>
     </view>
   </view>
 </view>

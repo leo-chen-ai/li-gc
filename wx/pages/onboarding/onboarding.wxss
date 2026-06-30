@@ -205,6 +205,35 @@
   height: 126rpx;
 }
 
+.upload-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 78rpx;
+  padding: 0 18rpx 0 22rpx;
+  border: 1rpx solid #dbe5e8;
+  border-radius: 18rpx;
+  background: #f8fbfb;
+}
+
+.upload-main {
+  min-width: 0;
+  color: #223034;
+  font-size: 25rpx;
+}
+
+.upload-action {
+  flex: 0 0 auto;
+  height: 52rpx;
+  padding: 0 20rpx;
+  border-radius: 14rpx;
+  color: #ffffff;
+  font-size: 23rpx;
+  font-weight: 800;
+  line-height: 52rpx;
+  background: #0a9875;
+}
+
 .price-row {
   display: grid;
   grid-template-columns: 1fr 52rpx;
@@ -385,6 +414,10 @@
   text-align: center;
   background: #0a9875;
   box-shadow: 0 16rpx 34rpx rgba(10, 152, 117, 0.22);
+}
+
+.submit-button.disabled {
+  opacity: 0.58;
 }
 
 .phone-mask {

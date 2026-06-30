@@ -37,6 +37,9 @@ for (const path of [
   "pages/profile/profile.js",
   "pages/profile/profile.json",
   "utils/module-page.js",
+  "utils/construction-api.js",
+  "utils/construction-fields.js",
+  "utils/form-utils.js",
   "pages/onboarding/onboarding.wxml",
   "pages/onboarding/onboarding.wxss",
   "pages/onboarding/onboarding.js",
@@ -71,6 +74,12 @@ assert.ok(
   projectConfig.packOptions.include.some((item) => item.type === "file" && item.value === "utils/module-page.js"),
   "module-page shared JS should be explicitly included in the mini program package",
 );
+for (const path of ["utils/construction-api.js", "utils/construction-fields.js", "utils/form-utils.js"]) {
+  assert.ok(
+    projectConfig.packOptions.include.some((item) => item.type === "file" && item.value === path),
+    `${path} should be explicitly included in the mini program package`,
+  );
+}
 assert.ok(
   projectConfig.packOptions.include.some((item) => item.type === "file" && item.value === "config/api.js"),
   "api config JS should be explicitly included in the mini program package",
@@ -101,7 +110,7 @@ assert.equal(homeJson.navigationStyle, "custom");
 
 const profileJson = readJson("pages/profile/profile.json");
 assert.equal(profileJson.navigationStyle, "custom");
-assert.equal(profileJson.usingComponents["t-icon"], "/miniprogram_npm/tdesign-miniprogram/icon/icon");
+assert.ok(!profileJson.usingComponents || !profileJson.usingComponents["t-icon"], "profile should not depend on remote icon fonts");
 
 const loginWxml = readText("pages/login/login.wxml");
 const loginWxss = readText("pages/login/login.wxss");
@@ -153,7 +162,10 @@ assert.doesNotMatch(homeWxml, /宁波山淮科技有限公司 技术支持/);
 assert.doesNotMatch(homeWxss, /support-footer/);
 assert.match(homeJs, /projectOptions/);
 assert.match(homeJs, /developerName/);
-assert.match(homeSurface, /淮安城发置业有限公司/);
+assert.match(homeJs, /listProjectOptions/);
+assert.match(homeJs, /未分配项目/);
+assert.match(homeJs, /setSelectedProject/);
+assert.match(homeJs, /clearSelectedProject/);
 assert.match(homeJs, /project-switch-card-bg\.png/);
 assert.match(homeJs, /openProjectSwitcher/);
 assert.match(homeJs, /onProjectKeywordInput/);
@@ -190,9 +202,13 @@ assert.match(profileWxml, /contact-card/);
 assert.match(profileWxml, /contact-icon/);
 assert.match(profileWxml, /tool-grid/);
 assert.match(profileWxml, /bottom-nav/);
-assert.match(profileWxml, /t-icon/);
+for (const iconClass of ["symbol-home", "symbol-users", "symbol-lock", "symbol-logout"]) {
+  assert.match(profileWxml, new RegExp(iconClass), `profile should render ${iconClass}`);
+  assert.match(profileWxss, new RegExp(`\\.${iconClass}`), `profile should style ${iconClass}`);
+}
 assert.match(profileJs, /goHome/);
 assert.match(profileJs, /changePassword/);
+assert.match(profileJs, /\/auth\/change-password/);
 assert.match(profileJs, /contactUs/);
 assert.match(profileJs, /maskPhone/);
 assert.match(profileJs, /logout/);
@@ -221,28 +237,28 @@ assert.ok(existsSync(join(root, "assets/generated/profile-contact-icon.png")), "
 const onboardingWxml = readText("pages/onboarding/onboarding.wxml");
 const onboardingWxss = readText("pages/onboarding/onboarding.wxss");
 const onboardingJs = readText("pages/onboarding/onboarding.js");
+const constructionFieldsJs = readText("utils/construction-fields.js");
+const onboardingSurface = `${onboardingWxml}\n${onboardingJs}\n${constructionFieldsJs}`;
 assert.doesNotMatch(onboardingJs, /createModulePage/);
-assert.match(onboardingJs, /knownWorkerByPhone/);
+assert.match(onboardingJs, /createResource/);
+assert.match(onboardingJs, /updateResource/);
+assert.match(onboardingJs, /fieldSets\.workers/);
+assert.match(onboardingJs, /uploadForField/);
 assert.match(onboardingJs, /confirmPhoneLookup/);
 assert.match(onboardingJs, /submitOnboarding/);
-assert.match(onboardingJs, /phone:\s*"1"/);
 assert.match(onboardingWxml, /先查询手机号/);
 assert.match(onboardingWxml, /phoneModalVisible/);
 assert.match(onboardingWxml, /onboarding-form/);
 assert.match(onboardingWxml, /提交实名入职/);
-assert.match(onboardingWxml, /idFrontImage/);
-assert.match(onboardingWxml, /idBackImage/);
-assert.match(onboardingWxml, /id-illustration/);
+assert.match(onboardingWxml, /formSections/);
+assert.match(onboardingWxml, /chooseUpload/);
+assert.match(onboardingWxml, /field\.control === 'upload'/);
 assert.ok(
-  onboardingWxml.indexOf("个人信息") < onboardingWxml.indexOf("工作信息"),
-  "onboarding should place personal information before work information",
+  onboardingJs.indexOf("listResource") < onboardingJs.indexOf("submitOnboarding"),
+  "onboarding should load project lookups before submit",
 );
-for (const action of ["chooseFaceImage", "chooseIdFrontImage", "chooseIdBackImage"]) {
-  assert.match(onboardingWxml, new RegExp(`bind:tap="${action}"`), `onboarding should make ${action} tappable`);
-  assert.match(onboardingJs, new RegExp(action), `onboarding should implement ${action}`);
-}
-for (const label of ["工作信息", "管理人员角色", "文化程度", "政治面貌", "结算方式", "单价", "个人信息", "身份证识别", "有效期开始", "有效期结束"]) {
-  assert.match(onboardingWxml, new RegExp(label), `onboarding should render ${label}`);
+for (const label of ["班组归属", "证件照片", "基础信息", "证件信息", "用工信息", "结算银行卡", "保险与状态", "资料附件"]) {
+  assert.match(onboardingSurface, new RegExp(label), `onboarding should define/render ${label}`);
 }
 for (const removedLabel of ["新入职人员", "已匹配人员", "重新查询手机号"]) {
   assert.doesNotMatch(onboardingWxml, new RegExp(removedLabel), `onboarding should not render ${removedLabel}`);
@@ -258,28 +274,23 @@ assert.doesNotMatch(onboardingWxss, /\.phone-modal::before/);
 assert.match(onboardingWxss, /\.phone-modal::after\s*\{/);
 assert.match(onboardingWxss, /\.onboarding-form\s*\{/);
 assert.match(onboardingJs, /page-header-bg-v1\.png/);
-assert.match(onboardingJs, /onboarding-face-upload-v1\.png/);
-assert.match(onboardingJs, /id-card-front-construction-v2\.png/);
-assert.match(onboardingJs, /id-card-back-construction-v2\.png/);
-assert.match(onboardingWxss, /\.field-row \.field\s*\{[\s\S]*margin-top:\s*0;/);
-assert.match(onboardingWxss, /\.face-upload-card\s*\{/);
-assert.match(onboardingWxss, /\.id-upload-action\s*\{/);
-assert.match(onboardingWxss, /\.id-illustration\s*\{/);
+assert.match(onboardingWxss, /\.upload-field\s*\{/);
 assert.match(onboardingWxss, /safe-area-inset-bottom/);
 
 const moduleWxml = readText("pages/teams/teams.wxml");
 const moduleWxss = readText("pages/teams/teams.wxss");
 const moduleJs = readText("utils/module-page.js");
+const moduleSurface = `${moduleJs}\n${constructionFieldsJs}`;
 for (const label of ["班组管理", "参建单位", "考勤机模式"]) {
   assert.match(moduleJs, new RegExp(label), `module page should configure ${label}`);
 }
 assert.doesNotMatch(moduleJs, /key:\s*"onboarding"/);
 assert.doesNotMatch(moduleJs, /key:\s*"workers"/);
 assert.doesNotMatch(moduleJs, /key:\s*"attendance"/);
-for (const field of ["company_credit_code", "manager_id_card", "project_name", "attendance_period", "second_day", "contract_template", "registered_date", "region", "serial_number"]) {
-  assert.match(moduleJs, new RegExp(field), `module page should include ${field}`);
+for (const field of ["company_credit_code", "manager_id_card", "register_date", "register_area", "attachment_file", "unit_id", "attendance_start_time", "attendance_is_next_day", "leader_id", "serial_number"]) {
+  assert.match(moduleSurface, new RegExp(field), `module page should include ${field}`);
 }
-for (const action of ["openCreate", "openEdit", "saveRecord", "deleteRecord"]) {
+for (const action of ["openCreate", "openEdit", "saveRecord", "deleteRecord", "chooseUpload"]) {
   assert.match(moduleJs, new RegExp(action), `module page should implement ${action}`);
 }
 for (const route of ["teams", "companies", "device"]) {
@@ -292,7 +303,10 @@ for (const route of ["teams", "companies", "device"]) {
   assert.doesNotMatch(wxml, /hero-action/, `${route} should not render the old right hero action`);
   assert.doesNotMatch(wxss, /\.hero-action/, `${route} should not keep unused hero action styles`);
 }
-assert.match(moduleJs, /Array\.isArray\(cached\)\) return cached/);
+assert.match(moduleJs, /listResource/);
+assert.match(moduleJs, /createResource/);
+assert.match(moduleJs, /updateResource/);
+assert.match(moduleJs, /deleteResource/);
 assert.match(moduleJs, /getCurrentPages\(\)/);
 assert.match(moduleJs, /redirectTo\(\{ url: "\/pages\/home\/home" \}\)/);
 assert.match(moduleWxml, /form-sheet/);
@@ -310,26 +324,35 @@ const workersWxml = readText("pages/workers/workers.wxml");
 const workersWxss = readText("pages/workers/workers.wxss");
 const workersJs = readText("pages/workers/workers.js");
 assert.doesNotMatch(workersJs, /createModulePage/);
-for (const label of ["在场人数", "批量退场", "请输入姓名或手机号", "认证状态", "工人详情", "身份证号码", "劳务合同", "相关文件", "人员签字"]) {
+for (const label of ["在场人数", "批量退场", "请输入姓名或手机号", "认证状态", "工人详情", "身份证号码", "劳务合同", "相关文件", "人员签字", "编辑工人信息", "办理退场", "删除工人"]) {
   assert.match(`${workersWxml}\n${workersJs}`, new RegExp(label), `workers page should render ${label}`);
 }
-assert.match(workersJs, /filterWorkers/);
+assert.match(workersJs, /listResource/);
+assert.match(workersJs, /updateResource/);
+assert.match(workersJs, /deleteResource/);
+assert.match(workersJs, /submitEditWorker/);
+assert.match(workersJs, /retireWorker/);
+assert.match(workersJs, /chooseUpload/);
 assert.match(workersJs, /openWorkerDetail/);
 assert.match(workersJs, /page-header-bg-v1\.png/);
 assert.match(workersWxss, /\.auth-ribbon/);
+assert.match(workersWxss, /\.form-sheet/);
 
 const attendanceWxml = readText("pages/attendance/attendance.wxml");
 const attendanceWxss = readText("pages/attendance/attendance.wxss");
 const attendanceJs = readText("pages/attendance/attendance.js");
 assert.doesNotMatch(attendanceJs, /createModulePage/);
-for (const label of ["出勤统计", "项目名称", "2026年06月", "总人数", "出勤率", "全部班组", "全部参建单位", "搜索姓名", "已出勤", "未出勤"]) {
+for (const label of ["出勤统计", "项目名称", "总人数", "出勤率", "全部班组", "全部参建单位", "搜索姓名", "已出勤", "未出勤"]) {
   assert.match(`${attendanceWxml}\n${attendanceJs}`, new RegExp(label), `attendance page should render ${label}`);
 }
-assert.match(attendanceJs, /filterList/);
+assert.match(attendanceJs, /listResource/);
+assert.match(attendanceJs, /buildWorkerAttendance/);
+assert.match(attendanceJs, /openWorkerAttendance/);
 assert.match(attendanceJs, /setDate/);
 assert.match(attendanceJs, /setTab/);
 assert.match(attendanceJs, /page-header-bg-v1\.png/);
 assert.match(attendanceWxss, /\.date-rail/);
+assert.match(attendanceWxml, /detail-records/);
 
 global.Page = (config) => {
   assert.equal(typeof config.goBack, "function");
@@ -358,6 +381,11 @@ for (const route of ["teams", "companies", "device"]) {
 const assetConfig = readText("config/assets.js");
 assert.match(assetConfig, /ASSET_BASE_URL/);
 assert.match(assetConfig, /京东云 OSS/);
+
+const apiConfig = readText("config/api.js");
+const { API_BASE_URL } = require(join(root, "config/api.js"));
+assert.equal(API_BASE_URL, "http://192.168.32.126:8080/api/v1");
+assert.doesNotMatch(apiConfig, /127\.0\.0\.1/, "miniapp debug API should use the LAN IP for real-device debugging");
 
 const { ASSET_BASE_URL, assetPath } = require(join(root, "config/assets.js"));
 assert.equal(ASSET_BASE_URL, "https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/wx");

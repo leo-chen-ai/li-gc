@@ -1,4 +1,10 @@
 const { assetPath } = require("../../config/assets");
+const {
+  clearSelectedProject,
+  getSelectedProject,
+  listProjectOptions,
+  setSelectedProject,
+} = require("../../utils/construction-api.js");
 
 const featureCards = [
   {
@@ -46,52 +52,6 @@ const attendanceModules = [
   },
 ];
 
-const projectOptions = [
-  {
-    id: "1206",
-    title: "淮安高铁商务区综合体项目",
-    developerName: "淮安城发置业有限公司",
-    location: "清江浦区 · 在建",
-    metric: "286人在册",
-  },
-  {
-    id: "1207",
-    title: "宁波正宇建设有限公司项目",
-    developerName: "宁波正宇建设有限公司",
-    location: "海曙区 · 筹备",
-    metric: "64人在册",
-  },
-  {
-    id: "1208",
-    title: "山淮智慧工地示范项目",
-    developerName: "山淮建设工程有限公司",
-    location: "生态文旅区 · 在建",
-    metric: "128人在册",
-  },
-  {
-    id: "1209",
-    title: "淮安城发安置房二期",
-    developerName: "淮安城发置业有限公司",
-    location: "经开区 · 在建",
-    metric: "96人在册",
-  },
-];
-
-function getStoredProjectOptions() {
-  const projects = wx.getStorageSync("shanhuai_managed_projects");
-  if (!Array.isArray(projects) || projects.length === 0) {
-    return projectOptions;
-  }
-
-  return projects.map((project) => ({
-    id: project.id,
-    title: project.name || "未命名项目",
-    developerName: "已授权项目",
-    location: "小程序可管理",
-    metric: "查看详情",
-  }));
-}
-
 const moduleRoutes = {
   onboarding: "/pages/onboarding/onboarding",
   teams: "/pages/teams/teams",
@@ -109,26 +69,60 @@ Page({
     wideFeature: featureCards[3],
     attendanceModules,
     projectCardBg: assetPath("/project-switch-card-bg.png"),
-    selectedProject: projectOptions[0],
-    projectOptions,
-    filteredProjects: projectOptions,
+    selectedProject: {},
+    projectOptions: [],
+    filteredProjects: [],
     projectKeyword: "",
     projectSwitcherVisible: false,
+    loadingProjects: false,
   },
 
-  onLoad() {
+  async onLoad() {
     const token = wx.getStorageSync("shanhuai_access_token");
     if (!token) {
       wx.redirectTo({ url: "/pages/login/login" });
       return;
     }
 
-    const storedProjects = getStoredProjectOptions();
-    this.setData({
-      selectedProject: storedProjects[0],
-      projectOptions: storedProjects,
-      filteredProjects: storedProjects,
-    });
+    await this.loadProjects();
+  },
+
+  async onShow() {
+    const token = wx.getStorageSync("shanhuai_access_token");
+    if (token && !this.data.projectOptions.length) {
+      await this.loadProjects();
+    }
+  },
+
+  async loadProjects() {
+    this.setData({ loadingProjects: true });
+    try {
+      const projectOptions = await listProjectOptions();
+      if (!projectOptions.length) {
+        clearSelectedProject();
+        wx.showModal({
+          title: "未分配项目",
+          content: "当前账号没有可管理项目，请联系管理员分配项目后再登录。",
+          showCancel: false,
+          success: () => this.logout(),
+        });
+        return;
+      }
+
+      const storedProject = getSelectedProject();
+      const selectedProject = projectOptions.find((project) => storedProject && project.id === storedProject.id)
+        || projectOptions[0];
+      setSelectedProject(selectedProject);
+      this.setData({
+        loadingProjects: false,
+        selectedProject,
+        projectOptions,
+        filteredProjects: projectOptions,
+      });
+    } catch (error) {
+      this.setData({ loadingProjects: false });
+      wx.showToast({ title: error.message || "项目加载失败", icon: "none" });
+    }
   },
 
   navigateToModule(event) {
@@ -171,6 +165,7 @@ Page({
       selectedProject,
       projectSwitcherVisible: false,
     });
+    setSelectedProject(selectedProject);
     wx.showToast({
       title: "项目已切换",
       icon: "success",
@@ -182,6 +177,7 @@ Page({
     wx.removeStorageSync("shanhuai_token_expires_at");
     wx.removeStorageSync("shanhuai_user");
     wx.removeStorageSync("shanhuai_managed_projects");
+    clearSelectedProject();
     wx.redirectTo({ url: "/pages/login/login" });
   },
 });

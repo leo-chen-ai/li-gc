@@ -1,0 +1,229 @@
+const { uploadConstructionFile } = require("./construction-api.js");
+
+function buildDefaultForm(fields, record = {}, overrides = {}) {
+  return fields.reduce((form, field) => {
+    form[field.key] = stringifyFormValue(field, overrides[field.key] !== undefined ? overrides[field.key] : record[field.key]);
+    if (!form[field.key] && field.defaultValue !== undefined) {
+      form[field.key] = field.defaultValue;
+    }
+    return form;
+  }, {});
+}
+
+function buildFormFields(fields, form, lookups = {}) {
+  return fields
+    .filter((field) => !field.hidden)
+    .map((field) => {
+      const options = resolveOptions(field, form, lookups);
+      const value = form[field.key] || "";
+      const optionIndex = options.length ? Math.max(0, options.findIndex((item) => item.value === value)) : 0;
+      const selectedOption = options.find((item) => item.value === value);
+      const valueLabel = selectedOption ? selectedOption.label : "";
+      return {
+        ...field,
+        options,
+        value,
+        optionIndex,
+        valueLabel,
+        displayValue: valueLabel || (field.control === "select" ? "请选择" : ""),
+        uploadDisplay: uploadDisplayValue(field, value),
+        placeholder: field.placeholder || "请输入",
+        inputType: field.valueType === "number" ? "number" : "text",
+      };
+    });
+}
+
+function resolveOptions(field, form, lookups) {
+  if (field.options) return field.options;
+  if (field.optionsSource === "units") {
+    return [{ label: "请选择参建单位", value: "" }].concat((lookups.units || []).map((unit) => ({
+      label: unit.company_name || "未命名单位",
+      value: unit.id,
+    })));
+  }
+  if (field.optionsSource === "teams") {
+    const teams = (lookups.teams || []).filter((team) => !form.unit_id || team.unit_id === form.unit_id);
+    return [{ label: "请选择班组", value: "" }].concat(teams.map((team) => ({
+      label: team.name || "未命名班组",
+      value: team.id,
+    })));
+  }
+  if (field.optionsSource === "workers") {
+    return [{ label: "请选择工人", value: "" }].concat((lookups.workers || []).map((worker) => ({
+      label: [worker.name || "未命名工人", worker.phone].filter(Boolean).join(" / "),
+      value: worker.id,
+    })));
+  }
+  return [];
+}
+
+function buildPayloadFromForm(fields, form) {
+  return fields.reduce((payload, field) => {
+    const rawValue = form[field.key];
+    const textValue = rawValue === undefined || rawValue === null ? "" : String(rawValue).trim();
+
+    if (field.required && !textValue) {
+      throw new Error(`请填写${field.label}`);
+    }
+
+    if (!textValue) {
+      payload[field.key] = null;
+      return payload;
+    }
+
+    if (field.valueType === "boolean") {
+      payload[field.key] = rawValue === true || rawValue === "true";
+      return payload;
+    }
+
+    if (field.valueType === "number") {
+      const numberValue = Number(textValue);
+      if (!Number.isFinite(numberValue)) {
+        throw new Error(`${field.label}必须是数字`);
+      }
+      payload[field.key] = numberValue;
+      return payload;
+    }
+
+    if (field.valueType === "json") {
+      try {
+        payload[field.key] = typeof rawValue === "string" ? JSON.parse(rawValue) : rawValue;
+      } catch (error) {
+        throw new Error(`${field.label}必须是有效文件数据`);
+      }
+      return payload;
+    }
+
+    if (field.valueType === "datetime") {
+      const normalized = textValue.includes("T") ? textValue : textValue.replace(" ", "T");
+      const date = new Date(normalized);
+      if (Number.isNaN(date.getTime())) {
+        throw new Error(`${field.label}时间格式无效`);
+      }
+      payload[field.key] = date.toISOString();
+      return payload;
+    }
+
+    payload[field.key] = textValue;
+    return payload;
+  }, {});
+}
+
+function stringifyFormValue(field, value) {
+  if (value === undefined || value === null) return "";
+  if (field.valueType === "json") return JSON.stringify(value);
+  if (field.valueType === "datetime" && typeof value === "string") return toDatetimeLocal(value);
+  return String(value);
+}
+
+function toDatetimeLocal(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16).replace("T", " ");
+}
+
+function today() {
+  const date = new Date();
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
+}
+
+function optionLabel(fields, key, value, fallback = "未填写") {
+  const field = fields.find((item) => item.key === key);
+  const option = ((field && field.options) || []).find((item) => item.value === String(value));
+  return option ? option.label : value || fallback;
+}
+
+function pickUploadFile(field) {
+  return new Promise((resolve, reject) => {
+    const done = (filePath) => {
+      if (filePath) resolve(filePath);
+      else reject(new Error("未选择文件"));
+    };
+
+    if (field.uploadKind === "image") {
+      if (wx.chooseMedia) {
+        wx.chooseMedia({
+          count: 1,
+          mediaType: ["image"],
+          sourceType: ["album", "camera"],
+          success: (res) => done(res.tempFiles && res.tempFiles[0] && res.tempFiles[0].tempFilePath),
+          fail: reject,
+        });
+        return;
+      }
+      wx.chooseImage({
+        count: 1,
+        sourceType: ["album", "camera"],
+        success: (res) => done(res.tempFilePaths && res.tempFilePaths[0]),
+        fail: reject,
+      });
+      return;
+    }
+
+    if (wx.chooseMessageFile) {
+      wx.chooseMessageFile({
+        count: 1,
+        type: "file",
+        success: (res) => done(res.tempFiles && res.tempFiles[0] && res.tempFiles[0].path),
+        fail: reject,
+      });
+      return;
+    }
+
+    wx.chooseImage({
+      count: 1,
+      sourceType: ["album"],
+      success: (res) => done(res.tempFilePaths && res.tempFilePaths[0]),
+      fail: reject,
+    });
+  });
+}
+
+async function uploadForField(field, context = {}) {
+  const filePath = await pickUploadFile(field);
+  const file = await uploadConstructionFile(filePath, {
+    bizType: context.bizType,
+    bizId: context.bizId,
+    fieldKey: field.key,
+  });
+  return file;
+}
+
+function nextUploadValue(field, currentValue, file) {
+  if (field.valueType === "json" || field.uploadMultiple) {
+    let files = [];
+    try {
+      files = currentValue ? JSON.parse(currentValue) : [];
+    } catch (error) {
+      files = [];
+    }
+    files.push(file);
+    return JSON.stringify(files);
+  }
+
+  return file.public_url || file.object_key || "";
+}
+
+function uploadDisplayValue(field, value) {
+  if (!value) return "未上传";
+  if (field.valueType !== "json") return "已上传";
+  try {
+    const files = JSON.parse(value);
+    return Array.isArray(files) && files.length ? `${files.length} 个文件` : "未上传";
+  } catch (error) {
+    return "已上传";
+  }
+}
+
+module.exports = {
+  buildDefaultForm,
+  buildFormFields,
+  buildPayloadFromForm,
+  nextUploadValue,
+  optionLabel,
+  today,
+  uploadDisplayValue,
+  uploadForField,
+};

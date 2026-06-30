@@ -355,8 +355,8 @@ export function ContractTemplateManagementPage() {
     <div className="space-y-4">
       <PageHeader
         icon={<FileText className="size-4" />}
-        label="合同模板管理"
-        title="合同模板管理"
+        label="劳务分包合同模板"
+        title="劳务分包合同模板"
         description="上传 Word 合同模板，下载时自动把工人、项目、班组等变量渲染进去。"
         action={<Button onClick={openCreate} className="bg-[#0f6b5d] text-white hover:bg-[#0b5148]"><Plus className="mr-2 size-4" />新增模板</Button>}
       />

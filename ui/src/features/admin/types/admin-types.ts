@@ -87,3 +87,10 @@ export interface AdminUploadFile {
   updated_at: string;
   deleted_at: string | null;
 }
+
+export interface RegistrationLead {
+  id: string;
+  name: string;
+  phone: string;
+  created_at: string;
+}

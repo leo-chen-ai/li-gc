@@ -81,7 +81,7 @@ export function CommandMenu({ open, setOpen }: CommandMenuProps) {
               }
             >
               <Settings className="mr-2 h-4 w-4" />
-              项目管理
+              项目列表
               <CommandShortcut>⌘A</CommandShortcut>
             </CommandItem>
           )}

@@ -279,7 +279,7 @@ export function UsersManagement() {
             新增用户
           </Button>
           <Button variant="outline" asChild>
-            <Link to="/app/admin/projects">返回项目管理</Link>
+            <Link to="/app/admin/projects">返回项目列表</Link>
           </Button>
         </div>
       </div>

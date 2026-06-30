@@ -39,6 +39,13 @@ export const authService = {
     return data;
   },
 
+  createRegistrationLead: async (payload: { name: string; phone: string }): Promise<void> => {
+    await apiClient.post<ApiSuccess<unknown>>(
+      API_ENDPOINTS.AUTH.REGISTRATION_LEADS,
+      payload
+    );
+  },
+
   refreshToken: (() => {
     let inflight: Promise<string> | null = null;
 

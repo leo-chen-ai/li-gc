@@ -566,3 +566,41 @@
   color: #59666b;
   background: #eaf1f2;
 }
+
+.primary-button {
+  color: #ffffff;
+  background: #0a9875;
+}
+
+.primary-button.disabled {
+  opacity: 0.58;
+}
+
+.upload-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 76rpx;
+  padding: 0 18rpx 0 22rpx;
+  border: 1rpx solid #dce6e8;
+  border-radius: 16rpx;
+  background: #ffffff;
+}
+
+.upload-main {
+  min-width: 0;
+  color: #233033;
+  font-size: 25rpx;
+}
+
+.upload-action {
+  flex: 0 0 auto;
+  height: 52rpx;
+  padding: 0 20rpx;
+  border-radius: 14rpx;
+  color: #ffffff;
+  font-size: 23rpx;
+  font-weight: 800;
+  line-height: 52rpx;
+  background: #0a9875;
+}

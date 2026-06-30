@@ -2,6 +2,7 @@ pub mod api_key;
 pub mod construction;
 pub mod enterprise;
 pub mod log;
+pub mod registration_lead;
 pub mod role;
 pub mod routes;
 pub mod stats;
