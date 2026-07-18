@@ -38,6 +38,7 @@ import type {
   ConstructionResourceListFilters,
   ConstructionResourceListResponse,
   ConstructionTeam,
+  ConstructionTeamListResponse,
   ConstructionTeamPayload,
   ConstructionUnit,
   ConstructionUnitPayload,
@@ -257,8 +258,8 @@ export const constructionProjectService = {
   listTeams: async (
     projectId: string,
     filters?: ConstructionResourceListFilters
-  ): Promise<ConstructionResourceListResponse<ConstructionTeam>> => {
-    const response = await apiClient.get<ApiResponse<ConstructionResourceListResponse<ConstructionTeam>>>(
+  ): Promise<ConstructionTeamListResponse> => {
+    const response = await apiClient.get<ApiResponse<ConstructionTeamListResponse>>(
       API_ENDPOINTS.MANAGEMENT.PROJECT_TEAMS(projectId),
       { params: filters }
     );

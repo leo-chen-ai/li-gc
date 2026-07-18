@@ -57,6 +57,28 @@ test("team leader is selected from project workers", () => {
   assert.equal(field.optionsSource, "workers");
 });
 
+test("team type is required and matches the Ningbo housing dictionary", () => {
+  const typeField = teamFormFields.find((item) => item.key === "work_type");
+  const leaderField = teamFormFields.find((item) => item.key === "leader_id");
+  const labels = typeField?.options?.map((option) => option.label) ?? [];
+
+  assert.equal(typeField?.required, true);
+  assert.notEqual(leaderField?.required, true);
+  assert.equal(typeField?.options?.[0]?.label, "项目管理部");
+  assert.equal(teamFormFields[0]?.key, "is_manage_team");
+  for (const label of [
+    "砌筑工",
+    "模板工",
+    "机械设备安装工",
+    "建筑起重机械安装拆卸工",
+    "古建筑传统彩画工",
+    "杂工",
+    "其它",
+  ]) {
+    assert.equal(labels.includes(label), true, `missing Ningbo team type: ${label}`);
+  }
+});
+
 test("worker form starts with team scope fields", () => {
   const sections = getFieldsBySection(workerFormFields);
 

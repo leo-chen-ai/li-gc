@@ -14,6 +14,7 @@ use sqlx::{Postgres, QueryBuilder, Row};
 use std::{
     collections::{HashMap, HashSet},
     io::{Cursor, Read, Write},
+    time::Duration,
 };
 use uuid::Uuid;
 use zip::{ZipArchive, ZipWriter, write::SimpleFileOptions};
@@ -23,6 +24,7 @@ use crate::{
     feature::device_mqtt::issuer::{
         issue_device_workers_via_broker, issue_single_worker_via_broker,
     },
+    feature::integration::ningbo_housing,
     infrastructure::web::response::{ApiError, ApiResult, ApiSuccess},
     state::AppState,
 };
@@ -2522,19 +2524,42 @@ fn work_type_label(value: Option<i32>) -> String {
     match value {
         Some(1) => "钢筋工",
         Some(2) => "木工",
-        Some(3) => "安装工",
+        Some(3) => "机械设备安装工",
         Some(4) => "架子工",
         Some(5) => "混凝土工",
-        Some(6) => "瓦工",
-        Some(7) => "电工",
-        Some(8) => "焊工",
-        Some(9) => "水工",
-        Some(10) => "测量工",
-        Some(11) => "抹灰工",
-        Some(12) => "油漆工",
+        Some(6) => "砌筑工",
+        Some(7) => "建筑电工",
+        Some(8) => "电焊工",
+        Some(9) => "管道工",
+        Some(10) => "测量放线工",
+        Some(11 | 12) => "装饰装修工",
         Some(13) => "防水工",
-        Some(14) => "机械司机",
-        Some(900) => "其他",
+        Some(14) => "挖掘铲运和桩工机械司机",
+        Some(15) => "模板工",
+        Some(16) => "通风工",
+        Some(17) => "安装起重工",
+        Some(18) => "安装钳工",
+        Some(19) => "电气设备安装调试工",
+        Some(20) => "变电安装工",
+        Some(21) => "司泵工",
+        Some(22) => "桩机操作工",
+        Some(23) => "起重信号工",
+        Some(24) => "建筑起重机械安装拆卸工",
+        Some(25) => "室内成套设施安装工",
+        Some(26) => "建筑门窗幕墙安装工",
+        Some(27) => "幕墙制作工",
+        Some(28) => "石工",
+        Some(29) => "除尘工",
+        Some(30) => "爆破工",
+        Some(31) => "线路架设工",
+        Some(32) => "古建筑传统石工",
+        Some(33) => "古建筑传统瓦工",
+        Some(34) => "古建筑传统彩画工",
+        Some(35) => "古建筑传统木工",
+        Some(36) => "古建筑传统油工",
+        Some(37) => "金属工",
+        Some(38) => "杂工",
+        Some(900) => "其它",
         Some(value) => return value.to_string(),
         None => "",
     }
@@ -2805,7 +2830,9 @@ pub async fn create_team(
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
-    create_row(
+    validate_team_type_for_enabled_platforms(state.db.pool(), project_id, &body).await?;
+    let body = normalize_new_team_type(body)?;
+    let response = create_row(
         state.db.pool(),
         "construction_teams",
         TEAM_COLUMNS,
@@ -2813,7 +2840,722 @@ pub async fn create_team(
         &[("project_id", project_id)],
         StatusCode::CREATED,
     )
+    .await?;
+
+    if let Some(team_id) = response
+        .data
+        .as_ref()
+        .and_then(|team| team.get("id"))
+        .and_then(Value::as_str)
+        .and_then(|id| Uuid::parse_str(id).ok())
+        && let Err(error) = sync_new_team_to_ningbo_platforms(state.db.pool(), team_id).await
+    {
+        tracing::error!(%team_id, message = %error.message, "Failed to record Ningbo team sync");
+    }
+
+    Ok(response)
+}
+
+fn normalize_new_team_type(mut body: Value) -> Result<Value, ApiError> {
+    let object = body
+        .as_object_mut()
+        .ok_or_else(|| invalid_input("班组数据格式错误"))?;
+    let is_manage_team = json_bool_value(object.get("is_manage_team")).unwrap_or(false)
+        || json_i32_value(object.get("work_type")) == Some(1001);
+    if is_manage_team {
+        object.insert("is_manage_team".to_owned(), Value::Bool(true));
+        object.insert("work_type".to_owned(), Value::from(1001));
+        return Ok(body);
+    }
+
+    let work_type = json_i32_value(object.get("work_type"));
+    match work_type {
+        Some(work_type) if !ningbo_team_type_label(Some(work_type)).is_empty() => {}
+        Some(_) => return Err(invalid_input("班组类型不在市平台支持的类型清单中")),
+        None => {
+            object.insert("work_type".to_owned(), Value::from(900));
+        }
+    }
+    Ok(body)
+}
+
+fn json_bool_value(value: Option<&Value>) -> Option<bool> {
+    value.and_then(|value| {
+        value.as_bool().or_else(|| {
+            value
+                .as_str()
+                .map(str::trim)
+                .and_then(|raw| raw.parse::<bool>().ok())
+        })
+    })
+}
+
+fn json_i32_value(value: Option<&Value>) -> Option<i32> {
+    value.and_then(|value| {
+        value
+            .as_i64()
+            .or_else(|| value.as_str().and_then(|raw| raw.trim().parse().ok()))
+            .and_then(|number| i32::try_from(number).ok())
+    })
+}
+
+async fn validate_team_type_for_enabled_platforms(
+    pool: &sqlx::PgPool,
+    project_id: Uuid,
+    body: &Value,
+) -> Result<(), ApiError> {
+    let is_manage_team = json_bool_value(body.get("is_manage_team")).unwrap_or(false)
+        || json_i32_value(body.get("work_type")) == Some(1001);
+    if is_manage_team {
+        return Ok(());
+    }
+
+    let has_enabled_ningbo_platform = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM construction_platform_configs
+            WHERE project_id = $1
+              AND is_deleted = FALSE
+              AND is_enabled = TRUE
+              AND (platform_type = 'ningbo_housing' OR platform_name = '宁波市住建')
+        )
+        "#,
+    )
+    .bind(project_id)
+    .fetch_one(pool)
     .await
+    .map_err(db_error)?;
+    if !has_enabled_ningbo_platform {
+        return Ok(());
+    }
+
+    let work_type = json_i32_value(body.get("work_type"));
+    if ningbo_team_type_label(work_type).is_empty() {
+        return Err(invalid_input(
+            "启用宁波市住建上报后，班组类型为必填项且必须选择平台支持的类型",
+        ));
+    }
+    Ok(())
+}
+
+struct TeamPlatformSyncSource {
+    id: Uuid,
+    project_id: Uuid,
+    name: String,
+    work_type: Option<i32>,
+    is_manage_team: bool,
+    leader_name: String,
+    remark: String,
+    company_credit_code: String,
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
+async fn sync_new_team_to_ningbo_platforms(
+    pool: &sqlx::PgPool,
+    team_id: Uuid,
+) -> Result<(), ApiError> {
+    let row = sqlx::query(
+        r#"
+        SELECT
+            team.id,
+            team.project_id,
+            COALESCE(team.name, '') AS name,
+            team.work_type,
+            team.is_manage_team,
+            COALESCE(team.leader_name, '') AS leader_name,
+            COALESCE(team.remark, '') AS remark,
+            COALESCE(unit.company_credit_code, '') AS company_credit_code,
+            team.created_at
+        FROM construction_teams team
+        JOIN construction_units unit
+          ON unit.id = team.unit_id
+         AND unit.project_id = team.project_id
+         AND unit.is_deleted = FALSE
+        WHERE team.id = $1
+          AND team.is_deleted = FALSE
+        "#,
+    )
+    .bind(team_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(db_error)?
+    .ok_or_else(not_found)?;
+    let source = TeamPlatformSyncSource {
+        id: row.try_get("id").map_err(db_error)?,
+        project_id: row.try_get("project_id").map_err(db_error)?,
+        name: row.try_get("name").map_err(db_error)?,
+        work_type: row.try_get("work_type").map_err(db_error)?,
+        is_manage_team: row.try_get("is_manage_team").map_err(db_error)?,
+        leader_name: row.try_get("leader_name").map_err(db_error)?,
+        remark: row.try_get("remark").map_err(db_error)?,
+        company_credit_code: row.try_get("company_credit_code").map_err(db_error)?,
+        created_at: row.try_get("created_at").map_err(db_error)?,
+    };
+
+    if source.is_manage_team || source.work_type == Some(1001) {
+        return Ok(());
+    }
+
+    let configs = sqlx::query(
+        r#"
+        SELECT id, config
+        FROM construction_platform_configs
+        WHERE project_id = $1
+          AND is_deleted = FALSE
+          AND is_enabled = TRUE
+          AND (platform_type = 'ningbo_housing' OR platform_name = '宁波市住建')
+        ORDER BY created_at, id
+        "#,
+    )
+    .bind(source.project_id)
+    .fetch_all(pool)
+    .await
+    .map_err(db_error)?;
+
+    for config_row in configs {
+        let config_id: Uuid = config_row.try_get("id").map_err(db_error)?;
+        let config: Value = config_row.try_get("config").map_err(db_error)?;
+        sync_team_to_ningbo_config(pool, &source, config_id, &config).await?;
+    }
+    Ok(())
+}
+
+async fn sync_team_to_ningbo_config(
+    pool: &sqlx::PgPool,
+    source: &TeamPlatformSyncSource,
+    config_id: Uuid,
+    config: &Value,
+) -> Result<(), ApiError> {
+    let credentials = match ningbo_housing::NingboHousingCredentials::from_config(config) {
+        Ok(credentials) => credentials,
+        Err(error) => {
+            record_team_sync_configuration_failure(pool, source, config_id, &error.to_string())
+                .await?;
+            return Ok(());
+        }
+    };
+    let corp_code = if source.company_credit_code.trim().is_empty() {
+        json_string_from_keys(config, &["corp_code", "corpCode", "CorpCode"]).unwrap_or_default()
+    } else {
+        source.company_credit_code.trim().to_owned()
+    };
+    let team_type = ningbo_team_type_label(source.work_type);
+    let validation_error = if source.name.trim().is_empty() {
+        Some("班组名称为空，无法上报宁波市住建平台".to_owned())
+    } else if corp_code.is_empty() {
+        Some("参建单位统一社会信用代码为空，无法上报宁波市住建平台".to_owned())
+    } else if team_type.is_empty() {
+        Some("班组工种未配置，无法匹配宁波市住建班组类型".to_owned())
+    } else {
+        None
+    };
+
+    let binding_id =
+        ensure_ningbo_project_binding(pool, source.project_id, &credentials, config).await?;
+    let request = ningbo_housing::add_team_request(
+        &credentials,
+        corp_code.clone(),
+        team_type.clone(),
+        source.name.trim().to_owned(),
+        source.leader_name.trim().to_owned(),
+        source.remark.clone(),
+        source.created_at.format("%Y-%m-%d").to_string(),
+    );
+    let request_payload = serde_json::to_value(&request).unwrap_or(Value::Null);
+    let job_id =
+        upsert_team_sync_job(pool, source, config_id, Some(binding_id), &request_payload).await?;
+    if let Some(error) = validation_error {
+        finish_team_sync_job(pool, job_id, "failed", None, Some(&error)).await?;
+        return Ok(());
+    }
+
+    let client = match ningbo_housing::build_client() {
+        Ok(client) => client,
+        Err(error) => {
+            finish_team_sync_job(pool, job_id, "failed", None, Some(&error.to_string())).await?;
+            return Ok(());
+        }
+    };
+    let add_url = credentials
+        .endpoint("Project/AddTeam")
+        .map(|url| url.to_string())
+        .unwrap_or_else(|_| credentials.base_url.to_string());
+    let response = match ningbo_housing::add_team(&client, &credentials, &request).await {
+        Ok(response) => response,
+        Err(error) => {
+            record_team_sync_attempt(
+                pool,
+                job_id,
+                source.project_id,
+                binding_id,
+                &add_url,
+                &request_payload,
+                None,
+                None,
+                "failed",
+                Some(&error.to_string()),
+            )
+            .await?;
+            finish_team_sync_job(pool, job_id, "failed", None, Some(&error.to_string())).await?;
+            return Ok(());
+        }
+    };
+
+    if response.status.is_success()
+        && let Some(external_team_id) = ningbo_housing::extract_created_team_id(&response.body)
+    {
+        record_team_sync_attempt(
+            pool,
+            job_id,
+            source.project_id,
+            binding_id,
+            &add_url,
+            &request_payload,
+            Some(response.status.as_u16()),
+            Some(&response.body),
+            "success",
+            None,
+        )
+        .await?;
+        complete_team_platform_mapping(
+            pool,
+            source,
+            binding_id,
+            job_id,
+            external_team_id,
+            ningbo_housing::success_payload(external_team_id, false, response.body),
+        )
+        .await?;
+        return Ok(());
+    }
+
+    if ningbo_housing::response_indicates_team_exists(&response) {
+        record_team_sync_attempt(
+            pool,
+            job_id,
+            source.project_id,
+            binding_id,
+            &add_url,
+            &request_payload,
+            Some(response.status.as_u16()),
+            Some(&response.body),
+            "conflict",
+            Some("市平台提示班组已存在，转为查询并绑定平台班组 ID"),
+        )
+        .await?;
+        let platform_teams =
+            match ningbo_housing::list_teams(&client, &credentials, &source.name).await {
+                Ok(teams) => teams,
+                Err(error) => {
+                    finish_team_sync_job(
+                        pool,
+                        job_id,
+                        "failed",
+                        Some(&response.body),
+                        Some(&error.to_string()),
+                    )
+                    .await?;
+                    return Ok(());
+                }
+            };
+        if let Some(matched) = ningbo_housing::match_existing_team(
+            &platform_teams,
+            &source.name,
+            &corp_code,
+            &team_type,
+            &source.leader_name,
+        ) {
+            let external_team_id = matched.id;
+            let payload = ningbo_housing::success_payload(
+                external_team_id,
+                true,
+                serde_json::to_value(matched).unwrap_or(Value::Null),
+            );
+            complete_team_platform_mapping(
+                pool,
+                source,
+                binding_id,
+                job_id,
+                external_team_id,
+                payload,
+            )
+            .await?;
+        } else {
+            let error = "市平台提示班组已存在，但 Project/ListTeams 未找到唯一匹配项（项目、班组名、统一社会信用代码、班组类型需一致；班组长仅用于重名消歧）";
+            finish_team_sync_job(pool, job_id, "failed", Some(&response.body), Some(error)).await?;
+        }
+        return Ok(());
+    }
+
+    let error = ningbo_housing::response_message(&response.body);
+    record_team_sync_attempt(
+        pool,
+        job_id,
+        source.project_id,
+        binding_id,
+        &add_url,
+        &request_payload,
+        Some(response.status.as_u16()),
+        Some(&response.body),
+        "failed",
+        Some(&error),
+    )
+    .await?;
+    finish_team_sync_job(pool, job_id, "failed", Some(&response.body), Some(&error)).await?;
+    Ok(())
+}
+
+async fn ensure_ningbo_project_binding(
+    pool: &sqlx::PgPool,
+    project_id: Uuid,
+    credentials: &ningbo_housing::NingboHousingCredentials,
+    config: &Value,
+) -> Result<Uuid, ApiError> {
+    sqlx::query_scalar::<_, Uuid>(
+        r#"
+        INSERT INTO integration_project_bindings (
+            project_id,
+            platform_id,
+            external_project_id,
+            base_url,
+            credentials,
+            config,
+            enabled_events,
+            is_enabled,
+            is_deleted,
+            deleted_at
+        )
+        SELECT
+            $1,
+            platform.id,
+            $2,
+            $3,
+            $4,
+            $5,
+            ARRAY['team.created']::text[],
+            TRUE,
+            FALSE,
+            NULL
+        FROM integration_platforms platform
+        WHERE platform.code = 'ningbo_housing'
+          AND platform.is_deleted = FALSE
+          AND platform.is_enabled = TRUE
+        ON CONFLICT (project_id, platform_id) WHERE is_deleted = FALSE
+        DO UPDATE SET
+            external_project_id = EXCLUDED.external_project_id,
+            base_url = EXCLUDED.base_url,
+            credentials = EXCLUDED.credentials,
+            config = EXCLUDED.config,
+            enabled_events = EXCLUDED.enabled_events,
+            is_enabled = TRUE,
+            updated_at = NOW()
+        RETURNING id
+        "#,
+    )
+    .bind(project_id)
+    .bind(credentials.project_id.to_string())
+    .bind(credentials.base_url.as_str())
+    .bind(serde_json::json!({
+        "app_key": credentials.app_key,
+        "app_secret": credentials.app_secret,
+    }))
+    .bind(config)
+    .fetch_optional(pool)
+    .await
+    .map_err(db_error)?
+    .ok_or_else(|| invalid_input("宁波市住建平台适配器未初始化，请先运行数据库迁移"))
+}
+
+async fn upsert_team_sync_job(
+    pool: &sqlx::PgPool,
+    source: &TeamPlatformSyncSource,
+    config_id: Uuid,
+    binding_id: Option<Uuid>,
+    request_payload: &Value,
+) -> Result<Uuid, ApiError> {
+    sqlx::query_scalar::<_, Uuid>(
+        r#"
+        INSERT INTO integration_jobs (
+            project_id,
+            binding_id,
+            platform_code,
+            operation,
+            entity_type,
+            local_entity_id,
+            idempotency_key,
+            request_payload,
+            status,
+            attempt_count,
+            next_attempt_at,
+            last_error,
+            completed_at
+        )
+        VALUES ($1, $2, 'ningbo_housing', 'Project/AddTeam', 'team', $3, $4, $5, 'pending', 0, NOW(), NULL, NULL)
+        ON CONFLICT (idempotency_key)
+        DO UPDATE SET
+            binding_id = EXCLUDED.binding_id,
+            request_payload = EXCLUDED.request_payload,
+            status = 'pending',
+            next_attempt_at = NOW(),
+            last_error = NULL,
+            completed_at = NULL,
+            updated_at = NOW()
+        RETURNING id
+        "#,
+    )
+    .bind(source.project_id)
+    .bind(binding_id)
+    .bind(source.id)
+    .bind(format!(
+        "ningbo_housing:team:create:{}:{config_id}",
+        source.id
+    ))
+    .bind(request_payload)
+    .fetch_one(pool)
+    .await
+    .map_err(db_error)
+}
+
+async fn record_team_sync_configuration_failure(
+    pool: &sqlx::PgPool,
+    source: &TeamPlatformSyncSource,
+    config_id: Uuid,
+    error: &str,
+) -> Result<(), ApiError> {
+    let payload = serde_json::json!({ "team_name": source.name });
+    let job_id = upsert_team_sync_job(pool, source, config_id, None, &payload).await?;
+    finish_team_sync_job(pool, job_id, "failed", None, Some(error)).await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn record_team_sync_attempt(
+    pool: &sqlx::PgPool,
+    job_id: Uuid,
+    project_id: Uuid,
+    binding_id: Uuid,
+    request_url: &str,
+    request_body: &Value,
+    response_status: Option<u16>,
+    response_body: Option<&Value>,
+    status: &str,
+    error_message: Option<&str>,
+) -> Result<(), ApiError> {
+    let attempt_no = sqlx::query_scalar::<_, i32>(
+        "SELECT COALESCE(MAX(attempt_no), 0) + 1 FROM integration_attempts WHERE job_id = $1",
+    )
+    .bind(job_id)
+    .fetch_one(pool)
+    .await
+    .map_err(db_error)?;
+    sqlx::query(
+        r#"
+        INSERT INTO integration_attempts (
+            job_id,
+            project_id,
+            binding_id,
+            attempt_no,
+            transport,
+            request_method,
+            request_url,
+            request_body,
+            response_status,
+            response_body,
+            status,
+            error_message
+        )
+        VALUES ($1, $2, $3, $4, 'http', 'POST', $5, $6, $7, $8, $9, $10)
+        "#,
+    )
+    .bind(job_id)
+    .bind(project_id)
+    .bind(binding_id)
+    .bind(attempt_no)
+    .bind(request_url)
+    .bind(request_body)
+    .bind(response_status.map(i32::from))
+    .bind(response_body)
+    .bind(status)
+    .bind(error_message)
+    .execute(pool)
+    .await
+    .map_err(db_error)?;
+    Ok(())
+}
+
+async fn complete_team_platform_mapping(
+    pool: &sqlx::PgPool,
+    source: &TeamPlatformSyncSource,
+    binding_id: Uuid,
+    job_id: Uuid,
+    external_team_id: i64,
+    payload: Value,
+) -> Result<(), ApiError> {
+    let mut transaction = pool.begin().await.map_err(db_error)?;
+    sqlx::query(
+        r#"
+        UPDATE integration_entity_mappings mapping
+        SET is_deleted = TRUE,
+            deleted_at = NOW(),
+            updated_at = NOW()
+        WHERE mapping.binding_id = $1
+          AND mapping.entity_type = 'team'
+          AND mapping.external_entity_id = $2
+          AND mapping.local_entity_id <> $3
+          AND mapping.is_deleted = FALSE
+          AND NOT EXISTS (
+              SELECT 1
+              FROM construction_teams existing_team
+              WHERE existing_team.id = mapping.local_entity_id
+                AND existing_team.is_deleted = FALSE
+          )
+        "#,
+    )
+    .bind(binding_id)
+    .bind(external_team_id.to_string())
+    .bind(source.id)
+    .execute(&mut *transaction)
+    .await
+    .map_err(db_error)?;
+
+    let mapping_result = sqlx::query(
+        r#"
+        INSERT INTO integration_entity_mappings (
+            binding_id,
+            project_id,
+            entity_type,
+            local_entity_id,
+            external_entity_id,
+            external_payload,
+            last_pushed_at,
+            is_deleted,
+            deleted_at
+        )
+        VALUES ($1, $2, 'team', $3, $4, $5, NOW(), FALSE, NULL)
+        ON CONFLICT (binding_id, entity_type, local_entity_id) WHERE is_deleted = FALSE
+        DO UPDATE SET
+            external_entity_id = EXCLUDED.external_entity_id,
+            external_payload = EXCLUDED.external_payload,
+            last_pushed_at = NOW(),
+            updated_at = NOW()
+        "#,
+    )
+    .bind(binding_id)
+    .bind(source.project_id)
+    .bind(source.id)
+    .bind(external_team_id.to_string())
+    .bind(&payload)
+    .execute(&mut *transaction)
+    .await;
+    if let Err(error) = mapping_result {
+        let _ = transaction.rollback().await;
+        let message = if error
+            .as_database_error()
+            .and_then(|database_error| database_error.constraint())
+            == Some("idx_integration_entity_mappings_external_active")
+        {
+            "该市平台班组 ID 已绑定其他本地班组，已停止自动绑定".to_owned()
+        } else {
+            format!("保存市平台班组 ID 失败：{error}")
+        };
+        finish_team_sync_job(pool, job_id, "failed", Some(&payload), Some(&message)).await?;
+        return Ok(());
+    }
+
+    transaction.commit().await.map_err(db_error)?;
+
+    finish_team_sync_job(pool, job_id, "success", Some(&payload), None).await?;
+    sqlx::query("UPDATE integration_project_bindings SET last_sync_at = NOW(), updated_at = NOW() WHERE id = $1")
+        .bind(binding_id)
+        .execute(pool)
+        .await
+        .map_err(db_error)?;
+    Ok(())
+}
+
+async fn finish_team_sync_job(
+    pool: &sqlx::PgPool,
+    job_id: Uuid,
+    status: &str,
+    response_payload: Option<&Value>,
+    error: Option<&str>,
+) -> Result<(), ApiError> {
+    sqlx::query(
+        r#"
+        UPDATE integration_jobs
+        SET status = $2,
+            response_payload = $3,
+            attempt_count = attempt_count + 1,
+            last_error = $4,
+            completed_at = CASE WHEN $2 IN ('success', 'failed') THEN NOW() ELSE NULL END,
+            updated_at = NOW()
+        WHERE id = $1
+        "#,
+    )
+    .bind(job_id)
+    .bind(status)
+    .bind(response_payload)
+    .bind(error)
+    .execute(pool)
+    .await
+    .map_err(db_error)?;
+    Ok(())
+}
+
+fn json_string_from_keys(value: &Value, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| {
+        value
+            .get(*key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+    })
+}
+
+fn ningbo_team_type_label(work_type: Option<i32>) -> String {
+    match work_type {
+        Some(1) => "钢筋工",
+        Some(2) => "木工",
+        Some(3) => "机械设备安装工",
+        Some(4) => "架子工",
+        Some(5) => "混凝土工",
+        Some(6) => "砌筑工",
+        Some(7) => "建筑电工",
+        Some(8) => "电焊工",
+        Some(9) => "管道工",
+        Some(10) => "测量放线工",
+        Some(11 | 12) => "装饰装修工",
+        Some(13) => "防水工",
+        Some(14) => "挖掘铲运和桩工机械司机",
+        Some(15) => "模板工",
+        Some(16) => "通风工",
+        Some(17) => "安装起重工",
+        Some(18) => "安装钳工",
+        Some(19) => "电气设备安装调试工",
+        Some(20) => "变电安装工",
+        Some(21) => "司泵工",
+        Some(22) => "桩机操作工",
+        Some(23) => "起重信号工",
+        Some(24) => "建筑起重机械安装拆卸工",
+        Some(25) => "室内成套设施安装工",
+        Some(26) => "建筑门窗幕墙安装工",
+        Some(27) => "幕墙制作工",
+        Some(28) => "石工",
+        Some(29) => "除尘工",
+        Some(30) => "爆破工",
+        Some(31) => "线路架设工",
+        Some(32) => "古建筑传统石工",
+        Some(33) => "古建筑传统瓦工",
+        Some(34) => "古建筑传统彩画工",
+        Some(35) => "古建筑传统木工",
+        Some(36) => "古建筑传统油工",
+        Some(37) => "金属工",
+        Some(38) => "杂工",
+        Some(900) => "其它",
+        _ => "",
+    }
+    .to_owned()
 }
 
 pub async fn list_teams(
@@ -2829,14 +3571,7 @@ pub async fn list_teams(
         scoped_columns.push(("unit_id", unit_id));
     }
 
-    list_rows_page(
-        state.db.pool(),
-        "construction_teams",
-        &[("project_id", project_id)],
-        &scoped_columns,
-        &params,
-    )
-    .await
+    list_team_rows_page(state.db.pool(), project_id, &scoped_columns, &params).await
 }
 
 pub async fn get_team(
@@ -2860,6 +3595,7 @@ pub async fn update_team(
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+    let body = normalize_team_update_type(state.db.pool(), project_id, team_id, body).await?;
     update_row(
         state.db.pool(),
         "construction_teams",
@@ -2870,18 +3606,327 @@ pub async fn update_team(
     .await
 }
 
+struct TeamPlatformExitTarget {
+    binding_id: Uuid,
+    external_team_id: i64,
+    config: Value,
+}
+
+async fn upsert_team_exit_job(
+    pool: &sqlx::PgPool,
+    project_id: Uuid,
+    team_id: Uuid,
+    binding_id: Uuid,
+    request_payload: &Value,
+) -> Result<Uuid, ApiError> {
+    sqlx::query_scalar::<_, Uuid>(
+        r#"
+        INSERT INTO integration_jobs (
+            project_id,
+            binding_id,
+            platform_code,
+            operation,
+            entity_type,
+            local_entity_id,
+            idempotency_key,
+            request_payload,
+            status,
+            attempt_count,
+            next_attempt_at,
+            last_error,
+            completed_at
+        )
+        VALUES ($1, $2, 'ningbo_housing', 'Project/TeamExit', 'team', $3, $4, $5, 'pending', 0, NOW(), NULL, NULL)
+        ON CONFLICT (idempotency_key)
+        DO UPDATE SET
+            request_payload = EXCLUDED.request_payload,
+            status = 'pending',
+            next_attempt_at = NOW(),
+            last_error = NULL,
+            completed_at = NULL,
+            updated_at = NOW()
+        RETURNING id
+        "#,
+    )
+    .bind(project_id)
+    .bind(binding_id)
+    .bind(team_id)
+    .bind(format!(
+        "ningbo_housing:team:exit:{team_id}:{binding_id}"
+    ))
+    .bind(request_payload)
+    .fetch_one(pool)
+    .await
+    .map_err(db_error)
+}
+
+async fn exit_team_from_ningbo_platforms(
+    pool: &sqlx::PgPool,
+    project_id: Uuid,
+    team_id: Uuid,
+) -> Result<(), ApiError> {
+    let team = sqlx::query(
+        r#"
+        SELECT COALESCE(name, '') AS name, is_manage_team, work_type
+        FROM construction_teams
+        WHERE project_id = $1
+          AND id = $2
+          AND is_deleted = FALSE
+        "#,
+    )
+    .bind(project_id)
+    .bind(team_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(db_error)?
+    .ok_or_else(not_found)?;
+    let team_name: String = team.try_get("name").map_err(db_error)?;
+    let is_manage_team: bool = team.try_get("is_manage_team").map_err(db_error)?;
+    let work_type: Option<i32> = team.try_get("work_type").map_err(db_error)?;
+    if is_manage_team || work_type == Some(1001) {
+        return Ok(());
+    }
+
+    let target_rows = sqlx::query(
+        r#"
+        SELECT mapping.external_entity_id, binding.id AS binding_id, binding.config
+        FROM integration_entity_mappings mapping
+        JOIN integration_project_bindings binding
+          ON binding.id = mapping.binding_id
+         AND binding.is_deleted = FALSE
+        JOIN integration_platforms platform
+          ON platform.id = binding.platform_id
+         AND platform.code = 'ningbo_housing'
+         AND platform.is_deleted = FALSE
+        WHERE mapping.project_id = $1
+          AND mapping.entity_type = 'team'
+          AND mapping.local_entity_id = $2
+          AND mapping.is_deleted = FALSE
+        ORDER BY mapping.created_at, mapping.id
+        "#,
+    )
+    .bind(project_id)
+    .bind(team_id)
+    .fetch_all(pool)
+    .await
+    .map_err(db_error)?;
+    let mut targets = Vec::with_capacity(target_rows.len());
+    for row in target_rows {
+        let external_team_id = row
+            .try_get::<String, _>("external_entity_id")
+            .map_err(db_error)?
+            .parse::<i64>()
+            .map_err(|_| invalid_input("市平台班组 ID 无效，已停止删除本地班组"))?;
+        targets.push(TeamPlatformExitTarget {
+            binding_id: row.try_get("binding_id").map_err(db_error)?,
+            external_team_id,
+            config: row.try_get("config").map_err(db_error)?,
+        });
+    }
+
+    for target in targets {
+        let exit_request = ningbo_housing::team_exit_request(
+            target.external_team_id,
+            &team_name,
+            chrono::Utc::now().format("%Y-%m-%d").to_string(),
+        );
+        let request_payload = serde_json::to_value(&exit_request).unwrap_or(Value::Null);
+        let job_id = upsert_team_exit_job(
+            pool,
+            project_id,
+            team_id,
+            target.binding_id,
+            &request_payload,
+        )
+        .await?;
+        let credentials =
+            match ningbo_housing::NingboHousingCredentials::from_config(&target.config) {
+                Ok(credentials) => credentials,
+                Err(error) => {
+                    let message = error.to_string();
+                    finish_team_sync_job(pool, job_id, "failed", None, Some(&message)).await?;
+                    return Err(platform_exit_error(&message));
+                }
+            };
+        let client = match ningbo_housing::build_client() {
+            Ok(client) => client,
+            Err(error) => {
+                let message = error.to_string();
+                finish_team_sync_job(pool, job_id, "failed", None, Some(&message)).await?;
+                return Err(platform_exit_error(&message));
+            }
+        };
+        let exit_url = credentials
+            .endpoint("Project/TeamExit")
+            .map(|url| url.to_string())
+            .unwrap_or_else(|_| credentials.base_url.to_string());
+        let response = match ningbo_housing::exit_team(&client, &credentials, &exit_request).await {
+            Ok(response) => response,
+            Err(error) => {
+                let message = error.to_string();
+                record_team_sync_attempt(
+                    pool,
+                    job_id,
+                    project_id,
+                    target.binding_id,
+                    &exit_url,
+                    &request_payload,
+                    None,
+                    None,
+                    "failed",
+                    Some(&message),
+                )
+                .await?;
+                finish_team_sync_job(pool, job_id, "failed", None, Some(&message)).await?;
+                return Err(platform_exit_error(&message));
+            }
+        };
+
+        let mut exited = response.status.is_success();
+        if !exited
+            && let Ok(teams) = ningbo_housing::list_teams(&client, &credentials, &team_name).await
+        {
+            exited = teams
+                .iter()
+                .any(|team| team.id == target.external_team_id && team.is_exited);
+        }
+        if exited {
+            let response_payload = serde_json::json!({
+                "team_id": target.external_team_id,
+                "is_exited": true,
+                "platform_response": response.body,
+            });
+            record_team_sync_attempt(
+                pool,
+                job_id,
+                project_id,
+                target.binding_id,
+                &exit_url,
+                &request_payload,
+                Some(response.status.as_u16()),
+                Some(&response_payload),
+                "success",
+                None,
+            )
+            .await?;
+            finish_team_sync_job(pool, job_id, "success", Some(&response_payload), None).await?;
+            sqlx::query(
+                "UPDATE integration_project_bindings SET last_sync_at = NOW(), updated_at = NOW() WHERE id = $1",
+            )
+            .bind(target.binding_id)
+            .execute(pool)
+            .await
+            .map_err(db_error)?;
+            continue;
+        }
+
+        let message = ningbo_housing::response_message(&response.body);
+        record_team_sync_attempt(
+            pool,
+            job_id,
+            project_id,
+            target.binding_id,
+            &exit_url,
+            &request_payload,
+            Some(response.status.as_u16()),
+            Some(&response.body),
+            "failed",
+            Some(&message),
+        )
+        .await?;
+        finish_team_sync_job(pool, job_id, "failed", Some(&response.body), Some(&message)).await?;
+        return Err(platform_exit_error(&message));
+    }
+    Ok(())
+}
+
+fn platform_exit_error(message: &str) -> ApiError {
+    ApiError::default()
+        .with_code(StatusCode::BAD_GATEWAY)
+        .with_message(format!(
+            "宁波市住建平台班组退场失败，本地班组未删除：{message}"
+        ))
+}
+
+async fn normalize_team_update_type(
+    pool: &sqlx::PgPool,
+    project_id: Uuid,
+    team_id: Uuid,
+    mut body: Value,
+) -> Result<Value, ApiError> {
+    let (current_is_manage_team, current_work_type) = sqlx::query_as::<_, (bool, Option<i32>)>(
+        r#"
+        SELECT is_manage_team, work_type
+        FROM construction_teams
+        WHERE project_id = $1
+          AND id = $2
+          AND is_deleted = FALSE
+        "#,
+    )
+    .bind(project_id)
+    .bind(team_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(db_error)?
+    .ok_or_else(not_found)?;
+    let object = body
+        .as_object_mut()
+        .ok_or_else(|| invalid_input("班组数据格式错误"))?;
+    let target_is_manage_team = json_bool_value(object.get("is_manage_team"))
+        .unwrap_or(current_is_manage_team)
+        || json_i32_value(object.get("work_type")) == Some(1001);
+    if target_is_manage_team {
+        object.insert("is_manage_team".to_owned(), Value::Bool(true));
+        object.insert("work_type".to_owned(), Value::from(1001));
+        return Ok(body);
+    }
+
+    let target_work_type = if object.contains_key("work_type") {
+        json_i32_value(object.get("work_type"))
+    } else {
+        current_work_type
+    };
+    match target_work_type {
+        Some(work_type) if !ningbo_team_type_label(Some(work_type)).is_empty() => Ok(body),
+        Some(_) => Err(invalid_input("班组类型不在市平台支持的类型清单中")),
+        None => {
+            object.insert("work_type".to_owned(), Value::from(900));
+            Ok(body)
+        }
+    }
+}
+
 pub async fn delete_team(
     State(state): State<AppState>,
     Extension(auth_user): Extension<AuthUser>,
     Path((project_id, team_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<()> {
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
-    delete_row(
+    exit_team_from_ningbo_platforms(state.db.pool(), project_id, team_id).await?;
+    let response = delete_row(
         state.db.pool(),
         "construction_teams",
         &[("project_id", project_id), ("id", team_id)],
     )
+    .await?;
+    sqlx::query(
+        r#"
+        UPDATE integration_entity_mappings
+        SET is_deleted = TRUE,
+            deleted_at = NOW(),
+            updated_at = NOW()
+        WHERE project_id = $1
+          AND entity_type = 'team'
+          AND local_entity_id = $2
+          AND is_deleted = FALSE
+        "#,
+    )
+    .bind(project_id)
+    .bind(team_id)
+    .execute(state.db.pool())
     .await
+    .map_err(db_error)?;
+    Ok(response)
 }
 
 pub async fn create_worker(
@@ -4767,12 +5812,22 @@ pub async fn download_worker_contract(
             .get(object_key)
             .await
             .map_err(|error| ApiError::default().with_debug(error.to_string()))?;
-        let rendered =
-            render_docx_contract_template(&template_bytes, &variables).map_err(|error| {
-                ApiError::default()
-                    .with_code(StatusCode::BAD_REQUEST)
-                    .with_message(format!("合同模板文件解析失败：{error}"))
-            })?;
+        let remote_images =
+            load_remote_docx_images(&variables, state.storage.public_base_url()).await;
+        let rendered = tokio::task::spawn_blocking(move || {
+            render_docx_contract_template(&template_bytes, &variables, &remote_images)
+        })
+        .await
+        .map_err(|error| {
+            ApiError::default()
+                .with_message("合同文件生成失败")
+                .with_debug(format!("DOCX render task failed: {error}"))
+        })?
+        .map_err(|error| {
+            ApiError::default()
+                .with_code(StatusCode::BAD_REQUEST)
+                .with_message(format!("合同模板文件解析失败：{error}"))
+        })?;
         let filename = contract_filename(
             template
                 .template_file_name
@@ -4960,15 +6015,195 @@ pub async fn create_platform_log(
 
 pub async fn list_platform_logs(State(state): State<AppState>, uri: Uri) -> ApiResult<Value> {
     let params = module_list_params(&uri)?;
-    let mut data =
-        list_module_rows_value(state.db.pool(), "construction_platform_logs", &params, None)
-            .await?;
-    let summary = platform_log_summary(state.db.pool(), &params).await?;
-    if let Some(object) = data.as_object_mut() {
-        object.insert("summary".to_owned(), summary);
-    }
-
+    let data = list_unified_platform_logs(state.db.pool(), &params).await?;
     Ok(ApiSuccess::default().with_data(data))
+}
+
+async fn list_unified_platform_logs(
+    pool: &sqlx::PgPool,
+    params: &ModuleListParams,
+) -> Result<Value, ApiError> {
+    let offset = (params.page - 1) * params.page_size;
+    let mut query = QueryBuilder::<Postgres>::new(
+        r#"
+        WITH unified_logs AS (
+            SELECT
+                log.id,
+                log.project_id,
+                project.name AS project_name,
+                log.platform_config_id,
+                log.is_deleted,
+                log.platform_name,
+                config.platform_type,
+                log.operation,
+                log.direction,
+                log.status,
+                log.request_count,
+                log.success_count,
+                log.failure_count,
+                log.message,
+                log.payload,
+                log.occurred_at,
+                log.created_by_user_id,
+                log.updated_by_user_id,
+                log.created_at,
+                log.updated_at,
+                log.deleted_at,
+                'manual'::text AS source
+            FROM construction_platform_logs log
+            LEFT JOIN construction_projects project
+              ON project.id = log.project_id
+             AND project.is_deleted = FALSE
+            LEFT JOIN construction_platform_configs config
+              ON config.id = log.platform_config_id
+             AND config.is_deleted = FALSE
+            WHERE log.is_deleted = FALSE
+
+            UNION ALL
+
+            SELECT
+                job.id,
+                job.project_id,
+                project.name AS project_name,
+                config.id AS platform_config_id,
+                FALSE AS is_deleted,
+                COALESCE(config.platform_name, platform.name, job.platform_code) AS platform_name,
+                COALESCE(config.platform_type, platform.code, job.platform_code) AS platform_type,
+                CASE
+                    WHEN job.entity_type IN ('team', 'construction_team')
+                         AND job.operation IN ('Project/AddTeam', 'addTeam') THEN '班组新增'
+                    ELSE job.operation
+                END AS operation,
+                'push'::text AS direction,
+                job.status,
+                GREATEST(
+                    job.attempt_count,
+                    (SELECT COUNT(*)::int FROM integration_attempts attempt WHERE attempt.job_id = job.id),
+                    CASE WHEN job.status = 'pending' THEN 0 ELSE 1 END
+                )::int AS request_count,
+                CASE WHEN job.status IN ('success', 'completed') THEN 1 ELSE 0 END::int AS success_count,
+                CASE WHEN job.status IN ('failed', 'dead_letter', 'cancelled') THEN 1 ELSE 0 END::int AS failure_count,
+                COALESCE(
+                    NULLIF(job.last_error, ''),
+                    CASE
+                        WHEN job.response_payload ->> 'recovered_existing' = 'true'
+                            THEN '平台提示班组重复，已查询并绑定现有平台班组 ID'
+                        WHEN job.status IN ('success', 'completed') THEN '上报成功'
+                        WHEN job.status = 'pending' THEN '等待上报'
+                        ELSE NULL
+                    END
+                ) AS message,
+                jsonb_build_object(
+                    'source', 'integration_job',
+                    'entity_type', job.entity_type,
+                    'local_entity_id', job.local_entity_id,
+                    'request', job.request_payload,
+                    'response', job.response_payload
+                ) AS payload,
+                job.updated_at AS occurred_at,
+                NULL::uuid AS created_by_user_id,
+                NULL::uuid AS updated_by_user_id,
+                job.created_at,
+                job.updated_at,
+                NULL::timestamptz AS deleted_at,
+                'system'::text AS source
+            FROM integration_jobs job
+            LEFT JOIN construction_projects project
+              ON project.id = job.project_id
+             AND project.is_deleted = FALSE
+            LEFT JOIN integration_project_bindings binding
+              ON binding.id = job.binding_id
+             AND binding.is_deleted = FALSE
+            LEFT JOIN integration_platforms platform
+              ON platform.id = binding.platform_id
+             AND platform.is_deleted = FALSE
+            LEFT JOIN LATERAL (
+                SELECT config.id, config.platform_name, config.platform_type
+                FROM construction_platform_configs config
+                WHERE config.project_id = job.project_id
+                  AND config.is_deleted = FALSE
+                  AND (
+                      config.platform_type = job.platform_code
+                      OR (config.platform_type = 'ningbo_housing' AND job.platform_code = 'zhenhai')
+                  )
+                ORDER BY config.is_enabled DESC, config.created_at, config.id
+                LIMIT 1
+            ) config ON TRUE
+        ), filtered_logs AS (
+            SELECT *
+            FROM unified_logs log
+            WHERE TRUE
+        "#,
+    );
+    if let Some(project_id) = params.project_id {
+        query.push(" AND log.project_id = ").push_bind(project_id);
+    }
+    if let Some(status) = &params.status {
+        query.push(" AND log.status = ").push_bind(status.clone());
+    }
+    if let Some(platform_type) = &params.platform_type {
+        query
+            .push(" AND log.platform_type = ")
+            .push_bind(platform_type.clone());
+    }
+    if !params.keyword.is_empty() {
+        let pattern = format!("%{}%", params.keyword);
+        query
+            .push(" AND (COALESCE(log.project_name, '') ILIKE ")
+            .push_bind(pattern.clone())
+            .push(" OR COALESCE(log.platform_name, '') ILIKE ")
+            .push_bind(pattern.clone())
+            .push(" OR COALESCE(log.operation, '') ILIKE ")
+            .push_bind(pattern.clone())
+            .push(" OR COALESCE(log.message, '') ILIKE ")
+            .push_bind(pattern)
+            .push(")");
+    }
+    query
+        .push(
+            r#"
+        )
+        SELECT jsonb_build_object(
+            'items', COALESCE((
+                SELECT jsonb_agg(to_jsonb(page) ORDER BY page.occurred_at DESC, page.id DESC)
+                FROM (
+                    SELECT *
+                    FROM filtered_logs
+                    ORDER BY occurred_at DESC, id DESC
+                    LIMIT
+            "#,
+        )
+        .push_bind(params.page_size)
+        .push(" OFFSET ")
+        .push_bind(offset)
+        .push(
+            r#"
+                ) page
+            ), '[]'::jsonb),
+            'total', (SELECT COUNT(*)::int FROM filtered_logs),
+            'page',
+            "#,
+        )
+        .push_bind(params.page)
+        .push(", 'page_size', ")
+        .push_bind(params.page_size)
+        .push(
+            r#",
+            'summary', jsonb_build_object(
+                'today_request_count', COALESCE((SELECT SUM(request_count)::int FROM filtered_logs WHERE (occurred_at AT TIME ZONE 'Asia/Shanghai')::date = (NOW() AT TIME ZONE 'Asia/Shanghai')::date), 0),
+                'today_success_count', COALESCE((SELECT SUM(success_count)::int FROM filtered_logs WHERE (occurred_at AT TIME ZONE 'Asia/Shanghai')::date = (NOW() AT TIME ZONE 'Asia/Shanghai')::date), 0),
+                'today_failure_count', COALESCE((SELECT SUM(failure_count)::int FROM filtered_logs WHERE (occurred_at AT TIME ZONE 'Asia/Shanghai')::date = (NOW() AT TIME ZONE 'Asia/Shanghai')::date), 0),
+                'today_log_count', (SELECT COUNT(*)::int FROM filtered_logs WHERE (occurred_at AT TIME ZONE 'Asia/Shanghai')::date = (NOW() AT TIME ZONE 'Asia/Shanghai')::date)
+            )
+        )
+        "#,
+        );
+
+    query
+        .build_query_scalar::<Value>()
+        .fetch_one(pool)
+        .await
+        .map_err(db_error)
 }
 
 pub async fn get_platform_log(
@@ -5623,6 +6858,7 @@ fn render_text_contract_template(content: &str, variables: &HashMap<String, Stri
 fn render_docx_contract_template(
     template_bytes: &[u8],
     variables: &HashMap<String, String>,
+    remote_images: &HashMap<String, DocxImage>,
 ) -> Result<Bytes, String> {
     let reader = Cursor::new(template_bytes);
     let mut archive = ZipArchive::new(reader).map_err(|error| error.to_string())?;
@@ -5650,7 +6886,8 @@ fn render_docx_contract_template(
             continue;
         }
         let xml = String::from_utf8(entry.bytes.clone()).map_err(|error| error.to_string())?;
-        let rendered = render_docx_xml_text_nodes(&entry.name, &xml, variables, &mut context);
+        let rendered =
+            render_docx_xml_text_nodes(&entry.name, &xml, variables, remote_images, &mut context);
         rendered_parts.insert(entry.name.clone(), rendered.into_bytes());
     }
 
@@ -5779,6 +7016,7 @@ fn render_docx_xml_text_nodes(
     part_name: &str,
     xml: &str,
     variables: &HashMap<String, String>,
+    remote_images: &HashMap<String, DocxImage>,
     context: &mut DocxRenderContext,
 ) -> String {
     let nodes = collect_text_nodes(xml);
@@ -5802,15 +7040,13 @@ fn render_docx_xml_text_nodes(
         else {
             continue;
         };
-        if is_docx_image_variable(&name) {
-            if let Some(image) = load_docx_image(value) {
-                if let Some(raw) =
-                    create_image_replacement(part_name, &nodes, start, end, image, context)
-                {
-                    raw_replacements.push(raw);
-                    continue;
-                }
-            }
+        if is_docx_image_variable(&name)
+            && let Some(image) = load_docx_image(value, remote_images)
+            && let Some(raw) =
+                create_image_replacement(part_name, &nodes, start, end, image, context)
+        {
+            raw_replacements.push(raw);
+            continue;
         }
         apply_text_replacement(&nodes, &mut replacements, start, end, value);
     }
@@ -6003,13 +7239,184 @@ fn word_relationship_part_name(part_name: &str) -> Option<String> {
     Some(format!("{dir}/_rels/{file}.rels"))
 }
 
+const MAX_DOCX_IMAGE_BYTES: usize = 5 * 1024 * 1024;
+const MAX_REMOTE_DOCX_IMAGES: usize = 12;
+const DOCX_IMAGE_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
+const DOCX_IMAGE_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+#[derive(Clone, Debug)]
 struct DocxImage {
     extension: String,
     content_type: String,
     bytes: Vec<u8>,
 }
 
-fn load_docx_image(raw_value: &str) -> Option<DocxImage> {
+#[derive(Debug)]
+struct TrustedImageBase {
+    scheme: String,
+    host: String,
+    port: Option<u16>,
+    path_prefix: String,
+}
+
+impl TrustedImageBase {
+    fn parse(value: &str) -> Option<Self> {
+        let url = reqwest::Url::parse(value).ok()?;
+        if !matches!(url.scheme(), "http" | "https")
+            || !url.username().is_empty()
+            || url.password().is_some()
+        {
+            return None;
+        }
+        Some(Self {
+            scheme: url.scheme().to_owned(),
+            host: url.host_str()?.to_owned(),
+            port: url.port_or_known_default(),
+            path_prefix: url.path().trim_end_matches('/').to_owned(),
+        })
+    }
+
+    fn allows(&self, url: &reqwest::Url) -> bool {
+        if url.scheme() != self.scheme
+            || url.host_str() != Some(self.host.as_str())
+            || url.port_or_known_default() != self.port
+            || !url.username().is_empty()
+            || url.password().is_some()
+        {
+            return false;
+        }
+
+        self.path_prefix.is_empty()
+            || url.path() == self.path_prefix
+            || url
+                .path()
+                .strip_prefix(&self.path_prefix)
+                .is_some_and(|suffix| suffix.starts_with('/'))
+    }
+}
+
+async fn load_remote_docx_images(
+    variables: &HashMap<String, String>,
+    public_base_url: &str,
+) -> HashMap<String, DocxImage> {
+    let Some(trusted_base) = TrustedImageBase::parse(public_base_url) else {
+        tracing::warn!("DOCX remote images disabled: invalid storage public base URL");
+        return HashMap::new();
+    };
+    let Ok(client) = reqwest::Client::builder()
+        .connect_timeout(DOCX_IMAGE_CONNECT_TIMEOUT)
+        .timeout(DOCX_IMAGE_REQUEST_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+    else {
+        tracing::warn!("DOCX remote images disabled: HTTP client initialization failed");
+        return HashMap::new();
+    };
+
+    let urls = variables
+        .iter()
+        .filter(|(name, _)| is_docx_image_variable(name))
+        .filter_map(|(_, value)| extract_remote_docx_image_url(value))
+        .collect::<HashSet<_>>();
+    let mut downloads = tokio::task::JoinSet::new();
+    for raw_url in urls.into_iter().take(MAX_REMOTE_DOCX_IMAGES) {
+        let Ok(url) = reqwest::Url::parse(&raw_url) else {
+            continue;
+        };
+        if !trusted_base.allows(&url) {
+            tracing::warn!(host = url.host_str(), "Rejected untrusted DOCX image URL");
+            continue;
+        }
+        let client = client.clone();
+        downloads.spawn(async move {
+            let result = download_remote_docx_image(&client, url).await;
+            (raw_url, result)
+        });
+    }
+
+    let mut images = HashMap::new();
+    while let Some(result) = downloads.join_next().await {
+        match result {
+            Ok((raw_url, Ok(image))) => {
+                images.insert(raw_url, image);
+            }
+            Ok((_, Err(error))) => {
+                tracing::warn!(%error, "DOCX remote image download skipped");
+            }
+            Err(error) => tracing::warn!(%error, "DOCX remote image task failed"),
+        }
+    }
+    images
+}
+
+async fn download_remote_docx_image(
+    client: &reqwest::Client,
+    url: reqwest::Url,
+) -> Result<DocxImage, String> {
+    let mut response = client
+        .get(url)
+        .header(reqwest::header::ACCEPT, "image/png,image/jpeg,image/gif")
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("unexpected HTTP status {}", response.status()));
+    }
+    if response
+        .content_length()
+        .is_some_and(|size| size > MAX_DOCX_IMAGE_BYTES as u64)
+    {
+        return Err("image exceeds size limit".to_owned());
+    }
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .map(str::trim)
+        .ok_or_else(|| "missing image content type".to_owned())?
+        .to_owned();
+    let extension = image_extension_for_content_type(&content_type)
+        .ok_or_else(|| "unsupported image content type".to_owned())?;
+
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|error| error.to_string())? {
+        append_bounded_image_bytes(&mut bytes, &chunk)?;
+    }
+    if !image_bytes_match_content_type(&content_type, &bytes) {
+        return Err("image content does not match content type".to_owned());
+    }
+    Ok(DocxImage {
+        extension,
+        content_type,
+        bytes,
+    })
+}
+
+fn append_bounded_image_bytes(target: &mut Vec<u8>, chunk: &[u8]) -> Result<(), String> {
+    if target.len().saturating_add(chunk.len()) > MAX_DOCX_IMAGE_BYTES {
+        return Err("image exceeds size limit".to_owned());
+    }
+    target.extend_from_slice(chunk);
+    Ok(())
+}
+
+fn extract_remote_docx_image_url(raw_value: &str) -> Option<String> {
+    let value = raw_value.trim();
+    if let Ok(json) = serde_json::from_str::<Value>(value) {
+        return ["public_url", "url", "image_url"]
+            .into_iter()
+            .filter_map(|key| json.get(key).and_then(Value::as_str))
+            .find_map(extract_remote_docx_image_url);
+    }
+    let url = reqwest::Url::parse(value).ok()?;
+    matches!(url.scheme(), "http" | "https").then(|| value.to_owned())
+}
+
+fn load_docx_image(
+    raw_value: &str,
+    remote_images: &HashMap<String, DocxImage>,
+) -> Option<DocxImage> {
     let value = raw_value.trim();
     if value.is_empty() {
         return None;
@@ -6019,18 +7426,15 @@ fn load_docx_image(raw_value: &str) -> Option<DocxImage> {
     }
     if let Ok(json) = serde_json::from_str::<Value>(value) {
         for key in ["public_url", "url", "image_url"] {
-            if let Some(url) = json.get(key).and_then(Value::as_str) {
-                if let Some(image) = load_docx_image(url) {
-                    return Some(image);
-                }
+            if let Some(url) = json.get(key).and_then(Value::as_str)
+                && let Some(image) = load_docx_image(url, remote_images)
+            {
+                return Some(image);
             }
         }
         return None;
     }
-    if value.starts_with("http://") || value.starts_with("https://") {
-        return load_http_image(value);
-    }
-    None
+    remote_images.get(value).cloned()
 }
 
 fn load_data_uri_image(value: &str) -> Option<DocxImage> {
@@ -6043,32 +7447,14 @@ fn load_data_uri_image(value: &str) -> Option<DocxImage> {
         .trim_end_matches(";base64")
         .to_owned();
     let extension = image_extension_for_content_type(&content_type)?;
-    let bytes = general_purpose::STANDARD.decode(payload).ok()?;
-    Some(DocxImage {
-        extension,
-        content_type,
-        bytes,
-    })
-}
-
-fn load_http_image(url: &str) -> Option<DocxImage> {
-    let response = ureq::get(url).call().ok()?;
-    if !response.status().is_success() {
+    if payload.len() > MAX_DOCX_IMAGE_BYTES.saturating_mul(4) / 3 + 4 {
         return None;
     }
-    let content_type = response
-        .headers()
-        .get("content-type")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(';').next())
-        .map(str::trim)
-        .filter(|value| value.starts_with("image/"))
-        .unwrap_or("image/png")
-        .to_owned();
-    let extension = image_extension_for_content_type(&content_type)?;
-    let mut reader = response.into_body().into_reader();
-    let mut bytes = Vec::new();
-    std::io::Read::read_to_end(&mut reader, &mut bytes).ok()?;
+    let bytes = general_purpose::STANDARD.decode(payload).ok()?;
+    if bytes.len() > MAX_DOCX_IMAGE_BYTES || !image_bytes_match_content_type(&content_type, &bytes)
+    {
+        return None;
+    }
     Some(DocxImage {
         extension,
         content_type,
@@ -6082,6 +7468,15 @@ fn image_extension_for_content_type(content_type: &str) -> Option<String> {
         "image/jpeg" | "image/jpg" => Some("jpg".to_owned()),
         "image/gif" => Some("gif".to_owned()),
         _ => None,
+    }
+}
+
+fn image_bytes_match_content_type(content_type: &str, bytes: &[u8]) -> bool {
+    match content_type {
+        "image/png" => bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
+        "image/jpeg" | "image/jpg" => bytes.starts_with(&[0xff, 0xd8, 0xff]),
+        "image/gif" => bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a"),
+        _ => false,
     }
 }
 
@@ -6399,37 +7794,6 @@ fn json_path_text(data: &Value, path: &[&str]) -> String {
         Value::Number(value) => value.to_string(),
         Value::Array(_) | Value::Object(_) => current.to_string(),
     }
-}
-
-async fn platform_log_summary(
-    pool: &sqlx::PgPool,
-    params: &ModuleListParams,
-) -> Result<Value, ApiError> {
-    let mut query = QueryBuilder::<Postgres>::new(
-        r#"
-        SELECT jsonb_build_object(
-            'today_request_count', COALESCE(SUM(request_count), 0)::int,
-            'today_success_count', COALESCE(SUM(success_count), 0)::int,
-            'today_failure_count', COALESCE(SUM(failure_count), 0)::int,
-            'today_log_count', COUNT(*)::int
-        )
-        FROM construction_platform_logs r
-        WHERE r.is_deleted = FALSE
-          AND (r.occurred_at AT TIME ZONE 'Asia/Shanghai')::date = (NOW() AT TIME ZONE 'Asia/Shanghai')::date
-        "#,
-    );
-    if let Some(project_id) = params.project_id {
-        query.push(" AND r.project_id = ").push_bind(project_id);
-    }
-    if let Some(status) = &params.status {
-        query.push(" AND r.status = ").push_bind(status.clone());
-    }
-
-    query
-        .build_query_scalar::<Value>()
-        .fetch_one(pool)
-        .await
-        .map_err(db_error)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -7344,6 +8708,185 @@ async fn list_rows_page(
     })))
 }
 
+async fn list_team_rows_page(
+    pool: &sqlx::PgPool,
+    project_id: Uuid,
+    scoped_uuid_columns: &[(&'static str, Uuid)],
+    params: &ResourceListParams,
+) -> ApiResult<Value> {
+    let where_uuid_columns = [("project_id", project_id)];
+    let total = count_rows(
+        pool,
+        "construction_teams",
+        &where_uuid_columns,
+        scoped_uuid_columns,
+        params,
+    )
+    .await?;
+    let offset = (params.page - 1) * params.page_size;
+    let mut query = QueryBuilder::<Postgres>::new(
+        r#"
+        SELECT COALESCE(jsonb_agg(to_jsonb(row_data) ORDER BY row_data.created_at DESC), '[]'::jsonb)
+        FROM (
+            SELECT
+                r.*,
+                COALESCE((
+                    SELECT jsonb_agg(
+                        jsonb_build_object(
+                            'platform_name', config.platform_name,
+                            'platform_type', config.platform_type,
+                            'is_enabled', config.is_enabled,
+                            'status', CASE
+                                WHEN r.is_manage_team OR r.work_type = 1001 THEN 'ignored'
+                                WHEN latest_job.id IS NULL THEN 'not_reported'
+                                WHEN latest_job.status IN ('success', 'completed') THEN 'success'
+                                WHEN latest_job.status IN ('failed', 'dead_letter', 'cancelled') THEN 'failed'
+                                ELSE 'pending'
+                            END,
+                            'failure_reason', CASE
+                                WHEN r.is_manage_team OR r.work_type = 1001 THEN NULL
+                                WHEN latest_job.status IN ('failed', 'dead_letter', 'cancelled')
+                                    THEN COALESCE(
+                                        NULLIF(latest_job.last_error, ''),
+                                        latest_job.response_payload ->> 'message',
+                                        latest_job.response_payload ->> 'msg'
+                                    )
+                                ELSE NULL
+                            END,
+                            'reported_at', CASE WHEN r.is_manage_team OR r.work_type = 1001 THEN NULL ELSE latest_job.updated_at END
+                        )
+                        ORDER BY config.created_at, config.platform_name
+                    )
+                    FROM construction_platform_configs config
+                    LEFT JOIN LATERAL (
+                        SELECT
+                            job.id,
+                            job.status,
+                            job.last_error,
+                            job.response_payload,
+                            job.updated_at
+                        FROM integration_jobs job
+                        WHERE job.project_id = r.project_id
+                          AND job.entity_type IN ('team', 'construction_team')
+                          AND job.local_entity_id = r.id
+                          AND (
+                              job.platform_code = config.platform_type
+                              OR (config.platform_type = 'ningbo_housing' AND job.platform_code = 'zhenhai')
+                          )
+                        ORDER BY job.created_at DESC, job.id DESC
+                        LIMIT 1
+                    ) latest_job ON TRUE
+                    WHERE config.project_id = r.project_id
+                      AND config.is_deleted = FALSE
+                      AND config.is_enabled = TRUE
+                ), '[]'::jsonb) AS reporting_platforms
+            FROM construction_teams r
+            WHERE r.is_deleted = FALSE
+        "#,
+    );
+    push_uuid_filters(&mut query, &where_uuid_columns);
+    push_uuid_filters(&mut query, scoped_uuid_columns);
+    push_resource_filters(&mut query, "construction_teams", params);
+    query
+        .push(" ORDER BY r.created_at DESC LIMIT ")
+        .push_bind(params.page_size)
+        .push(" OFFSET ")
+        .push_bind(offset)
+        .push(") row_data");
+
+    let items = query
+        .build_query_scalar::<Value>()
+        .fetch_one(pool)
+        .await
+        .map_err(db_error)?;
+    let reporting_summary = team_reporting_summary(pool, project_id).await?;
+
+    Ok(ApiSuccess::default().with_data(serde_json::json!({
+        "items": items,
+        "total": total,
+        "page": params.page,
+        "page_size": params.page_size,
+        "reporting_summary": reporting_summary,
+    })))
+}
+
+async fn team_reporting_summary(pool: &sqlx::PgPool, project_id: Uuid) -> Result<Value, ApiError> {
+    sqlx::query_scalar::<_, Value>(
+        r#"
+        WITH team_platform_statuses AS (
+            SELECT
+                config.id AS platform_config_id,
+                config.platform_name,
+                config.platform_type,
+                config.created_at AS platform_created_at,
+                team.id AS team_id,
+                CASE
+                    WHEN team.is_manage_team OR team.work_type = 1001 THEN 'ignored'
+                    WHEN team.id IS NULL OR latest_job.id IS NULL THEN 'not_reported'
+                    WHEN latest_job.status IN ('success', 'completed') THEN 'success'
+                    WHEN latest_job.status IN ('failed', 'dead_letter', 'cancelled') THEN 'failed'
+                    ELSE 'pending'
+                END AS reporting_status
+            FROM construction_platform_configs config
+            LEFT JOIN construction_teams team
+                ON team.project_id = config.project_id
+               AND team.is_deleted = FALSE
+            LEFT JOIN LATERAL (
+                SELECT job.id, job.status
+                FROM integration_jobs job
+                WHERE job.project_id = config.project_id
+                  AND job.entity_type IN ('team', 'construction_team')
+                  AND job.local_entity_id = team.id
+                  AND (
+                      job.platform_code = config.platform_type
+                      OR (config.platform_type = 'ningbo_housing' AND job.platform_code = 'zhenhai')
+                  )
+                ORDER BY job.created_at DESC, job.id DESC
+                LIMIT 1
+            ) latest_job ON TRUE
+            WHERE config.project_id = $1
+              AND config.is_deleted = FALSE
+              AND config.is_enabled = TRUE
+        ), platform_summary AS (
+            SELECT
+                platform_config_id,
+                platform_name,
+                platform_type,
+                platform_created_at,
+                COUNT(*) FILTER (WHERE team_id IS NOT NULL AND reporting_status <> 'ignored')::int AS total_count,
+                COUNT(*) FILTER (WHERE team_id IS NOT NULL AND reporting_status = 'success')::int AS success_count,
+                COUNT(*) FILTER (WHERE team_id IS NOT NULL AND reporting_status = 'failed')::int AS failure_count,
+                COUNT(*) FILTER (WHERE team_id IS NOT NULL AND reporting_status = 'pending')::int AS pending_count,
+                COUNT(*) FILTER (WHERE team_id IS NOT NULL AND reporting_status = 'not_reported')::int AS not_reported_count,
+                COUNT(*) FILTER (WHERE team_id IS NOT NULL AND reporting_status = 'ignored')::int AS ignored_count
+            FROM team_platform_statuses
+            GROUP BY platform_config_id, platform_name, platform_type, platform_created_at
+        )
+        SELECT COALESCE(
+            jsonb_agg(
+                jsonb_build_object(
+                    'platform_name', platform_name,
+                    'platform_type', platform_type,
+                    'total_count', total_count,
+                    'success_count', success_count,
+                    'failure_count', failure_count,
+                    'pending_count', pending_count,
+                    'not_reported_count', not_reported_count,
+                    'ignored_count', ignored_count
+                )
+                ORDER BY platform_created_at, platform_name
+            ),
+            '[]'::jsonb
+        )
+        FROM platform_summary
+        "#,
+    )
+    .bind(project_id)
+    .fetch_one(pool)
+    .await
+    .map_err(db_error)
+}
+
 async fn count_rows(
     pool: &sqlx::PgPool,
     table: &'static str,
@@ -8024,6 +9567,85 @@ fn db_error(error: sqlx::Error) -> ApiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ningbo_team_types_use_the_official_names() {
+        let expected = [
+            (1, "钢筋工"),
+            (2, "木工"),
+            (3, "机械设备安装工"),
+            (6, "砌筑工"),
+            (15, "模板工"),
+            (19, "电气设备安装调试工"),
+            (24, "建筑起重机械安装拆卸工"),
+            (34, "古建筑传统彩画工"),
+            (38, "杂工"),
+            (900, "其它"),
+        ];
+        for (work_type, platform_name) in expected {
+            assert_eq!(ningbo_team_type_label(Some(work_type)), platform_name);
+        }
+        assert!(ningbo_team_type_label(Some(9999)).is_empty());
+    }
+
+    #[test]
+    fn trusted_docx_image_base_restricts_origin_and_path() {
+        let trusted = TrustedImageBase::parse("https://cdn.example.test/wx").unwrap();
+
+        assert!(trusted.allows(
+            &reqwest::Url::parse("https://cdn.example.test/wx/contracts/seal.png?token=1").unwrap()
+        ));
+        assert!(
+            !trusted
+                .allows(&reqwest::Url::parse("https://cdn.example.test/private/seal.png").unwrap())
+        );
+        assert!(
+            !trusted.allows(&reqwest::Url::parse("http://cdn.example.test/wx/seal.png").unwrap())
+        );
+        assert!(
+            !trusted
+                .allows(&reqwest::Url::parse("https://cdn.example.test:444/wx/seal.png").unwrap())
+        );
+        assert!(!trusted.allows(&reqwest::Url::parse("https://127.0.0.1/wx/seal.png").unwrap()));
+    }
+
+    #[test]
+    fn docx_image_url_extraction_supports_upload_json() {
+        let raw = r#"{"public_url":"https://cdn.example.test/wx/avatar.png"}"#;
+
+        assert_eq!(
+            extract_remote_docx_image_url(raw).as_deref(),
+            Some("https://cdn.example.test/wx/avatar.png")
+        );
+        assert_eq!(
+            extract_remote_docx_image_url("data:image/png;base64,AAAA"),
+            None
+        );
+    }
+
+    #[test]
+    fn docx_image_body_limit_is_enforced_across_chunks() {
+        let mut bytes = vec![0; MAX_DOCX_IMAGE_BYTES - 2];
+
+        assert!(append_bounded_image_bytes(&mut bytes, &[1, 2]).is_ok());
+        assert!(append_bounded_image_bytes(&mut bytes, &[3]).is_err());
+        assert_eq!(bytes.len(), MAX_DOCX_IMAGE_BYTES);
+    }
+
+    #[test]
+    fn data_uri_image_requires_matching_image_signature() {
+        let valid = format!(
+            "data:image/png;base64,{}",
+            general_purpose::STANDARD.encode(b"\x89PNG\r\n\x1a\n")
+        );
+        let invalid = format!(
+            "data:image/png;base64,{}",
+            general_purpose::STANDARD.encode(b"not a png")
+        );
+
+        assert!(load_data_uri_image(&valid).is_some());
+        assert!(load_data_uri_image(&invalid).is_none());
+    }
 
     #[test]
     fn project_options_params_tolerates_encoded_keyword_and_bad_limit() {

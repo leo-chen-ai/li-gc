@@ -10,6 +10,27 @@ test("uses configured API URL when VITE_API_URL is present", () => {
   );
 });
 
+test("aligns a localhost API with a 127.0.0.1 development page", () => {
+  assert.equal(
+    resolveApiUrl("http://localhost:8080", "http://127.0.0.1:8073"),
+    "http://127.0.0.1:8080"
+  );
+});
+
+test("aligns a 127.0.0.1 API with a localhost development page", () => {
+  assert.equal(
+    resolveApiUrl("http://127.0.0.1:8080", "http://localhost:8073"),
+    "http://localhost:8080"
+  );
+});
+
+test("does not rewrite non-loopback configured API hosts", () => {
+  assert.equal(
+    resolveApiUrl("https://shanhuai.top", "http://127.0.0.1:8073"),
+    "https://shanhuai.top"
+  );
+});
+
 test("uses browser origin when VITE_API_URL is absent", () => {
   assert.equal(resolveApiUrl("", "http://admin.shanhuai.top"), "http://admin.shanhuai.top");
 });

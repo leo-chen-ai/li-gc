@@ -290,7 +290,7 @@ export function ProjectsPage() {
                       <span>{project.finishDate}</span>
                     </div>
                     <div className="grid grid-cols-[auto_1fr] items-start gap-2 border-t border-slate-100 pt-1.5 dark:border-border">
-                      <span className="text-xs text-slate-400 dark:text-muted-foreground">上报列表</span>
+                      <span className="text-xs text-slate-400 dark:text-muted-foreground">上报平台</span>
                       <ProjectReportingPlatforms platforms={project.raw?.reporting_platforms} />
                     </div>
                   </div>

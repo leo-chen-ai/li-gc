@@ -1,3 +1,5 @@
+import type { ConstructionEntityReportingPlatform } from "../types/construction-types";
+
 export type ProjectStatus = "在建" | "筹备" | "完工" | "停工" | "竣工";
 export type AttendanceDirection = "进场" | "出场";
 
@@ -45,6 +47,7 @@ export type ConstructionUnit = {
 export type Team = {
   id: string;
   projectId: string;
+  isManageTeam: boolean;
   unitId?: string;
   unitName: string;
   name: string;
@@ -56,6 +59,7 @@ export type Team = {
   attendanceStart: string;
   attendanceEnd: string;
   status: "正常" | "待完善";
+  reportingPlatforms?: ConstructionEntityReportingPlatform[];
 };
 
 export type Worker = {
@@ -190,10 +194,10 @@ export const constructionUnits: ConstructionUnit[] = [
 ];
 
 export const teams: Team[] = [
-  { id: "t-1", projectId: "p-1001", unitName: "苏北劳务工程有限公司", name: "钢筋一班", type: "钢筋工", leader: "马建军", phone: "138****1001", workerCount: 42, salaryType: "按量", attendanceStart: "06:30", attendanceEnd: "18:30", status: "正常" },
-  { id: "t-2", projectId: "p-1001", unitName: "苏北劳务工程有限公司", name: "木工二班", type: "木工", leader: "黄小飞", phone: "138****1002", workerCount: 38, salaryType: "按日", attendanceStart: "06:30", attendanceEnd: "18:00", status: "正常" },
-  { id: "t-3", projectId: "p-1001", unitName: "山淮建设工程有限公司", name: "安装综合班", type: "安装工", leader: "沈凯", phone: "138****1003", workerCount: 31, salaryType: "按月", attendanceStart: "07:00", attendanceEnd: "18:00", status: "待完善" },
-  { id: "t-4", projectId: "p-1002", unitName: "江苏筑安建筑集团", name: "机电安装班", type: "电工", leader: "高峰", phone: "138****2201", workerCount: 26, salaryType: "按月", attendanceStart: "07:00", attendanceEnd: "18:00", status: "正常" },
+  { id: "t-1", projectId: "p-1001", isManageTeam: false, unitName: "苏北劳务工程有限公司", name: "钢筋一班", type: "钢筋工", leader: "马建军", phone: "138****1001", workerCount: 42, salaryType: "按量", attendanceStart: "06:30", attendanceEnd: "18:30", status: "正常" },
+  { id: "t-2", projectId: "p-1001", isManageTeam: false, unitName: "苏北劳务工程有限公司", name: "木工二班", type: "木工", leader: "黄小飞", phone: "138****1002", workerCount: 38, salaryType: "按日", attendanceStart: "06:30", attendanceEnd: "18:00", status: "正常" },
+  { id: "t-3", projectId: "p-1001", isManageTeam: true, unitName: "山淮建设工程有限公司", name: "安装综合班", type: "安装工", leader: "沈凯", phone: "138****1003", workerCount: 31, salaryType: "按月", attendanceStart: "07:00", attendanceEnd: "18:00", status: "待完善" },
+  { id: "t-4", projectId: "p-1002", isManageTeam: false, unitName: "江苏筑安建筑集团", name: "机电安装班", type: "电工", leader: "高峰", phone: "138****2201", workerCount: 26, salaryType: "按月", attendanceStart: "07:00", attendanceEnd: "18:00", status: "正常" },
 ];
 
 export const workers: Worker[] = [

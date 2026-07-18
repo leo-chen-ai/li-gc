@@ -180,7 +180,9 @@ assert.doesNotMatch(homeWxss, /function-panel|function-grid|function-item/);
 assert.match(homeWxss, /\.home-page\s*\{[\s\S]*padding:\s*124rpx 30rpx calc\(196rpx \+ env\(safe-area-inset-bottom\)\);/);
 assert.match(homeWxss, /\.bottom-nav\s*\{[\s\S]*height:\s*calc\(112rpx \+ env\(safe-area-inset-bottom\)\);/);
 
-assert.match(homeJs, /navigateToModule/);
+for (const handler of ["openOnboarding", "openTeams", "openCompanies", "openAttendance", "openDevice", "enterWorkerList"]) {
+  assert.match(homeJs, new RegExp(`${handler}\\s*\\(`), `home should define ${handler}`);
+}
 for (const route of ["onboarding", "teams", "workers", "companies", "attendance", "device"]) {
   assert.match(homeJs, new RegExp(`/pages/${route}/${route}`), `home should route to ${route} page`);
 }

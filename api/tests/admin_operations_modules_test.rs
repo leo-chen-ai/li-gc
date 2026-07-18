@@ -687,7 +687,7 @@ async fn attendance_calendar_maps_legacy_work_hour_rules_to_work_point_segments(
 
 #[tokio::test]
 async fn admin_can_crud_platform_configs_and_logs_with_today_summary() {
-    let (app, _c) = build_test_app().await;
+    let (app, pool, _c) = build_test_app_with_pool().await;
     let token = admin_token();
     let (project_id, _, _, _) = create_project_unit_team_worker(app.clone(), &token).await;
 
@@ -773,6 +773,23 @@ async fn admin_can_crud_platform_configs_and_logs_with_today_summary() {
     assert_eq!(body["data"]["operation"], "班组上传");
     assert_eq!(body["data"]["failure_count"], 1);
 
+    let system_job_id: Uuid = sqlx::query_scalar(
+        r#"
+        INSERT INTO integration_jobs (
+            project_id, platform_code, operation, entity_type, local_entity_id,
+            idempotency_key, request_payload, status, attempt_count, last_error, completed_at
+        )
+        VALUES ($1, 'real_name', 'Project/AddTeam', 'team', gen_random_uuid(),
+                $2, '{"TeamName":"石工"}'::jsonb, 'failed', 1, '班组名称不能重复', NOW())
+        RETURNING id
+        "#,
+    )
+    .bind(Uuid::parse_str(&project_id).expect("valid project id"))
+    .bind(format!("platform-log-system-job-{}", Uuid::new_v4()))
+    .fetch_one(&pool)
+    .await
+    .expect("insert system integration job");
+
     let (status, body) = get_authed(
         app.clone(),
         &format!("/api/v1/admin/platform-logs?project_id={project_id}"),
@@ -780,9 +797,18 @@ async fn admin_can_crud_platform_configs_and_logs_with_today_summary() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["data"]["summary"]["today_request_count"], 16);
-    assert_eq!(body["data"]["summary"]["today_failure_count"], 1);
-    assert_eq!(body["data"]["items"][0]["id"], log_id);
+    assert_eq!(body["data"]["summary"]["today_request_count"], 17);
+    assert_eq!(body["data"]["summary"]["today_failure_count"], 2);
+    assert_eq!(body["data"]["total"], 2);
+    let system_log = body["data"]["items"]
+        .as_array()
+        .expect("platform log items")
+        .iter()
+        .find(|item| item["id"] == system_job_id.to_string())
+        .expect("system integration job should appear in platform logs");
+    assert_eq!(system_log["source"], "system");
+    assert_eq!(system_log["operation"], "班组新增");
+    assert_eq!(system_log["message"], "班组名称不能重复");
 
     let (status, body) = delete_authed(
         app.clone(),

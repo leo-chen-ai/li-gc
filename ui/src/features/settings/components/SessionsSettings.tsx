@@ -46,6 +46,8 @@ export function SessionsSettings() {
     }, []);
 
     const handleRevokeSession = async (sessionId: string) => {
+        const session = sessions.find(item => item.id === sessionId);
+        if (!window.confirm(`确认退出设备“${session?.device || "未知设备"}”？退出后该设备需要重新登录。`)) return;
         try {
             await apiClient.delete(`/auth/sessions/${sessionId}`);
             setSessions(sessions.filter(s => s.id !== sessionId));

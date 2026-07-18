@@ -122,6 +122,23 @@ export type ConstructionReportingPlatform = {
   is_enabled: boolean;
 };
 
+export type ConstructionEntityReportingPlatform = ConstructionReportingPlatform & {
+  status: "success" | "failed" | "pending" | "not_reported" | string;
+  failure_reason: string | null;
+  reported_at: string | null;
+};
+
+export type ConstructionTeamReportingSummary = {
+  platform_name: string;
+  platform_type: string;
+  total_count: number;
+  success_count: number;
+  failure_count: number;
+  pending_count: number;
+  not_reported_count: number;
+  ignored_count: number;
+};
+
 export type ConstructionProjectOption = {
   id: string;
   name: string | null;
@@ -186,6 +203,7 @@ export type ConstructionTeam = {
   leader_phone: string | null;
   leader_id_card: string | null;
   team_no: string | null;
+  reporting_platforms?: ConstructionEntityReportingPlatform[];
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -470,6 +488,10 @@ export type ConstructionResourceListResponse<T> = {
   page_size: number;
 };
 
+export type ConstructionTeamListResponse = ConstructionResourceListResponse<ConstructionTeam> & {
+  reporting_summary: ConstructionTeamReportingSummary[];
+};
+
 export type ConstructionContractTemplate = {
   id: string;
   is_deleted: boolean;
@@ -558,6 +580,7 @@ export type ConstructionPlatformLog = {
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
+  source?: "system" | "manual" | string;
 };
 
 export type ConstructionPlatformLogSummary = {

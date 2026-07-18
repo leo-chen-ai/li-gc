@@ -319,6 +319,7 @@ export function UsersTable({
   };
 
   const handleBulkDelete = () => {
+    if (selectedCount === 0 || !window.confirm(`确认删除选中的 ${selectedCount} 个用户？该操作不可撤销。`)) return;
     onBulkDelete(selectedCount);
     table.toggleAllPageRowsSelected(false);
   };

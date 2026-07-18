@@ -613,6 +613,13 @@ async fn integration_and_device_messaging_tables_support_job_ledgers() {
             .fetch_one(&pool)
             .await
             .expect("seeded zhenhai platform");
+    let ningbo_platform_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM integration_platforms WHERE code = 'ningbo_housing' AND adapter = 'ningbo_housing'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("seeded Ningbo housing platform");
+    assert_eq!(ningbo_platform_count, 1);
 
     let binding_id: uuid::Uuid = sqlx::query_scalar(
         r#"

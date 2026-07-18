@@ -796,7 +796,7 @@ async fn admin_project_resource_lists_filter_paginate_and_summarize_attendance_o
             json!({
                 "unit_id": target_unit_id,
                 "name": format!("分页班组{:02}", index),
-                "work_type": if index == 11 { 77 } else { 10 },
+                "work_type": if index == 11 { 28 } else { 10 },
                 "settlement_type": if index % 2 == 0 { 1 } else { 2 },
                 "leader_name": format!("班组长{:02}", index),
                 "leader_phone": format!("1392000{:04}", index),
@@ -825,7 +825,7 @@ async fn admin_project_resource_lists_filter_paginate_and_summarize_attendance_o
     let (status, body) = get_authed(
         app.clone(),
         &format!(
-            "/api/v1/admin/projects/{project_id}/teams?unit_id={target_unit_id}&keyword=TEAM-PAGE-11&work_type=77&attendance_configured=true"
+            "/api/v1/admin/projects/{project_id}/teams?unit_id={target_unit_id}&keyword=TEAM-PAGE-11&work_type=28&attendance_configured=true"
         ),
         &token,
     )
@@ -946,7 +946,7 @@ async fn admin_project_resource_lists_filter_paginate_and_summarize_attendance_o
     );
 
     let (status, body) = get_authed(
-        app,
+        app.clone(),
         &format!(
             "/api/v1/admin/projects/{project_id}/attendance-records?view=calendar&month=2026-06&keyword=%E5%88%86%E9%A1%B5%E5%B7%A5%E4%BA%BA11"
         ),
@@ -966,6 +966,283 @@ async fn admin_project_resource_lists_filter_paginate_and_summarize_attendance_o
     assert_eq!(day["first_in_time"], "07:30");
     assert_eq!(day["last_out_time"], "18:05");
     assert_eq!(day["working_hours"], 10.58);
+}
+
+#[tokio::test]
+async fn team_list_reports_latest_platform_status_and_project_summary() {
+    let (app, pool, _container) = build_test_app_with_pool().await;
+    let token = admin_token();
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        "/api/v1/admin/projects",
+        &token,
+        json!({ "name": "班组上报状态测试项目", "status": 1 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let project_id = body["data"]["id"].as_str().expect("project id");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        "/api/v1/admin/platform-configs",
+        &token,
+        json!({
+            "project_id": project_id,
+            "platform_name": "宁波市住建",
+            "platform_type": "ningbo_housing",
+            "config": {},
+            "is_enabled": false
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let platform_config_id = body["data"]["id"]
+        .as_str()
+        .expect("platform config id")
+        .to_owned();
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/units"),
+        &token,
+        json!({ "company_name": "上报状态测试单位" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let unit_id = body["data"]["id"].as_str().expect("unit id");
+
+    let mut team_ids = Vec::new();
+    for name in ["成功班组", "失败班组", "未传班组"] {
+        let (status, body) = authed_json(
+            app.clone(),
+            "POST",
+            &format!("/api/v1/admin/projects/{project_id}/teams"),
+            &token,
+            json!({ "unit_id": unit_id, "name": name }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+        team_ids.push(
+            Uuid::parse_str(body["data"]["id"].as_str().expect("team id")).expect("valid team id"),
+        );
+    }
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "PATCH",
+        &format!("/api/v1/admin/platform-configs/{platform_config_id}"),
+        &token,
+        json!({ "is_enabled": true }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let project_uuid = Uuid::parse_str(project_id).expect("valid project id");
+    for (team_id, job_status, last_error) in [
+        (team_ids[0], "success", None),
+        (team_ids[1], "failed", Some("班组长身份证校验失败")),
+    ] {
+        sqlx::query(
+            r#"
+            INSERT INTO integration_jobs
+                (project_id, platform_code, operation, entity_type, local_entity_id,
+                 idempotency_key, request_payload, status, last_error)
+            VALUES ($1, 'zhenhai', 'addTeam', 'team', $2, $3, '{}'::jsonb, $4, $5)
+            "#,
+        )
+        .bind(project_uuid)
+        .bind(team_id)
+        .bind(format!("team-reporting-status-{team_id}"))
+        .bind(job_status)
+        .bind(last_error)
+        .execute(&pool)
+        .await
+        .expect("insert integration job");
+    }
+
+    let (status, body) = get_authed(
+        app,
+        &format!("/api/v1/admin/projects/{project_id}/teams"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let summary = &body["data"]["reporting_summary"][0];
+    assert_eq!(summary["platform_name"], "宁波市住建");
+    assert_eq!(summary["success_count"], 1);
+    assert_eq!(summary["failure_count"], 1);
+    assert_eq!(summary["not_reported_count"], 1);
+
+    let teams = body["data"]["items"].as_array().expect("team items");
+    let success_team = teams
+        .iter()
+        .find(|team| team["name"] == "成功班组")
+        .expect("success team");
+    assert_eq!(success_team["reporting_platforms"][0]["status"], "success");
+    let failed_team = teams
+        .iter()
+        .find(|team| team["name"] == "失败班组")
+        .expect("failed team");
+    assert_eq!(failed_team["reporting_platforms"][0]["status"], "failed");
+    assert_eq!(
+        failed_team["reporting_platforms"][0]["failure_reason"],
+        "班组长身份证校验失败"
+    );
+    let not_reported_team = teams
+        .iter()
+        .find(|team| team["name"] == "未传班组")
+        .expect("not reported team");
+    assert_eq!(
+        not_reported_team["reporting_platforms"][0]["status"],
+        "not_reported"
+    );
+}
+
+#[tokio::test]
+async fn enabled_ningbo_platform_requires_team_type_but_not_team_leader() {
+    let (app, pool, _container) = build_test_app_with_pool().await;
+    let token = admin_token();
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        "/api/v1/admin/projects",
+        &token,
+        json!({ "name": "宁波班组类型校验测试项目", "status": 1 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let project_id = body["data"]["id"].as_str().expect("project id");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        "/api/v1/admin/platform-configs",
+        &token,
+        json!({
+            "project_id": project_id,
+            "platform_name": "宁波市住建",
+            "platform_type": "ningbo_housing",
+            "config": {},
+            "is_enabled": true
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/units"),
+        &token,
+        json!({
+            "company_name": "宁波班组类型测试单位",
+            "company_credit_code": "91330200TEAMTYPE01X"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let unit_id = body["data"]["id"].as_str().expect("unit id");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/teams"),
+        &token,
+        json!({ "unit_id": unit_id, "name": "缺少类型班组" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(
+        body.to_string().contains("班组类型为必填项"),
+        "unexpected validation response: {body}"
+    );
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/teams"),
+        &token,
+        json!({
+            "unit_id": unit_id,
+            "name": "无班组长钢筋班",
+            "work_type": 1
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let team_id =
+        Uuid::parse_str(body["data"]["id"].as_str().expect("team id")).expect("valid team id");
+
+    let job = sqlx::query_as::<_, (String, Option<String>)>(
+        r#"
+        SELECT status, last_error
+        FROM integration_jobs
+        WHERE local_entity_id = $1
+          AND platform_code = 'ningbo_housing'
+        "#,
+    )
+    .bind(team_id)
+    .fetch_one(&pool)
+    .await
+    .expect("automatic Ningbo sync job");
+    assert_eq!(job.0, "failed");
+    assert!(
+        job.1.is_some_and(|error| error.contains("AppKey")),
+        "invalid platform config should be recorded without making a network request"
+    );
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/teams"),
+        &token,
+        json!({
+            "unit_id": unit_id,
+            "name": "项目管理班组",
+            "work_type": 1001
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["data"]["work_type"], 1001);
+    assert_eq!(body["data"]["is_manage_team"], true);
+    let manage_team_id = Uuid::parse_str(body["data"]["id"].as_str().expect("management team id"))
+        .expect("valid management team id");
+    let manage_job_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM integration_jobs WHERE local_entity_id = $1 AND platform_code = 'ningbo_housing'",
+    )
+    .bind(manage_team_id)
+    .fetch_one(&pool)
+    .await
+    .expect("count management team jobs");
+    assert_eq!(manage_job_count, 0, "management team must not be reported");
+
+    let (status, body) = get_authed(
+        app,
+        &format!("/api/v1/admin/projects/{project_id}/teams"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let management_team = body["data"]["items"]
+        .as_array()
+        .expect("team items")
+        .iter()
+        .find(|team| team["id"] == manage_team_id.to_string())
+        .expect("management team row");
+    assert_eq!(
+        management_team["reporting_platforms"][0]["status"],
+        "ignored"
+    );
+    let summary = &body["data"]["reporting_summary"][0];
+    assert_eq!(summary["total_count"], 1);
+    assert_eq!(summary["ignored_count"], 1);
+    assert_eq!(summary["not_reported_count"], 0);
 }
 
 #[tokio::test]
@@ -1929,7 +2206,7 @@ async fn admin_api_accepts_form_style_nulls_by_column_type() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["data"]["name"], "2026-03-18");
-    assert_eq!(body["data"]["work_type"], Value::Null);
+    assert_eq!(body["data"]["work_type"], 1001);
     assert_eq!(body["data"]["settlement_type"], Value::Null);
     assert_eq!(body["data"]["leader_id"], Value::Null);
 

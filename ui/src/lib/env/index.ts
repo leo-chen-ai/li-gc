@@ -25,12 +25,36 @@ export function resolveApiUrl(
   fallbackUrl = "http://localhost:8080"
 ): string {
   const trimmedUrl = configuredUrl.trim();
-  if (trimmedUrl) return trimmedUrl;
+  if (trimmedUrl) return alignLoopbackApiHost(trimmedUrl, browserOrigin);
 
   const trimmedOrigin = browserOrigin.trim();
   if (trimmedOrigin) return trimmedOrigin;
 
   return fallbackUrl;
+}
+
+function alignLoopbackApiHost(configuredUrl: string, browserOrigin: string): string {
+  try {
+    const apiUrl = new URL(configuredUrl);
+    const pageUrl = new URL(browserOrigin);
+    const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+    if (
+      loopbackHosts.has(apiUrl.hostname) &&
+      loopbackHosts.has(pageUrl.hostname) &&
+      apiUrl.hostname !== pageUrl.hostname
+    ) {
+      apiUrl.hostname = pageUrl.hostname;
+      const normalized = apiUrl.toString();
+      return !configuredUrl.endsWith("/") && normalized.endsWith("/")
+        ? normalized.slice(0, -1)
+        : normalized;
+    }
+  } catch {
+    // Keep the configured value so the existing URL validation reports malformed input.
+  }
+
+  return configuredUrl;
 }
 
 // ============================================

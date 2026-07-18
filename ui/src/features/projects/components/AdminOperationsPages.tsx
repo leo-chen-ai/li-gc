@@ -805,9 +805,9 @@ function PlatformLogPanel({ filters, setFilters, tabControls }: { filters: Const
       </div>
       <div className="grid gap-3 md:grid-cols-4"><MetricCell label="今日请求" value={summary?.today_request_count ?? 0} helper="API 交互量" /><MetricCell label="今日成功" value={summary?.today_success_count ?? 0} helper="成功条数" /><MetricCell label="今日失败" value={summary?.today_failure_count ?? 0} helper="失败条数" /><MetricCell label="日志条数" value={summary?.today_log_count ?? 0} helper="今日记录" /></div>
       <ModuleFilters filters={filters} setFilters={setFilters} placeholder="搜索项目、平台、操作、消息" />
-      <DataTable loading={query.isLoading} colSpan={8} headers={["平台", "项目", "操作", "方向", "状态", "请求/成功/失败", "时间", "操作"]}>
+      <DataTable loading={query.isLoading} colSpan={9} headers={["平台", "项目", "操作", "方向", "状态", "请求/成功/失败", "消息", "时间", "操作"]}>
         {rows.map((row) => (
-          <TableRow key={row.id}><TableCell className="font-medium">{row.platform_name || "-"}</TableCell><TableCell className="max-w-[240px] truncate">{row.project_name || row.project_id}</TableCell><TableCell>{row.operation}</TableCell><TableCell>{row.direction}</TableCell><TableCell><PlatformStatusBadge status={row.status} /></TableCell><TableCell>{row.request_count}/{row.success_count}/{row.failure_count}</TableCell><TableCell>{formatDateTime(row.occurred_at)}</TableCell><TableCell className="text-right"><RowActions onEdit={() => openEdit(row)} onDelete={() => void remove(row)} /></TableCell></TableRow>
+          <TableRow key={row.id}><TableCell className="font-medium">{row.platform_name || "-"}</TableCell><TableCell className="max-w-[240px] truncate">{row.project_name || row.project_id}</TableCell><TableCell>{row.operation}</TableCell><TableCell>{row.direction}</TableCell><TableCell><PlatformStatusBadge status={row.status} /></TableCell><TableCell>{row.request_count}/{row.success_count}/{row.failure_count}</TableCell><TableCell className="max-w-[320px] truncate text-xs text-slate-500" title={row.message ?? undefined}>{row.message || "-"}</TableCell><TableCell>{formatDateTime(row.occurred_at)}</TableCell><TableCell className="text-right">{row.source === "system" ? <span className="text-xs text-slate-400">系统日志</span> : <RowActions onEdit={() => openEdit(row)} onDelete={() => void remove(row)} />}</TableCell></TableRow>
         ))}
       </DataTable>
       <Pager total={query.data?.total ?? 0} page={filters.page ?? 1} onPageChange={(page) => setFilters((current) => ({ ...current, page }))} />
@@ -1121,6 +1121,7 @@ function WorkHourRuleFields({ value, onChange }: { value: WorkHourRuleForm; onCh
   };
   const removeSegment = (index: number) => {
     if (value.segments.length <= 1) return;
+    if (!window.confirm(`确认删除第 ${index + 1} 个计费分段？`)) return;
     onChange({
       ...value,
       segments: value.segments.filter((_, segmentIndex) => segmentIndex !== index),

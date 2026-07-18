@@ -61,6 +61,7 @@ export function ApiKeysManagement() {
 
   const handleBulkDelete = (rows: ApiKey[]) => {
     const count = rows.length;
+    if (count === 0 || !window.confirm(`确认删除选中的 ${count} 个 API Key？该操作不可撤销。`)) return;
     rows.forEach((row) => deleteKey(row.id));
     toast.success(`${count} API key(s) deleted`);
   };

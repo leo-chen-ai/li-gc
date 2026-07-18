@@ -31,6 +31,7 @@ export type ConstructionFormField = {
   inputMode?: "numeric" | "decimal";
   options?: ConstructionFormOption[];
   optionsSource?: "units" | "teams" | "workers";
+  managementTeamType?: boolean;
   wide?: boolean;
 };
 
@@ -165,6 +166,48 @@ const quantityUnitTypeOptions: ConstructionFormOption[] = [
   { label: "件", value: "4" },
   { label: "套", value: "5" },
   { label: "立方", value: "6" },
+];
+
+const teamWorkTypeOptions: ConstructionFormOption[] = [
+  { label: "项目管理部", value: "1001" },
+  { label: "钢筋工", value: "1" },
+  { label: "木工", value: "2" },
+  { label: "机械设备安装工", value: "3" },
+  { label: "架子工", value: "4" },
+  { label: "混凝土工", value: "5" },
+  { label: "砌筑工", value: "6" },
+  { label: "建筑电工", value: "7" },
+  { label: "电焊工", value: "8" },
+  { label: "管道工", value: "9" },
+  { label: "测量放线工", value: "10" },
+  { label: "装饰装修工", value: "11" },
+  { label: "防水工", value: "13" },
+  { label: "挖掘铲运和桩工机械司机", value: "14" },
+  { label: "模板工", value: "15" },
+  { label: "通风工", value: "16" },
+  { label: "安装起重工", value: "17" },
+  { label: "安装钳工", value: "18" },
+  { label: "电气设备安装调试工", value: "19" },
+  { label: "变电安装工", value: "20" },
+  { label: "司泵工", value: "21" },
+  { label: "桩机操作工", value: "22" },
+  { label: "起重信号工", value: "23" },
+  { label: "建筑起重机械安装拆卸工", value: "24" },
+  { label: "室内成套设施安装工", value: "25" },
+  { label: "建筑门窗幕墙安装工", value: "26" },
+  { label: "幕墙制作工", value: "27" },
+  { label: "石工", value: "28" },
+  { label: "除尘工", value: "29" },
+  { label: "爆破工", value: "30" },
+  { label: "线路架设工", value: "31" },
+  { label: "古建筑传统石工", value: "32" },
+  { label: "古建筑传统瓦工", value: "33" },
+  { label: "古建筑传统彩画工", value: "34" },
+  { label: "古建筑传统木工", value: "35" },
+  { label: "古建筑传统油工", value: "36" },
+  { label: "金属工", value: "37" },
+  { label: "杂工", value: "38" },
+  { label: "其它", value: "900" },
 ];
 
 const workTypeOptions: ConstructionFormOption[] = [
@@ -434,10 +477,10 @@ export const unitFormFields: ConstructionFormField[] = [
 ];
 
 export const teamFormFields: ConstructionFormField[] = [
+  { key: "is_manage_team", label: "是否管理班组", valueType: "boolean", control: "select", defaultValue: "false", section: "基础信息", options: yesNoOptions },
   { key: "unit_id", label: "参建单位", valueType: "string", control: "select", required: true, section: "基础信息", optionsSource: "units" },
   { key: "name", label: "班组名称", valueType: "string", required: true, section: "基础信息" },
-  { key: "work_type", label: "工种", valueType: "number", control: "select", section: "基础信息", options: workTypeOptions },
-  { key: "is_manage_team", label: "是否管理班组", valueType: "boolean", control: "select", defaultValue: "false", section: "基础信息", options: yesNoOptions },
+  { key: "work_type", label: "工种", valueType: "number", control: "select", required: true, managementTeamType: true, section: "基础信息", options: teamWorkTypeOptions },
   { key: "settlement_type", label: "结算方式", valueType: "number", control: "select", section: "结算考勤", options: inheritedSalaryCalcTypeOptions },
   { key: "quantity_unit_type", label: "计量单位", valueType: "number", control: "select", section: "结算考勤", options: quantityUnitTypeOptions },
   { key: "attendance_start_time", label: "考勤开始时间", valueType: "string", defaultValue: "06:00", section: "结算考勤" },

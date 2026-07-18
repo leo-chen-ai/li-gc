@@ -126,6 +126,7 @@ import type {
   ConstructionProjectPayload,
   ConstructionTeam,
   ConstructionTeamPayload,
+  ConstructionTeamReportingSummary,
   ConstructionUnit as ApiConstructionUnit,
   ConstructionUnitPayload,
   ConstructionWageBatch,
@@ -835,6 +836,16 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       return;
     }
 
+    const deleteMessages: Record<string, string> = {
+      建设单位: "确认删除这条参建单位记录？删除后将不再显示。",
+      班组信息: "确认删除这个班组？如已上报市平台，将同步办理班组退场；平台退场失败时本地班组不会删除。",
+      项目工人: "确认删除这名工人？删除后相关人员信息将不再显示。",
+      考勤记录: "确认删除这条考勤记录？删除后无法在列表中恢复。",
+      工资统计: "确认删除这条工资记录？删除后无法在列表中恢复。",
+    };
+    const deleteMessage = deleteMessages[activeTab];
+    if (!deleteMessage || !window.confirm(deleteMessage)) return;
+
     try {
       if (activeTab === "建设单位") await deleteUnit.mutateAsync(id);
       if (activeTab === "班组信息") await deleteTeam.mutateAsync(id);
@@ -842,8 +853,8 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       if (activeTab === "考勤记录") await deleteAttendance.mutateAsync(id);
       if (activeTab === "工资统计") await deleteWageBatch.mutateAsync(id);
       toast.success("记录已删除");
-    } catch {
-      toast.error("删除失败");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "删除失败");
     }
   };
 
@@ -1179,6 +1190,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                 unitFilters={unitFilters}
                 onUnitFiltersChange={(patch) => setUnitFilters((current) => ({ ...current, ...patch }))}
                 teamFilters={teamFilters}
+                teamReportingSummary={teamQuery.data?.reporting_summary ?? []}
                 onTeamFiltersChange={(patch) => setTeamFilters((current) => ({ ...current, ...patch }))}
                 workerFilters={workerFilters}
                 onWorkerFiltersChange={(patch) => setWorkerFilters((current) => ({ ...current, ...patch }))}
@@ -1819,6 +1831,7 @@ function ModuleFilters({
   unitFilters,
   onUnitFiltersChange,
   teamFilters,
+  teamReportingSummary,
   onTeamFiltersChange,
   workerFilters,
   onWorkerFiltersChange,
@@ -1833,6 +1846,7 @@ function ModuleFilters({
   unitFilters: UnitLedgerFilters;
   onUnitFiltersChange: (patch: Partial<UnitLedgerFilters>) => void;
   teamFilters: TeamLedgerFilters;
+  teamReportingSummary: ConstructionTeamReportingSummary[];
   onTeamFiltersChange: (patch: Partial<TeamLedgerFilters>) => void;
   workerFilters: WorkerLedgerFilters;
   onWorkerFiltersChange: (patch: Partial<WorkerLedgerFilters>) => void;
@@ -1861,21 +1875,24 @@ function ModuleFilters({
 
   if (activeTab === "班组信息") {
     return (
-      <FilterGrid onSearch={onSearch} onReset={onReset}>
-        <FilterInput label="关键词" placeholder="班组名称、班组长" value={teamFilters.keyword} onChange={(event) => onTeamFiltersChange({ keyword: event.target.value })} />
-        <FilterSelect label="参建单位" value={teamFilters.unitId} onValueChange={(unitId) => onTeamFiltersChange({ unitId })} options={[{ label: "全部单位", value: "all" }, ...units.map((unit) => ({ label: unit.name, value: unit.id }))]} />
-        <FilterSelect label="工种" value={teamFilters.workType} onValueChange={(workType) => onTeamFiltersChange({ workType })} options={selectOptionsFromField(teamFormFields, "work_type", "全部工种")} />
-        <FilterSelect
-          label="考勤时段"
-          value={teamFilters.attendanceConfigured}
-          onValueChange={(attendanceConfigured) => onTeamFiltersChange({ attendanceConfigured })}
-          options={[
-            { label: "全部时段", value: "all" },
-            { label: "已配置", value: "configured" },
-            { label: "待配置", value: "missing" },
-          ]}
-        />
-      </FilterGrid>
+      <div className="grid gap-2 xl:grid-cols-[minmax(280px,0.8fr)_minmax(0,2.2fr)]">
+        <TeamReportingOverview summary={teamReportingSummary} />
+        <FilterGrid compact onSearch={onSearch} onReset={onReset}>
+          <FilterInput label="关键词" placeholder="班组名称、班组长" value={teamFilters.keyword} onChange={(event) => onTeamFiltersChange({ keyword: event.target.value })} />
+          <FilterSelect label="参建单位" value={teamFilters.unitId} onValueChange={(unitId) => onTeamFiltersChange({ unitId })} options={[{ label: "全部单位", value: "all" }, ...units.map((unit) => ({ label: unit.name, value: unit.id }))]} />
+          <FilterSelect label="工种" value={teamFilters.workType} onValueChange={(workType) => onTeamFiltersChange({ workType })} options={selectOptionsFromField(teamFormFields, "work_type", "全部工种")} />
+          <FilterSelect
+            label="考勤时段"
+            value={teamFilters.attendanceConfigured}
+            onValueChange={(attendanceConfigured) => onTeamFiltersChange({ attendanceConfigured })}
+            options={[
+              { label: "全部时段", value: "all" },
+              { label: "已配置", value: "configured" },
+              { label: "待配置", value: "missing" },
+            ]}
+          />
+        </FilterGrid>
+      </div>
     );
   }
 
@@ -2139,13 +2156,20 @@ function FilterGrid({
   children,
   onSearch,
   onReset,
+  compact = false,
 }: {
   children: ReactNode;
   onSearch: () => void;
   onReset: () => void;
+  compact?: boolean;
 }) {
   return (
-    <div className="grid gap-2 rounded-lg border border-slate-200 bg-white p-2 dark:border-border dark:bg-background sm:grid-cols-2 xl:grid-cols-[minmax(240px,2fr)_repeat(3,minmax(140px,1fr))_auto]">
+    <div className={cn(
+      "grid gap-2 rounded-lg border border-slate-200 bg-white p-2 dark:border-border dark:bg-background sm:grid-cols-2",
+      compact
+        ? "2xl:grid-cols-[minmax(180px,2fr)_repeat(3,minmax(120px,1fr))_auto]"
+        : "xl:grid-cols-[minmax(240px,2fr)_repeat(3,minmax(140px,1fr))_auto]"
+    )}>
       {children}
       <div className="flex items-end gap-2 sm:col-span-2 xl:col-span-1 xl:justify-end">
         <Button type="button" size="sm" variant="outline" className="h-8 gap-2 border-slate-200 bg-white dark:border-border dark:bg-background" onClick={onReset}>
@@ -2157,6 +2181,30 @@ function FilterGrid({
           查询
         </Button>
       </div>
+    </div>
+  );
+}
+
+function TeamReportingOverview({ summary }: { summary: ConstructionTeamReportingSummary[] }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 dark:border-border dark:bg-background">
+      <div className="text-[11px] font-medium text-slate-500 dark:text-muted-foreground">上报平台</div>
+      {summary.length === 0 ? (
+        <div className="mt-2 text-xs text-slate-400">未配置上报平台</div>
+      ) : (
+        <div className="mt-1.5 space-y-1.5">
+          {summary.map((platform) => (
+            <div key={`${platform.platform_type}-${platform.platform_name}`} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+              <span className="font-medium text-slate-700 dark:text-foreground">{platform.platform_name}</span>
+              <span className="text-emerald-600">成功 {platform.success_count}</span>
+              <span className="text-red-600">失败 {platform.failure_count}</span>
+              {platform.pending_count > 0 && <span className="text-amber-600">上报中 {platform.pending_count}</span>}
+              <span className="text-slate-400">未传 {platform.not_reported_count}</span>
+              {platform.ignored_count > 0 && <span className="text-slate-400">跳过 {platform.ignored_count}</span>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -2329,7 +2377,7 @@ function ProjectInfoTab({
         <div className="rounded-lg border border-slate-200 bg-[#fbfcfc] p-3 dark:border-border dark:bg-card">
           <div className="flex items-center gap-2 text-sm font-medium">
             <Upload className="size-4 text-[#0f6b5d]" />
-            上报列表
+            上报平台
           </div>
           <div className="mt-2 rounded-md border border-slate-200 bg-white px-3 py-2 dark:border-border dark:bg-background">
             <ProjectReportingPlatforms platforms={reportingPlatforms} />
@@ -2473,9 +2521,23 @@ function TeamsTab({
   return (
     <DataTable
       empty="暂无班组"
-      headers={editable ? ["班组名称", "参建单位", "工种", "班组长", "人数", "计薪方式", "考勤时段", "状态", "操作"] : ["班组名称", "参建单位", "工种", "班组长", "人数", "计薪方式", "考勤时段", "状态"]}
+      headers={editable ? ["管理班组", "班组名称", "参建单位", "工种", "班组长", "人数", "计薪方式", "考勤时段", "状态", "操作"] : ["管理班组", "班组名称", "参建单位", "工种", "班组长", "人数", "计薪方式", "考勤时段", "状态"]}
       rows={teams.map((team) => [
-        team.name,
+        <span
+          key={`${team.id}-manage-team`}
+          className={cn(
+            "inline-flex rounded-full px-2 py-0.5 text-xs font-medium",
+            team.isManageTeam
+              ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
+              : "bg-slate-100 text-slate-500 dark:bg-muted dark:text-muted-foreground"
+          )}
+        >
+          {team.isManageTeam ? "是" : "否"}
+        </span>,
+        <div key={`${team.id}-reporting`} className="min-w-[220px] space-y-1.5">
+          <div className="font-medium text-slate-800 dark:text-foreground">{team.name}</div>
+          <TeamReportingPlatforms platforms={team.reportingPlatforms} />
+        </div>,
         team.unitName,
         team.type,
         `${team.leader} / ${team.phone}`,
@@ -2487,6 +2549,53 @@ function TeamsTab({
       ])}
       pagination={pagination}
     />
+  );
+}
+
+function TeamReportingPlatforms({ platforms }: { platforms: Team["reportingPlatforms"] }) {
+  if (!platforms?.length) {
+    return <div className="text-[11px] text-slate-400">上报平台：未配置</div>;
+  }
+
+  return (
+    <div className="space-y-1 text-[11px]">
+      <div className="text-slate-400">上报平台</div>
+      {platforms.map((platform) => {
+        const isSuccess = platform.status === "success";
+        const isFailed = platform.status === "failed";
+        const isPending = platform.status === "pending";
+        const isIgnored = platform.status === "ignored";
+        const statusText = isSuccess
+          ? "成功"
+          : isFailed
+            ? `失败${platform.failure_reason ? `：${platform.failure_reason}` : ""}`
+            : isPending
+              ? "上报中"
+              : isIgnored
+                ? "已跳过（项目管理部不推送）"
+                : "未传";
+
+        return (
+          <div
+            key={`${platform.platform_type}-${platform.platform_name}`}
+            className={cn(
+              "flex max-w-[320px] items-start gap-1",
+              isSuccess
+                ? "text-emerald-600"
+                : isFailed
+                  ? "text-red-600"
+                  : isPending
+                    ? "text-amber-600"
+                    : "text-slate-400"
+            )}
+            title={`${platform.platform_name}：${statusText}`}
+          >
+            <span className="mt-[3px] size-1.5 shrink-0 rounded-full bg-current" />
+            <span className="break-words">{platform.platform_name}：{statusText}</span>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -3589,6 +3698,14 @@ function DynamicDetailForm({
       fields={fields}
       state={state}
       onChange={(key, value) => {
+        if (activeTab === "班组信息" && key === "is_manage_team") {
+          setState((current) => ({
+            ...current,
+            is_manage_team: value,
+            work_type: value === "true" ? "1001" : current.work_type === "1001" ? "" : current.work_type,
+          }));
+          return;
+        }
         if (activeTab === "班组信息" && key === "leader_id") {
           setState((current) => ({
             ...current,
@@ -3983,6 +4100,7 @@ function apiTeamToDetail(team: ConstructionTeam, units: ApiConstructionUnit[], w
   return {
     id: team.id,
     projectId: team.project_id,
+    isManageTeam: team.is_manage_team,
     unitId: team.unit_id,
     unitName: unit?.company_name ?? "未匹配单位",
     name: team.name ?? "未命名班组",
@@ -3994,6 +4112,7 @@ function apiTeamToDetail(team: ConstructionTeam, units: ApiConstructionUnit[], w
     attendanceStart: team.attendance_start_time ?? "",
     attendanceEnd: team.attendance_end_time ?? "",
     status: team.attendance_start_time && team.attendance_end_time ? "正常" : "待完善",
+    reportingPlatforms: team.reporting_platforms,
   };
 }
 

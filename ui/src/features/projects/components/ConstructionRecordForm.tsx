@@ -97,7 +97,12 @@ function RecordFormField({
   uploadContext?: UploadContext;
 }) {
   const inputType = field.valueType === "number" ? "number" : field.valueType === "date" ? "date" : field.valueType === "datetime" ? "datetime-local" : "text";
-  const fieldOptions = options ?? field.options ?? [];
+  const configuredOptions = options ?? field.options ?? [];
+  const fieldOptions = field.managementTeamType
+    ? configuredOptions.filter((option) =>
+        state.is_manage_team === "true" ? option.value === "1001" : option.value !== "1001"
+      )
+    : configuredOptions;
 
   return (
     <label className={cn("block min-w-0 space-y-2 text-sm", field.wide && "md:col-span-2")}>
@@ -413,6 +418,8 @@ function UploadField({
   };
 
   const removeItem = (index: number) => {
+    const itemName = items[index]?.original_filename || field.label || "该文件";
+    if (!window.confirm(`确认移除“${itemName}”？保存表单后该文件将不再关联。`)) return;
     if (isJsonField) {
       const nextItems = items.filter((_, currentIndex) => currentIndex !== index);
       onChange(nextItems.length > 0 ? JSON.stringify(nextItems.map(toUploadValue), null, 2) : "");
