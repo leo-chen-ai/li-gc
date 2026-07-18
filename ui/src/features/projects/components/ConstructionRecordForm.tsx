@@ -49,7 +49,7 @@ export function ConstructionRecordForm({
   uploadContext?: UploadContext;
   maxHeightClassName?: string;
 }) {
-  const sections = getFieldsBySection(fields);
+  const sections = getFieldsBySection(fields, state);
 
   return (
     <div className={cn("space-y-5 overflow-y-auto px-1 py-1", maxHeightClassName)}>
@@ -138,6 +138,8 @@ function RecordFormField({
           value={value}
           required={field.required}
           placeholder={field.placeholder}
+          step={field.step}
+          inputMode={field.inputMode}
           onChange={(event) => onChange(event.target.value)}
           className="h-9"
         />
@@ -473,7 +475,7 @@ function UploadField({
           onClick={() => inputRef.current?.click()}
         >
           {isUploading ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
-          {isUploading ? "上传中" : field.uploadKind === "image" ? "上传图片" : "上传文件"}
+          {isUploading ? "上传中" : field.uploadKind === "image" ? "选择图片" : "选择本地文件"}
         </Button>
         {items.length > 0 && (
           <span className="text-xs text-slate-500 dark:text-muted-foreground">
@@ -517,7 +519,9 @@ function UploadField({
             <div key={`${item.public_url}-${index}`} className="flex min-w-0 items-center gap-2 overflow-hidden rounded-md bg-slate-50 p-2 dark:bg-muted/40">
               {field.uploadKind === "image" ? (
                 item.public_url ? (
-                  <img src={item.public_url} alt={item.original_filename ?? field.label} className="size-10 shrink-0 rounded object-cover" />
+                  <a href={item.public_url} target="_blank" rel="noreferrer" className="size-10 shrink-0 overflow-hidden rounded">
+                    <img src={item.public_url} alt={item.original_filename ?? field.label} className="size-10 object-cover" />
+                  </a>
                 ) : (
                   <ImageIcon className="size-5 shrink-0 text-slate-400" />
                 )
@@ -532,6 +536,14 @@ function UploadField({
                 className="block min-w-0 flex-1 overflow-hidden truncate whitespace-nowrap text-xs text-slate-700 hover:text-[#0f6b5d] dark:text-muted-foreground"
               >
                 {item.original_filename ?? item.public_url}
+              </a>
+              <a
+                href={item.public_url}
+                target="_blank"
+                rel="noreferrer"
+                className="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-[#0f6b5d] hover:bg-[#0f6b5d]/10"
+              >
+                查看
               </a>
               <Button
                 type="button"

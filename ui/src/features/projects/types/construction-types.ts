@@ -110,9 +110,16 @@ export type ConstructionProject = {
   worker_count?: number;
   attendance_today?: number;
   attendance_rate?: number;
+  reporting_platforms?: ConstructionReportingPlatform[];
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
+};
+
+export type ConstructionReportingPlatform = {
+  platform_name: string;
+  platform_type: string;
+  is_enabled: boolean;
 };
 
 export type ConstructionProjectOption = {
@@ -229,9 +236,17 @@ export type ConstructionWorker = {
   signature_photo: string | null;
   signature_time: string | null;
   native_place: number | null;
+  attendance_issue_success_device_count?: number | null;
+  attendance_device_total_count?: number | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
+};
+
+export type ConstructionPersonnelWorker = ConstructionWorker & {
+  project_name: string | null;
+  unit_name?: string | null;
+  team_name?: string | null;
 };
 
 export type ConstructionAttendanceRecord = {
@@ -288,6 +303,13 @@ export type ConstructionAttendanceDevice = {
   device_name: string | null;
   direction: number;
   remark: string | null;
+  online_status: string;
+  last_seen_at: string | null;
+  last_heartbeat_at: string | null;
+  last_online_at: string | null;
+  last_offline_at: string | null;
+  last_mqtt_topic: string | null;
+  last_mqtt_payload: unknown | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -314,10 +336,68 @@ export type ConstructionAttendanceDeviceIssueReport = {
   status: ConstructionAttendanceDeviceIssueStatus;
   issued_at: string;
   message: string | null;
+  mqtt_message_id: string | null;
+  request_payload: unknown | null;
+  response_payload: unknown | null;
+  acknowledged_at: string | null;
   remark: string | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
+};
+
+export type ConstructionAttendanceDeviceIssueWorkersSummary = {
+  project_id: string;
+  attendance_device_id: string;
+  serial_number: string;
+  total_workers: number;
+  queued: number;
+  skipped_without_photo: number;
+  failed: number;
+};
+
+export type ConstructionAttendanceAlertCategory = "manager" | "worker" | "supervisor";
+export type ConstructionAttendanceAlertStatus = "logged" | "failed";
+
+export type ConstructionAttendanceAlertConfig = {
+  id: string;
+  is_deleted: boolean;
+  project_id: string;
+  project_name?: string | null;
+  is_enabled: boolean;
+  check_managers: boolean;
+  check_workers: boolean;
+  check_supervisors: boolean;
+  remark: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+};
+
+export type ConstructionAttendanceAlertLog = {
+  id: string;
+  is_deleted: boolean;
+  config_id: string | null;
+  project_id: string;
+  project_name?: string | null;
+  alert_date: string;
+  category: ConstructionAttendanceAlertCategory;
+  trigger_type: "manual" | "scheduled";
+  status: ConstructionAttendanceAlertStatus;
+  expected_count: number;
+  attendance_count: number;
+  absent_count: number;
+  message: string;
+  details: JsonValue;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+};
+
+export type ConstructionAttendanceAlertRunSummary = {
+  alert_date: string;
+  scanned_configs: number;
+  written_logs: number;
 };
 
 export type ConstructionWageStatus = "draft" | "confirmed" | "paid" | "imported";
@@ -497,9 +577,44 @@ export type ConstructionModuleListFilters = {
   page_size?: number;
   keyword?: string;
   project_id?: string;
+  worker_id?: string;
+  attendance_device_id?: string;
   status?: string;
   platform_type?: string;
   action?: string;
+  include_delete_actions?: string;
+};
+
+export type ConstructionAttendanceAlertConfigFilters = Pick<
+  ConstructionModuleListFilters,
+  "page" | "page_size" | "keyword" | "project_id"
+> & {
+  is_enabled?: boolean;
+};
+
+export type ConstructionAttendanceAlertLogFilters = Pick<
+  ConstructionModuleListFilters,
+  "page" | "page_size" | "keyword" | "project_id" | "status"
+> & {
+  category?: ConstructionAttendanceAlertCategory | "all";
+  alert_date?: string;
+};
+
+export type ConstructionAttendanceAlertConfigPayload = Partial<
+  Pick<
+    ConstructionAttendanceAlertConfig,
+    | "project_id"
+    | "is_enabled"
+    | "check_managers"
+    | "check_workers"
+    | "check_supervisors"
+    | "remark"
+  >
+>;
+
+export type ConstructionAttendanceAlertRunPayload = {
+  alert_date?: string;
+  project_id?: string;
 };
 
 export type ConstructionOverviewMetric = {
@@ -539,6 +654,7 @@ export type ConstructionResourceListFilters = {
   page?: number;
   page_size?: number;
   keyword?: string;
+  project_id?: string;
   unit_id?: string;
   team_id?: string;
   company_type?: number;
@@ -694,6 +810,10 @@ export type ConstructionAttendanceDeviceIssueReportPayload = Partial<
     | "status"
     | "issued_at"
     | "message"
+    | "mqtt_message_id"
+    | "request_payload"
+    | "response_payload"
+    | "acknowledged_at"
     | "remark"
   >
 >;

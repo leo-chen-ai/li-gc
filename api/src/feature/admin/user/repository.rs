@@ -71,6 +71,13 @@ pub trait AdminUserRepository: Send + Sync {
         pool: &PgPool,
         user_id: Uuid,
     ) -> Result<Vec<ManagedProject>, AdminUserRepositoryError>;
+
+    /// Permanently delete a user and detach non-cascading ownership references.
+    async fn delete_user(
+        &self,
+        pool: &PgPool,
+        user_id: Uuid,
+    ) -> Result<bool, AdminUserRepositoryError>;
 }
 
 #[derive(Debug, Clone, Default)]
@@ -213,6 +220,31 @@ impl AdminUserRepository for AdminUserRepositoryImpl {
             .into_iter()
             .map(|(id, name)| ManagedProject { id, name })
             .collect())
+    }
+
+    async fn delete_user(
+        &self,
+        pool: &PgPool,
+        user_id: Uuid,
+    ) -> Result<bool, AdminUserRepositoryError> {
+        let mut tx = pool.begin().await?;
+
+        sqlx::query("UPDATE api_keys SET created_by = NULL WHERE created_by = $1")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("UPDATE api_keys SET revoked_by = NULL WHERE revoked_by = $1")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?;
+
+        let result = sqlx::query("DELETE FROM users WHERE id = $1")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+
+        Ok(result.rows_affected() > 0)
     }
 }
 

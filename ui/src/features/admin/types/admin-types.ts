@@ -90,6 +90,7 @@ export interface AdminUploadFile {
 
 export interface RegistrationLead {
   id: string;
+  username: string | null;
   name: string;
   phone: string;
   created_at: string;

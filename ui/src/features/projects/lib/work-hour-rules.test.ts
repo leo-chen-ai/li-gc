@@ -11,20 +11,28 @@ import {
 test("builds backend rules from visual work-hour fields", () => {
   const form = createDefaultWorkHourRuleForm();
   form.segments = [
-    { id: "a", startHour: "0", endHour: "8", rate: "1" },
-    { id: "b", startHour: "8", endHour: "15", rate: "1.5" },
-    { id: "c", startHour: "15", endHour: "30", rate: "2" },
+    { id: "a", startHour: "2", endHour: "4", rate: "0.5" },
+    { id: "b", startHour: "4", endHour: "20", rate: "1" },
+    { id: "c", startHour: "20", endHour: "30", rate: "1.5" },
   ];
 
   assert.deepEqual(buildWorkHourRules(form), {
     algorithm: "tiered_duration",
     maxHours: 24,
     segments: [
-      { fromHours: 0, toHours: 8, rate: 1 },
-      { fromHours: 8, toHours: 15, rate: 1.5 },
-      { fromHours: 15, toHours: 24, rate: 2 },
+      { fromHours: 2, toHours: 4, rate: 0.5 },
+      { fromHours: 4, toHours: 20, rate: 1 },
+      { fromHours: 20, toHours: 24, rate: 1.5 },
     ],
   });
+});
+
+test("uses the project default work-hour tiers", () => {
+  assert.deepEqual(createDefaultWorkHourRuleForm().segments, [
+    { id: "segment-1", startHour: "2", endHour: "4", rate: "0.5" },
+    { id: "segment-2", startHour: "4", endHour: "20", rate: "1" },
+    { id: "segment-3", startHour: "20", endHour: "24", rate: "1.5" },
+  ]);
 });
 
 test("parses existing backend rules back into visual fields", () => {
@@ -80,5 +88,5 @@ test("summarizes rules without exposing raw JSON", () => {
     ],
   });
 
-  assert.equal(summary, "0-8小时 x1 · 8-15小时 x1.5 · 上限24小时");
+  assert.equal(summary, "0-8小时算1 · 8-15小时算1.5 · 上限24小时");
 });

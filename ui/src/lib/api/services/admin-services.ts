@@ -135,6 +135,17 @@ export const adminService = {
     return data;
   },
 
+  resetUserPassword: async (userId: string, newPassword: string): Promise<void> => {
+    await apiClient.put<ApiResponse<void>>(
+      API_ENDPOINTS.ADMIN.USER_PASSWORD(userId),
+      { new_password: newPassword }
+    );
+  },
+
+  deleteUser: async (userId: string): Promise<void> => {
+    await apiClient.delete<ApiResponse<void>>(API_ENDPOINTS.ADMIN.USER(userId));
+  },
+
   getRoles: async (): Promise<AdminRole[]> => {
     const response = await apiClient.get<ApiResponse<AdminRole[]>>(
       API_ENDPOINTS.ADMIN.ROLES

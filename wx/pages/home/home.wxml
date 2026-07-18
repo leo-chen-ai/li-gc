@@ -7,7 +7,7 @@
    
   </view>
 
-  <view class="project-card">
+  <view class="project-card" bindtap="openProjectSwitcher">
     <image class="project-card-bg" src="{{projectCardBg}}" mode="aspectFill" />
     <view class="project-card-content">
       <view class="project-label">当前项目</view>
@@ -16,16 +16,11 @@
         <text>{{selectedProject.developerName}}</text>
       </view>
     </view>
-    <view class="project-switch-button" bind:tap="openProjectSwitcher">切换</view>
+    <view class="project-switch-button">切换</view>
   </view>
 
   <view class="feature-board">
-    <view
-      class="feature-card feature-primary {{primaryFeature.tone}}"
-      bind:tap="navigateToModule"
-      data-key="{{primaryFeature.key}}"
-      data-title="{{primaryFeature.title}}"
-    >
+    <view class="feature-card feature-primary {{primaryFeature.tone}}" catchtap="openOnboarding">
       <view class="feature-title">{{primaryFeature.title}}</view>
       <view class="feature-note" wx:if="{{primaryFeature.note}}">{{primaryFeature.note}}</view>
       <image class="feature-primary-image" src="{{primaryFeature.image}}" mode="aspectFit" />
@@ -33,15 +28,17 @@
 
     <view class="feature-side">
       <view class="feature-mini-row">
-        <block wx:for="{{miniFeatures}}" wx:key="key">
-          <view class="feature-card feature-mini {{item.tone}}" bind:tap="navigateToModule" data-key="{{item.key}}" data-title="{{item.title}}">
-            <view class="feature-title">{{item.title}}</view>
-            <image class="feature-mini-image" src="{{item.image}}" mode="aspectFit" />
-          </view>
-        </block>
+        <view class="feature-card feature-mini {{miniFeatures[0].tone}}" catchtap="openTeams">
+          <view class="feature-title">{{miniFeatures[0].title}}</view>
+          <image class="feature-mini-image" src="{{miniFeatures[0].image}}" mode="aspectFit" />
+        </view>
+        <view class="feature-card feature-mini {{miniFeatures[1].tone}}" catchtap="openWorkerEntry">
+          <view class="feature-title">{{miniFeatures[1].title}}</view>
+          <image class="feature-mini-image" src="{{miniFeatures[1].image}}" mode="aspectFit" />
+        </view>
       </view>
 
-      <view class="feature-card feature-wide {{wideFeature.tone}}" bind:tap="navigateToModule" data-key="{{wideFeature.key}}" data-title="{{wideFeature.title}}">
+      <view class="feature-card feature-wide {{wideFeature.tone}}" catchtap="openCompanies">
         <image class="feature-wide-image" src="{{wideFeature.image}}" mode="aspectFit" />
         <view>
           <view class="feature-title accent">{{wideFeature.title}}</view>
@@ -54,18 +51,23 @@
   <view class="section-card">
     <view class="section-title-row">
       <view class="section-title">考勤统计</view>
-      <view class="section-metric">今日出勤286人</view>
+      <view class="section-metric">{{sectionMetric}}</view>
     </view>
     <view class="section-grid two">
-      <block wx:for="{{attendanceModules}}" wx:key="key">
-        <view class="section-item" bind:tap="navigateToModule" data-key="{{item.key}}" data-title="{{item.title}}">
-          <view class="icon-disc">
-            <image class="section-icon" src="{{item.image}}" mode="aspectFit" />
-          </view>
-          <view class="section-item-title">{{item.title}}</view>
-          <view class="section-item-note">{{item.note}}</view>
+      <view class="section-item" catchtap="openAttendance">
+        <view class="icon-disc">
+          <image class="section-icon" src="{{attendanceModules[0].image}}" mode="aspectFit" />
         </view>
-      </block>
+        <view class="section-item-title">{{attendanceModules[0].title}}</view>
+        <view class="section-item-note">{{attendanceModules[0].note}}</view>
+      </view>
+      <view class="section-item" catchtap="openDevice">
+        <view class="icon-disc">
+          <image class="section-icon" src="{{attendanceModules[1].image}}" mode="aspectFit" />
+        </view>
+        <view class="section-item-title">{{attendanceModules[1].title}}</view>
+        <view class="section-item-note">{{attendanceModules[1].note}}</view>
+      </view>
     </view>
   </view>
 
@@ -118,5 +120,34 @@
       </block>
       <view class="project-empty" wx:else>暂无匹配项目</view>
     </scroll-view>
+  </view>
+
+  <view class="worker-entry-mask" wx:if="{{workerEntryVisible}}" catchtap="closeWorkerEntry"></view>
+  <view class="worker-entry-modal show" wx:if="{{workerEntryVisible}}">
+    <view class="modal-handle"></view>
+    <view class="worker-entry-header">
+      <view>
+        <view class="modal-title">项目工人</view>
+        <view class="modal-subtitle">选择要查看的人员状态</view>
+      </view>
+      <view class="modal-close" bind:tap="closeWorkerEntry">×</view>
+    </view>
+    <view class="worker-entry-loading" wx:if="{{workerEntryLoading}}">人数加载中...</view>
+    <view class="worker-entry-options" wx:else>
+      <view class="worker-entry-option onsite" data-status="1" bind:tap="enterWorkerList">
+        <view>
+          <view class="worker-entry-title">在场工人</view>
+          <view class="worker-entry-copy">当前仍在项目内的人员</view>
+        </view>
+        <view class="worker-entry-count">{{onsiteWorkerCount}}<text>人</text></view>
+      </view>
+      <view class="worker-entry-option departed" data-status="2" bind:tap="enterWorkerList">
+        <view>
+          <view class="worker-entry-title">离场工人</view>
+          <view class="worker-entry-copy">已经办理退场的人员</view>
+        </view>
+        <view class="worker-entry-count">{{departedWorkerCount}}<text>人</text></view>
+      </view>
+    </view>
   </view>
 </view>

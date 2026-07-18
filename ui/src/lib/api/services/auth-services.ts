@@ -1,9 +1,12 @@
 import { apiClient, API_ENDPOINTS } from "@/lib/api";
+import { httpApiUrl } from "@/lib/api/api-config";
 import type { ApiSuccess } from "@/lib/api/types";
 import type {
   AuthResponse,
   LoginCredentials,
   RegisterCredentials,
+  ScanLoginPollResponse,
+  ScanLoginSession,
   User,
 } from "@/features/auth/types/auth-types";
 
@@ -39,12 +42,34 @@ export const authService = {
     return data;
   },
 
-  createRegistrationLead: async (payload: { name: string; phone: string }): Promise<void> => {
+  createRegistrationLead: async (payload: { username: string; name: string; phone: string }): Promise<void> => {
     await apiClient.post<ApiSuccess<unknown>>(
       API_ENDPOINTS.AUTH.REGISTRATION_LEADS,
       payload
     );
   },
+
+  createScanLoginSession: async (): Promise<ScanLoginSession> => {
+    const response = await apiClient.post<ApiSuccess<ScanLoginSession>>(
+      API_ENDPOINTS.AUTH.SCAN_LOGIN_SESSIONS,
+      {}
+    );
+    const data = response.data.data;
+    if (!data) throw new Error("扫码登录会话创建失败");
+    return data;
+  },
+
+  pollScanLoginSession: async (scanToken: string): Promise<ScanLoginPollResponse> => {
+    const response = await apiClient.get<ApiSuccess<ScanLoginPollResponse>>(
+      API_ENDPOINTS.AUTH.SCAN_LOGIN_SESSION(scanToken)
+    );
+    const data = response.data.data;
+    if (!data) throw new Error("扫码登录状态获取失败");
+    return data;
+  },
+
+  getScanLoginQrUrl: (scanToken: string): string =>
+    `${httpApiUrl}${API_ENDPOINTS.AUTH.SCAN_LOGIN_QR(scanToken)}`,
 
   refreshToken: (() => {
     let inflight: Promise<string> | null = null;

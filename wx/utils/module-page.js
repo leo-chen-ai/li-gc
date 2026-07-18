@@ -12,6 +12,7 @@ const {
   buildFormFields,
   buildPayloadFromForm,
   nextUploadValue,
+  previewUploadedFile,
   uploadForField,
 } = require("./form-utils.js");
 
@@ -20,6 +21,9 @@ const resourceByModule = {
   companies: "units",
   device: "attendance-devices",
 };
+
+const HEARTBEAT_ONLINE_WINDOW_MS = 3 * 60 * 1000;
+const LIST_PAGE_SIZE = 10;
 
 const moduleConfigs = {
   teams: {
@@ -63,22 +67,22 @@ const moduleConfigs = {
   },
   device: {
     key: "device",
-    title: "考勤机模式",
+    title: "考勤机状态",
     shortTitle: "设备",
-    kicker: "设备 / 闸机同步",
-    subtitle: "维护考勤设备、序列号、安装位置、进出方向和状态。",
-    formHint: "对应 PC 考勤设备：设备类型、名称、序列号、方向和备注。",
-    searchPlaceholder: "搜索设备、序列号、位置",
-    primaryMetric: "进场",
+    kicker: "设备 / 在线状态",
+    subtitle: "查看考勤机当前在线状态、厂家、序列号和进出方向。",
+    formHint: "对应 PC 考勤机绑定：厂家类型、名称、序列号、方向和备注。",
+    searchPlaceholder: "搜索厂家、序列号、设备名称",
+    primaryMetric: "在线设备",
     secondaryMetric: "设备总数",
-    attentionMetric: "通用",
+    attentionMetric: "未在线",
     filters: [
       { label: "全部", value: "all" },
-      { label: "进场", value: "0" },
-      { label: "出场", value: "1" },
-      { label: "通用", value: "2" },
+      { label: "在线", value: "online" },
+      { label: "离线", value: "offline" },
+      { label: "未连接", value: "unknown" },
     ],
-    filterField: "direction",
+    filterField: "online_status",
     fields: fieldSets.devices,
   },
 };
@@ -92,6 +96,10 @@ function createModulePage(fixedModuleKey) {
       module: moduleConfigs[initialModuleKey],
       records: [],
       filteredRecords: [],
+      total: 0,
+      page: 1,
+      pageSize: LIST_PAGE_SIZE,
+      hasMore: false,
       keyword: "",
       filterValue: "all",
       summary: { primary: 0, secondary: 0, attention: 0 },
@@ -105,7 +113,9 @@ function createModulePage(fixedModuleKey) {
       lookups: { units: [], teams: [], workers: [] },
       project: null,
       projectName: "",
+      canManage: false,
       loading: false,
+      loadingMore: false,
       saving: false,
     },
 
@@ -127,17 +137,21 @@ function createModulePage(fixedModuleKey) {
       module,
       project,
       projectName: project.title,
+      canManage: canManageModule(moduleKey),
       loading: true,
+      loadingMore: false,
       keyword: "",
       filterValue: "all",
+      page: 1,
+      hasMore: false,
       formVisible: false,
     });
 
     try {
       const lookups = await this.loadLookups(project.id, moduleKey);
-      const records = await this.loadRecords(moduleKey, project.id);
+      const result = await this.loadRecords(moduleKey, project.id);
       this.setData({ lookups, loading: false });
-      this.refresh(records);
+      this.refresh(result.items || [], result.total, 1);
     } catch (error) {
       this.setData({ loading: false });
       wx.showToast({ title: error.message || "加载失败", icon: "none" });
@@ -157,33 +171,57 @@ function createModulePage(fixedModuleKey) {
     return lookups;
   },
 
-    async loadRecords(moduleKey, projectId = this.data.project.id) {
-    const result = await listResource(projectId, resourceByModule[moduleKey], {
-      page: 1,
-      page_size: 200,
+    async loadRecords(moduleKey, projectId = this.data.project.id, page = 1) {
+    return listResource(projectId, resourceByModule[moduleKey], {
+      page,
+      page_size: this.data.pageSize || LIST_PAGE_SIZE,
+      ...this.buildListParams(moduleKey),
     });
-    return result.items || [];
   },
 
-    refresh(records = this.data.records) {
-    const filtered = this.filterRecords(records, this.data.keyword, this.data.filterValue);
+    buildListParams(moduleKey = this.data.moduleKey) {
+    const params = {};
+    const keyword = String(this.data.keyword || "").trim();
+    if (keyword) {
+      params.keyword = keyword;
+    }
+    if (moduleKey === "companies" && this.data.filterValue !== "all") {
+      params.company_type = this.data.filterValue;
+    }
+    if (moduleKey === "teams") {
+      if (this.data.filterValue === "正常") {
+        params.attendance_configured = true;
+      }
+      if (this.data.filterValue === "待完善") {
+        params.attendance_configured = false;
+      }
+    }
+    return params;
+  },
+
+    refresh(records = this.data.records, total = this.data.total, page = this.data.page) {
+    const filtered = this.filterRecords(records, this.data.filterValue);
+    const normalizedTotal = Number.isFinite(Number(total)) ? Number(total) : records.length;
     this.setData({
       records,
       filteredRecords: this.decorateRecords(this.data.moduleKey, filtered),
-      summary: this.buildSummary(this.data.moduleKey, records),
+      summary: this.buildSummary(this.data.moduleKey, records, normalizedTotal),
+      total: normalizedTotal,
+      page,
+      hasMore: records.length < normalizedTotal,
     });
   },
 
-    filterRecords(records, keyword, filterValue) {
-    const normalizedKeyword = String(keyword || "").trim().toLowerCase();
+    filterRecords(records, filterValue) {
     const filterField = this.data.module.filterField;
     return records.filter((record) => {
       const fieldValue = this.data.moduleKey === "teams" && filterField === "status"
         ? getTeamStatus(record)
+        : this.data.moduleKey === "device" && filterField === "online_status"
+        ? getDeviceStatusKey(record)
         : String(record[filterField] === undefined || record[filterField] === null ? "" : record[filterField]);
       const matchesFilter = filterValue === "all" || fieldValue === filterValue;
-      const text = Object.values(record).join(" ").toLowerCase();
-      return matchesFilter && (!normalizedKeyword || text.includes(normalizedKeyword));
+      return matchesFilter;
     });
   },
 
@@ -194,43 +232,74 @@ function createModulePage(fixedModuleKey) {
     });
   },
 
-    buildSummary(moduleKey, records) {
+    buildSummary(moduleKey, records, total = records.length) {
     if (moduleKey === "teams") {
-      const normalCount = records.filter((item) => getTeamStatus(item) === "正常").length;
       const attentionCount = records.filter((item) => getTeamStatus(item) === "待完善").length;
       return {
-        primary: normalCount,
+        primary: total,
         secondary: this.data.lookups.workers.length,
         attention: attentionCount,
       };
     }
     if (moduleKey === "companies") {
       return {
-        primary: records.length,
+        primary: total,
         secondary: `${sumBy(records, "contract_amount")}万`,
         attention: countBy(records, "company_type", "3"),
       };
     }
+    const onlineCount = records.filter(isDeviceOnline).length;
     return {
-      primary: countBy(records, "direction", "0"),
+      primary: onlineCount,
       secondary: records.length,
-      attention: countBy(records, "direction", "2"),
+      attention: records.length - onlineCount,
     };
   },
 
-    onKeywordInput(event) {
+  onKeywordInput(event) {
     const keyword = event.detail.value;
     this.setData({ keyword });
-    this.refresh();
   },
 
-    setFilter(event) {
+  async submitSearch() {
+    await this.reloadRecords({ append: false });
+  },
+
+    async setFilter(event) {
     const filterValue = event.currentTarget.dataset.value;
     this.setData({ filterValue });
-    this.refresh();
+    await this.reloadRecords({ append: false });
+  },
+
+    async reloadRecords({ append = false } = {}) {
+    if (append) {
+      if (this.data.loadingMore || this.data.loading || !this.data.hasMore) return;
+    } else if (this.data.loading) {
+      return;
+    }
+
+    const page = append ? this.data.page + 1 : 1;
+    this.setData(append ? { loadingMore: true } : { loading: true, hasMore: false });
+    try {
+      const result = await this.loadRecords(this.data.moduleKey, this.data.project.id, page);
+      const records = append ? this.data.records.concat(result.items || []) : result.items || [];
+      this.setData({ loading: false, loadingMore: false });
+      this.refresh(records, result.total, page);
+    } catch (error) {
+      this.setData({ loading: false, loadingMore: false });
+      wx.showToast({ title: error.message || "搜索失败", icon: "none" });
+    }
+  },
+
+    async onReachBottom() {
+    await this.reloadRecords({ append: true });
   },
 
     openCreate() {
+    if (!this.data.canManage) {
+      wx.showToast({ title: "当前账号仅可查看", icon: "none" });
+      return;
+    }
     const overrides = {};
     if (this.data.moduleKey === "teams" && this.data.lookups.units.length) {
       overrides.unit_id = this.data.lookups.units[0].id;
@@ -247,6 +316,10 @@ function createModulePage(fixedModuleKey) {
   },
 
     openEdit(event) {
+    if (!this.data.canManage) {
+      wx.showToast({ title: "当前账号仅可查看", icon: "none" });
+      return;
+    }
     const id = event.currentTarget.dataset.id;
     const record = this.data.records.find((item) => item.id === id);
     if (!record) return;
@@ -307,8 +380,17 @@ function createModulePage(fixedModuleKey) {
     }
   },
 
+  previewUpload(event) {
+    const { url, name, isImage } = event.currentTarget.dataset;
+    previewUploadedFile({ url, name, isImage: isImage === true || isImage === "true" });
+  },
+
     async saveRecord() {
     if (this.data.saving) return;
+    if (!this.data.canManage) {
+      wx.showToast({ title: "当前账号仅可查看", icon: "none" });
+      return;
+    }
     let payload;
     try {
       payload = buildPayloadFromForm(this.data.module.fields, this.data.form);
@@ -329,9 +411,9 @@ function createModulePage(fixedModuleKey) {
       } else {
         await createResource(this.data.project.id, resourceByModule[this.data.moduleKey], payload);
       }
-      const records = await this.loadRecords(this.data.moduleKey);
+      const result = await this.loadRecords(this.data.moduleKey);
       this.setData({ formVisible: false, saving: false });
-      this.refresh(records);
+      this.refresh(result.items || [], result.total, 1);
       wx.showToast({ title: "已保存", icon: "success" });
     } catch (error) {
       this.setData({ saving: false });
@@ -340,6 +422,10 @@ function createModulePage(fixedModuleKey) {
   },
 
     deleteRecord(event) {
+    if (!this.data.canManage) {
+      wx.showToast({ title: "当前账号仅可查看", icon: "none" });
+      return;
+    }
     const id = event.currentTarget.dataset.id;
     const record = this.data.records.find((item) => item.id === id);
     if (!record) return;
@@ -351,8 +437,8 @@ function createModulePage(fixedModuleKey) {
         if (!result.confirm) return;
         try {
           await deleteResource(this.data.project.id, resourceByModule[this.data.moduleKey], id);
-          const records = await this.loadRecords(this.data.moduleKey);
-          this.refresh(records);
+          const result = await this.loadRecords(this.data.moduleKey);
+          this.refresh(result.items || [], result.total, 1);
           wx.showToast({ title: "已删除", icon: "success" });
         } catch (error) {
           wx.showToast({ title: error.message || "删除失败", icon: "none" });
@@ -387,17 +473,58 @@ function sumBy(records, key) {
 
 function toneFromStatus(status) {
   if (["正常", "在场", "有效", "在线", "进场"].includes(status)) return "ok";
-  if (["待完善", "待补图", "维护中"].includes(status)) return "warn";
+  if (["待完善", "待补图", "维护中", "未连接"].includes(status)) return "warn";
   if (["异常", "离场", "离线"].includes(status)) return "danger";
   return "";
+}
+
+function canManageModule(moduleKey) {
+  return moduleKey !== "device" || isAdminUser(wx.getStorageSync("shanhuai_user"));
+}
+
+function isAdminUser(user) {
+  const role = String(user && user.role || "").toLowerCase();
+  if (role === "admin") return true;
+  const roles = Array.isArray(user && user.roles) ? user.roles : [];
+  return roles.some((item) => String(item).toLowerCase() === "admin");
 }
 
 function getTeamStatus(record) {
   return record.attendance_start_time && record.attendance_end_time ? "正常" : "待完善";
 }
 
+function isDeviceOnline(record) {
+  if (record.online_status === "offline") return false;
+  if (!record.last_heartbeat_at) return record.online_status === "online";
+
+  const heartbeatAt = new Date(record.last_heartbeat_at).getTime();
+  if (Number.isNaN(heartbeatAt)) return record.online_status === "online";
+
+  return Date.now() - heartbeatAt <= HEARTBEAT_ONLINE_WINDOW_MS;
+}
+
+function getDeviceStatusKey(record) {
+  if (isDeviceOnline(record)) return "online";
+  return record.online_status === "offline" ? "offline" : "unknown";
+}
+
+function getDeviceStatusLabel(record) {
+  const status = getDeviceStatusKey(record);
+  if (status === "online") return "在线";
+  if (status === "offline") return "离线";
+  return "未连接";
+}
+
 function details(items) {
   return items.map(([label, value]) => ({ label, value: value || "未填写" }));
+}
+
+function formatDateTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  const pad = (number) => String(number).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 function buildRecordView(moduleKey, record, lookups = {}) {
@@ -407,7 +534,7 @@ function buildRecordView(moduleKey, record, lookups = {}) {
     const workerCount = (lookups.workers || []).filter((item) => item.team_id === record.id).length;
     return {
       _title: record.name,
-      _subtitle: `${record.team_no || "未填编号"} / ${(unit && unit.company_name) || "未关联单位"} / ${optionLabel(fieldSets.teams, "work_type", record.work_type, "未填工种")}`,
+      _subtitle: `${(unit && unit.company_name) || "未关联单位"} / ${optionLabel(fieldSets.teams, "work_type", record.work_type, "未填工种")}`,
       _status: status,
       _statusTone: toneFromStatus(status),
       _details: details([
@@ -429,13 +556,21 @@ function buildRecordView(moduleKey, record, lookups = {}) {
       _note: record.company_address || "未填写企业地址",
     };
   }
+  const status = getDeviceStatusLabel(record);
   return {
-    _title: record.device_name,
-    _subtitle: `${record.device_type || "未填类型"} / ${record.serial_number || "未填序列号"}`,
-    _status: optionLabel(fieldSets.devices, "direction", record.direction, "进场"),
-    _statusTone: toneFromStatus(optionLabel(fieldSets.devices, "direction", record.direction, "")),
-    _details: details([["方向", optionLabel(fieldSets.devices, "direction", record.direction)], ["设备类型", record.device_type], ["序列号", record.serial_number], ["设备名称", record.device_name]]),
-    _note: record.remark || "设备运行正常",
+    _title: record.device_name || "未命名设备",
+    _subtitle: `${record.device_type || "A厂家"} / ${record.serial_number || "未填序列号"}`,
+    _status: status,
+    _statusTone: toneFromStatus(status),
+    _details: details([
+      ["当前状态", status],
+      ["最近心跳", formatDateTime(record.last_heartbeat_at)],
+      ["进出方向", optionLabel(fieldSets.devices, "direction", record.direction)],
+      ["厂家类型", record.device_type || "A厂家"],
+      ["序列号", record.serial_number],
+      ["设备名称", record.device_name],
+    ]),
+    _note: record.remark || (status === "在线" ? "设备当前在线" : "暂无在线心跳"),
   };
 }
 

@@ -1,6 +1,5 @@
 import type { ConstructionWorkerPayload } from "../types/construction-types";
 
-const CONSTRUCTION_WORKER_TYPE = 1;
 const MANAGER_WORKER_TYPE = 1001;
 
 function isBlank(value: unknown) {
@@ -19,8 +18,16 @@ export function validateWorkerCreatePayload(payload: ConstructionWorkerPayload) 
   }
 
   const workerType = toNumber(payload.worker_type);
-  if (workerType === CONSTRUCTION_WORKER_TYPE && isBlank(payload.work_type)) {
+  if (workerType == null) {
+    throw new Error("请选择工人类型");
+  }
+
+  if (isBlank(payload.work_type)) {
     throw new Error("请选择工种");
+  }
+
+  if (isBlank(payload.political_status)) {
+    throw new Error("请选择政治面貌");
   }
 
   if (workerType === MANAGER_WORKER_TYPE && isBlank(payload.manager_type)) {

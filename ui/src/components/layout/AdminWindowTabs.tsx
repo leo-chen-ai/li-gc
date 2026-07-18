@@ -5,6 +5,8 @@ import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   ADMIN_WINDOW_FALLBACK_PATH,
+  ADMIN_WINDOW_STORAGE_EVENT,
+  getAdminWindowPathname,
   normalizeAdminPath,
   readAdminWindowState,
   type AdminWindow,
@@ -27,6 +29,7 @@ const staticTitles: Record<string, string> = {
   "/app/admin/enterprise-payments": "付款管理",
   "/app/admin/attendance-devices": "考勤机绑定",
   "/app/admin/attendance-device-issue-reports": "考勤机下发报告",
+  "/app/admin/managed-attendance": "自动托管",
   "/app/admin/environment-monitoring": "环境检测",
   "/app/admin/video-monitoring": "视频监控",
   "/app/admin/quality-safety": "质安管理",
@@ -48,7 +51,7 @@ const staticTitles: Record<string, string> = {
 };
 
 function getWindowTitle(path: string) {
-  const normalized = normalizeAdminPath(path);
+  const normalized = getAdminWindowPathname(path);
   if (staticTitles[normalized]) return staticTitles[normalized];
 
   const projectMatch = normalized.match(/^\/app\/admin\/projects\/([^/]+)$/);
@@ -81,17 +84,34 @@ function readStoredWindowsSnapshot(path: string, version: number) {
 function mergeCurrentWindow(windows: AdminWindow[], currentPath: string) {
   if (!currentPath.startsWith("/app/admin")) return windows;
 
-  const nextWindow = { path: currentPath, title: getWindowTitle(currentPath) };
-  const exists = windows.some((item) => item.path === currentPath);
-  return exists
-    ? windows.map((item) => (item.path === currentPath ? nextWindow : item))
+  const currentBasePath = getAdminWindowPathname(currentPath);
+  const existing = windows.find(
+    (item) => getAdminWindowPathname(item.path) === currentBasePath
+  );
+  const nextWindow = {
+    path: currentPath,
+    title: existing?.title || getWindowTitle(currentPath),
+  };
+  return existing
+    ? windows.map((item) =>
+        getAdminWindowPathname(item.path) === currentBasePath ? nextWindow : item
+      )
     : [...windows, nextWindow];
+}
+
+function parseAdminWindowSearch(path: string) {
+  const query = path.split("#")[0]?.split("?")[1];
+  if (!query) return {};
+  return Object.fromEntries(new URLSearchParams(query).entries());
 }
 
 export function AdminWindowTabs() {
   const location = useLocation();
   const navigate = useNavigate();
-  const currentPath = useMemo(() => normalizeAdminPath(location.pathname), [location.pathname]);
+  const currentPath = useMemo(() => {
+    const search = typeof window === "undefined" ? "" : window.location.search;
+    return normalizeAdminPath(`${location.pathname}${search}`);
+  }, [location.pathname, location.search]);
   const [storageVersion, refreshStorage] = useReducer((value: number) => value + 1, 0);
   const [contextMenu, setContextMenu] = useState<{ path: string; x: number; y: number } | null>(null);
   const tabRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -107,6 +127,12 @@ export function AdminWindowTabs() {
   useEffect(() => {
     writeAdminWindowState({ windows: visibleWindows, activePath: currentPath });
   }, [currentPath, visibleWindows]);
+
+  useEffect(() => {
+    const handleStorageChange = () => refreshStorage();
+    window.addEventListener(ADMIN_WINDOW_STORAGE_EVENT, handleStorageChange);
+    return () => window.removeEventListener(ADMIN_WINDOW_STORAGE_EVENT, handleStorageChange);
+  }, []);
 
   useEffect(() => {
     tabRefs.current[currentPath]?.scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -135,7 +161,10 @@ export function AdminWindowTabs() {
   const openWindow = (path: string) => {
     if (path === currentPath) return;
     writeAdminWindowState({ windows: visibleWindows, activePath: path });
-    void navigate({ to: path });
+    void navigate({
+      to: getAdminWindowPathname(path),
+      search: parseAdminWindowSearch(path),
+    });
   };
 
   const closeWindow = (path: string) => {
@@ -146,7 +175,10 @@ export function AdminWindowTabs() {
     if (path === currentPath) {
       const target = next[currentIndex - 1] ?? next[currentIndex] ?? { path: ADMIN_WINDOW_FALLBACK_PATH };
       writeAdminWindowState({ windows: next, activePath: target.path });
-      void navigate({ to: target.path });
+      void navigate({
+        to: getAdminWindowPathname(target.path),
+        search: parseAdminWindowSearch(target.path),
+      });
       return;
     }
 
@@ -161,7 +193,10 @@ export function AdminWindowTabs() {
     writeAdminWindowState({ windows: next, activePath: path });
 
     if (path !== currentPath) {
-      void navigate({ to: path });
+      void navigate({
+        to: getAdminWindowPathname(path),
+        search: parseAdminWindowSearch(path),
+      });
       return;
     }
 

@@ -11,6 +11,7 @@ use crate::{
         },
         auth::{
             auth_method::{AuthMethodRepositoryImpl, AuthMethodService},
+            scan_login::ScanLoginStore,
             service::AuthService,
             session::{SessionRepositoryImpl, SessionService},
         },
@@ -42,6 +43,7 @@ pub struct AppState {
     pub stats_service: Arc<StatsService>,
     pub storage: Arc<dyn StorageProvider>,
     pub session_blacklist: Option<Arc<dyn SessionBlacklist>>,
+    pub scan_login_store: Arc<ScanLoginStore>,
     pub log_reload_handle: Arc<ReloadFilterHandle>,
 }
 
@@ -131,6 +133,7 @@ impl AppState {
             stats_service,
             storage,
             session_blacklist,
+            scan_login_store: Arc::new(ScanLoginStore::new()),
             log_reload_handle: Arc::new(log_reload_handle),
         })
     }
@@ -191,6 +194,7 @@ impl AppState {
             stats_service,
             storage,
             session_blacklist: None,
+            scan_login_store: Arc::new(ScanLoginStore::new()),
             log_reload_handle: Arc::new(handle),
         }
     }

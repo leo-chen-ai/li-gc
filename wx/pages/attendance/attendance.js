@@ -17,6 +17,51 @@ function formatMonth(iso) {
   return `${year}年${month}月`;
 }
 
+function monthKey(iso) {
+  return String(iso || "").slice(0, 7);
+}
+
+function pad2(value) {
+  return String(value).padStart(2, "0");
+}
+
+function buildMonthCalendar(month, activeDate, days = []) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  if (!year || !monthNumber) return [];
+
+  const dayCount = new Date(year, monthNumber, 0).getDate();
+  const firstWeekday = new Date(year, monthNumber - 1, 1).getDay();
+  const dayMap = days.reduce((map, item) => {
+    map[Number(item.day)] = item;
+    return map;
+  }, {});
+  const cells = Array.from({ length: firstWeekday }, (_, index) => ({
+    key: `empty-${index}`,
+    empty: true,
+  }));
+
+  for (let day = 1; day <= dayCount; day += 1) {
+    const info = dayMap[day];
+    const date = `${month}-${pad2(day)}`;
+    cells.push({
+      key: date,
+      day,
+      date,
+      empty: false,
+      hasAttendance: Boolean(info),
+      isActive: date === activeDate,
+      firstIn: info && info.first_in_time || "",
+      lastOut: info && info.last_out_time || "",
+    });
+  }
+
+  while (cells.length % 7 !== 0) {
+    cells.push({ key: `empty-tail-${cells.length}`, empty: true });
+  }
+
+  return cells;
+}
+
 function formatTime(value) {
   if (!value) return "";
   const date = new Date(value);
@@ -60,6 +105,8 @@ Page({
     filteredWorkers: [],
     detailVisible: false,
     currentDetail: null,
+    calendarRowsByMonth: {},
+    calendarWeekdays: ["日", "一", "二", "三", "四", "五", "六"],
   },
 
   async onLoad() {
@@ -201,11 +248,68 @@ Page({
     };
   },
 
-  openWorkerAttendance(event) {
+  async openWorkerAttendance(event) {
     const id = event.currentTarget.dataset.id;
     const currentDetail = this.data.filteredWorkers.find((item) => item.id === id);
     if (!currentDetail) return;
-    this.setData({ currentDetail, detailVisible: true });
+    const month = monthKey(this.data.activeDateValue);
+    const calendarDays = buildMonthCalendar(month, this.data.activeDateValue);
+    this.setData({
+      currentDetail: {
+        ...currentDetail,
+        calendarMonth: formatMonth(`${month}-01`),
+        calendarDays,
+        calendarAttendanceDays: 0,
+        calendarLoading: true,
+      },
+      detailVisible: true,
+    });
+    await this.loadWorkerMonthCalendar(id, month);
+  },
+
+  async loadWorkerMonthCalendar(workerId, month) {
+    const cachedRows = this.data.calendarRowsByMonth[month];
+    if (cachedRows) {
+      this.applyWorkerMonthCalendar(workerId, month, cachedRows);
+      return;
+    }
+
+    try {
+      const result = await listResource(this.data.project.id, "attendance-records", {
+        view: "calendar",
+        month,
+      });
+      const rows = result.items || [];
+      this.setData({
+        calendarRowsByMonth: {
+          ...this.data.calendarRowsByMonth,
+          [month]: rows,
+        },
+      });
+      this.applyWorkerMonthCalendar(workerId, month, rows);
+    } catch (error) {
+      this.setData({
+        currentDetail: {
+          ...this.data.currentDetail,
+          calendarLoading: false,
+        },
+      });
+      wx.showToast({ title: error.message || "月历加载失败", icon: "none" });
+    }
+  },
+
+  applyWorkerMonthCalendar(workerId, month, rows) {
+    const row = rows.find((item) => item.worker_id === workerId);
+    const days = row && Array.isArray(row.days) ? row.days : [];
+    const calendarDays = buildMonthCalendar(month, this.data.activeDateValue, days);
+    this.setData({
+      currentDetail: {
+        ...this.data.currentDetail,
+        calendarDays,
+        calendarAttendanceDays: days.length,
+        calendarLoading: false,
+      },
+    });
   },
 
   closeDetail() {

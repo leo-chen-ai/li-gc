@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useSearch } from "@tanstack/react-router";
 import {
   Check,
   ChevronsUpDown,
   FileClock,
   Loader2,
-  Pencil,
   Plus,
+  RotateCcw,
   Search,
   Trash2,
   UserRound,
@@ -53,7 +54,6 @@ import {
   useProjectAttendanceDevicesQuery,
   useProjectOptionsQuery,
   useProjectWorkersQuery,
-  useUpdateAttendanceDeviceIssueReportMutation,
 } from "@/features/projects/hooks/use-construction-projects";
 import type {
   ConstructionAttendanceDeviceIssueAction,
@@ -82,7 +82,6 @@ type IssueReportFormState = {
   worker_id: string;
   attendance_device_id: string;
   action: ConstructionAttendanceDeviceIssueAction;
-  status: ConstructionAttendanceDeviceIssueStatus;
   issued_at: string;
   message: string;
   remark: string;
@@ -93,22 +92,33 @@ const defaultFormState: IssueReportFormState = {
   worker_id: "",
   attendance_device_id: "",
   action: "create",
-  status: "pending",
   issued_at: "",
   message: "",
   remark: "",
 };
 
 export function AttendanceDeviceIssueReportsPage() {
+  const searchParams = useSearch({ strict: false }) as {
+    project_id?: string;
+    attendance_device_id?: string;
+    device_name?: string;
+    serial_number?: string;
+    include_delete_actions?: string;
+  };
   const projectsQuery = useProjectOptionsQuery();
   const projects = projectsQuery.data ?? [];
-  const [selectedProjectId, setSelectedProjectId] = useState("");
+  const searchProjectId = searchParams.project_id ?? "";
+  const attendanceDeviceId = searchParams.attendance_device_id ?? "";
+  const searchDeviceLabel = [searchParams.device_name, searchParams.serial_number]
+    .filter(Boolean)
+    .join(" / ");
+  const includeDeleteActions = searchParams.include_delete_actions === "1";
+  const [selectedProjectId, setSelectedProjectId] = useState(searchProjectId);
   const [keyword, setKeyword] = useState("");
   const [status, setStatus] = useState("all");
   const [action, setAction] = useState("all");
   const [page, setPage] = useState(1);
   const [formOpen, setFormOpen] = useState(false);
-  const [editingReport, setEditingReport] = useState<ConstructionAttendanceDeviceIssueReport | null>(null);
   const [reportPendingDelete, setReportPendingDelete] = useState<ConstructionAttendanceDeviceIssueReport | null>(null);
   const [form, setForm] = useState<IssueReportFormState>(defaultFormState);
   const [workerKeyword, setWorkerKeyword] = useState("");
@@ -122,7 +132,11 @@ export function AttendanceDeviceIssueReportsPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [action, keyword, selectedProjectId, status]);
+  }, [action, attendanceDeviceId, keyword, selectedProjectId, status]);
+
+  useEffect(() => {
+    if (searchProjectId) setSelectedProjectId(searchProjectId);
+  }, [searchProjectId]);
 
   const filters = useMemo(
     () => ({
@@ -130,10 +144,12 @@ export function AttendanceDeviceIssueReportsPage() {
       page_size: PAGE_SIZE,
       keyword: keyword.trim() || undefined,
       project_id: selectedProjectId || undefined,
+      attendance_device_id: attendanceDeviceId || undefined,
       status: status === "all" ? undefined : status,
       action: action === "all" ? undefined : action,
+      include_delete_actions: includeDeleteActions ? "1" : undefined,
     }),
-    [action, keyword, page, selectedProjectId, status]
+    [action, attendanceDeviceId, includeDeleteActions, keyword, page, selectedProjectId, status]
   );
 
   const reportsQuery = useAttendanceDeviceIssueReportsQuery(filters);
@@ -146,6 +162,7 @@ export function AttendanceDeviceIssueReportsPage() {
   const successCount = reports.filter((report) => report.status === "success").length;
   const pendingCount = reports.filter((report) => report.status === "pending").length;
   const failedCount = reports.filter((report) => report.status === "failed").length;
+  const scopedDeviceLabel = getScopedDeviceLabel(attendanceDeviceId, reports, searchDeviceLabel);
 
   const workerOptionsQuery = useProjectWorkersQuery(form.project_id, {
     page: 1,
@@ -159,34 +176,31 @@ export function AttendanceDeviceIssueReportsPage() {
   });
 
   const createReport = useCreateAttendanceDeviceIssueReportMutation();
-  const updateReport = useUpdateAttendanceDeviceIssueReportMutation();
   const deleteReport = useDeleteAttendanceDeviceIssueReportMutation();
-  const isSaving = createReport.isPending || updateReport.isPending;
+  const isSaving = createReport.isPending;
+
+  const handleSearch = () => {
+    if (page !== 1) {
+      setPage(1);
+      return;
+    }
+    void reportsQuery.refetch();
+  };
+
+  const handleResetFilters = () => {
+    setSelectedProjectId(searchProjectId || projects[0]?.id || "");
+    setKeyword("");
+    setStatus("all");
+    setAction("all");
+    setPage(1);
+  };
 
   const openCreateDialog = () => {
     const projectId = selectedProjectId || projects[0]?.id || "";
-    setEditingReport(null);
     setForm({
       ...defaultFormState,
       project_id: projectId,
       issued_at: toDateTimeLocalValue(new Date()),
-    });
-    setWorkerKeyword("");
-    setDeviceKeyword("");
-    setFormOpen(true);
-  };
-
-  const openEditDialog = (report: ConstructionAttendanceDeviceIssueReport) => {
-    setEditingReport(report);
-    setForm({
-      project_id: report.project_id,
-      worker_id: report.worker_id ?? "",
-      attendance_device_id: report.attendance_device_id ?? "",
-      action: report.action,
-      status: report.status,
-      issued_at: toDateTimeLocalValue(report.issued_at ? new Date(report.issued_at) : new Date()),
-      message: report.message ?? "",
-      remark: report.remark ?? "",
     });
     setWorkerKeyword("");
     setDeviceKeyword("");
@@ -223,26 +237,19 @@ export function AttendanceDeviceIssueReportsPage() {
       worker_id: form.worker_id,
       attendance_device_id: form.attendance_device_id,
       action: form.action,
-      status: form.status,
       issued_at: issuedAt.toISOString(),
       message: form.message.trim() || null,
       remark: form.remark.trim() || null,
     };
 
     try {
-      if (editingReport) {
-        await updateReport.mutateAsync({ reportId: editingReport.id, payload });
-        toast.success("下发记录已修改");
-      } else {
-        await createReport.mutateAsync(payload);
-        setSelectedProjectId(form.project_id);
-        toast.success("下发记录已新增");
-      }
+      await createReport.mutateAsync(payload);
+      setSelectedProjectId(form.project_id);
+      toast.success("下发命令已发送，等待设备回执");
       setFormOpen(false);
-      setEditingReport(null);
       setForm(defaultFormState);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : editingReport ? "修改下发记录失败" : "新增下发记录失败");
+      toast.error(error instanceof Error ? error.message : "新增下发记录失败");
     }
   };
 
@@ -301,7 +308,7 @@ export function AttendanceDeviceIssueReportsPage() {
           </Button>
         </div>
 
-        <div className="grid gap-3 bg-[#f8faf9] px-5 py-3 dark:bg-muted/30 lg:grid-cols-[minmax(260px,1fr)_minmax(300px,1.2fr)_180px_180px] lg:items-end">
+        <div className="grid gap-3 bg-[#f8faf9] px-5 py-3 dark:bg-muted/30 lg:grid-cols-[minmax(220px,1fr)_minmax(280px,1.2fr)_160px_160px_auto] lg:items-end">
           <label className="space-y-1">
             <span className="text-xs font-medium text-slate-500 dark:text-muted-foreground">选择项目</span>
             <ProjectSearchSelect
@@ -320,6 +327,11 @@ export function AttendanceDeviceIssueReportsPage() {
               <Input
                 value={keyword}
                 onChange={(event) => setKeyword(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    handleSearch();
+                  }
+                }}
                 placeholder="搜索姓名、身份证、手机号、考勤机、项目"
                 className="h-10 rounded-lg border-slate-200 bg-white pl-9 focus-visible:border-[#0f6b5d] focus-visible:ring-[#0f6b5d]/15 dark:border-border dark:bg-background"
               />
@@ -338,6 +350,35 @@ export function AttendanceDeviceIssueReportsPage() {
             onValueChange={setAction}
             options={[{ value: "all", label: "全部动作" }, ...actionOptions]}
           />
+          <div className="flex items-end gap-2 lg:justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 gap-2 border-slate-200 bg-white dark:border-border dark:bg-background"
+              onClick={handleResetFilters}
+            >
+              <RotateCcw className="size-4" />
+              重置
+            </Button>
+            <Button
+              type="button"
+              className="h-10 gap-2 bg-[#0f6b5d] text-white hover:bg-[#0b5148]"
+              onClick={handleSearch}
+              disabled={reportsQuery.isFetching}
+            >
+              {reportsQuery.isFetching ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Search className="size-4" />
+              )}
+              查询
+            </Button>
+          </div>
+          {attendanceDeviceId ? (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300 lg:col-span-5">
+              当前考勤机：{scopedDeviceLabel}
+            </div>
+          ) : null}
         </div>
       </section>
 
@@ -358,13 +399,14 @@ export function AttendanceDeviceIssueReportsPage() {
         <Table className="w-full table-fixed">
           <TableHeader>
             <TableRow className="bg-[#f8faf9] hover:bg-[#f8faf9] dark:bg-muted/30 dark:hover:bg-muted/30">
-              <TableHead className="w-[20%] px-5 text-slate-500 dark:text-muted-foreground">工人</TableHead>
-              <TableHead className="w-[21%] text-slate-500 dark:text-muted-foreground">项目</TableHead>
-              <TableHead className="w-[18%] text-slate-500 dark:text-muted-foreground">考勤机</TableHead>
-              <TableHead className="w-[12%] text-slate-500 dark:text-muted-foreground">下发时间</TableHead>
-              <TableHead className="w-[9%] text-slate-500 dark:text-muted-foreground">状态</TableHead>
-              <TableHead className="w-[8%] text-slate-500 dark:text-muted-foreground">动作</TableHead>
-              <TableHead className="w-[12%] text-right">操作</TableHead>
+              <TableHead className="w-[14%] px-5 text-slate-500 dark:text-muted-foreground">工人</TableHead>
+              <TableHead className="w-[12%] text-slate-500 dark:text-muted-foreground">项目</TableHead>
+              <TableHead className="w-[12%] text-slate-500 dark:text-muted-foreground">考勤机</TableHead>
+              <TableHead className="w-[9%] text-slate-500 dark:text-muted-foreground">下发时间</TableHead>
+              <TableHead className="w-[6%] text-slate-500 dark:text-muted-foreground">状态</TableHead>
+              <TableHead className="w-[7%] text-slate-500 dark:text-muted-foreground">动作</TableHead>
+              <TableHead className="w-[33%] text-slate-500 dark:text-muted-foreground">回执/原因</TableHead>
+              <TableHead className="w-[7%] text-right">操作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -411,18 +453,11 @@ export function AttendanceDeviceIssueReportsPage() {
                   <TableCell>
                     <ActionBadge action={report.action} />
                   </TableCell>
+                  <TableCell>
+                    <IssueMessage report={report} />
+                  </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="gap-1 text-slate-600 hover:bg-slate-50 dark:text-muted-foreground dark:hover:bg-muted/40"
-                        onClick={() => openEditDialog(report)}
-                      >
-                        <Pencil className="size-4" />
-                        编辑
-                      </Button>
                       <Button
                         type="button"
                         variant="ghost"
@@ -439,7 +474,7 @@ export function AttendanceDeviceIssueReportsPage() {
               ))
             ) : (
               <TableRow>
-                <TableCell colSpan={7} className="h-28 text-center text-sm text-slate-500 dark:text-muted-foreground">
+                <TableCell colSpan={8} className="h-28 text-center text-sm text-slate-500 dark:text-muted-foreground">
                   {reportsQuery.isLoading
                     ? "正在加载下发记录"
                     : reportsQuery.isError
@@ -469,9 +504,9 @@ export function AttendanceDeviceIssueReportsPage() {
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
         <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle>{editingReport ? "编辑下发记录" : "新增下发记录"}</DialogTitle>
+            <DialogTitle>下发人员到考勤机</DialogTitle>
             <DialogDescription>
-              选择项目后，从数据库下拉选择项目工人和考勤机。
+              选择项目工人和在线考勤机后，系统会直接向设备发送人员资料。
             </DialogDescription>
           </DialogHeader>
           <form className="grid gap-4" onSubmit={handleSubmit}>
@@ -551,17 +586,12 @@ export function AttendanceDeviceIssueReportsPage() {
                 options={actionOptions}
               />
 
-              <FilterSelect
-                label="下发状态"
-                value={form.status}
-                onValueChange={(nextStatus) =>
-                  setForm((current) => ({
-                    ...current,
-                    status: isIssueStatus(nextStatus) ? nextStatus : "pending",
-                  }))
-                }
-                options={statusOptions}
-              />
+              <div className="space-y-1.5">
+                <span className="text-xs font-medium text-slate-500 dark:text-muted-foreground">下发状态</span>
+                <div className="flex h-10 items-center rounded-lg border border-amber-200 bg-amber-50 px-3 text-sm font-medium text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
+                  等待设备回执
+                </div>
+              </div>
 
               <label className="space-y-1.5">
                 <span className="text-xs font-medium text-slate-500 dark:text-muted-foreground">下发时间 *</span>
@@ -601,7 +631,7 @@ export function AttendanceDeviceIssueReportsPage() {
               </Button>
               <Button type="submit" disabled={isSaving} className="bg-[#0f6b5d] text-white hover:bg-[#0b5148]">
                 {isSaving ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
-                保存
+                下发
               </Button>
             </DialogFooter>
           </form>
@@ -808,6 +838,27 @@ function StatusBadge({ status }: { status: ConstructionAttendanceDeviceIssueStat
   );
 }
 
+function IssueMessage({ report }: { report: ConstructionAttendanceDeviceIssueReport }) {
+  const message = readableIssueMessage(report);
+  if (!message) {
+    return <span className="text-xs text-slate-400 dark:text-muted-foreground">-</span>;
+  }
+
+  return (
+    <div
+      className={cn(
+        "line-clamp-2 max-w-[620px] whitespace-normal break-words text-xs leading-5",
+        report.status === "failed"
+          ? "text-red-600 dark:text-red-400"
+          : "text-slate-500 dark:text-muted-foreground"
+      )}
+      title={message}
+    >
+      {message}
+    </div>
+  );
+}
+
 function ActionBadge({ action }: { action: ConstructionAttendanceDeviceIssueAction }) {
   const config = {
     create: {
@@ -834,6 +885,31 @@ function ActionBadge({ action }: { action: ConstructionAttendanceDeviceIssueActi
   );
 }
 
+function readableIssueMessage(report: ConstructionAttendanceDeviceIssueReport) {
+  const message = report.message?.trim();
+  if (!message) {
+    if (report.status === "pending") return "等待设备回执";
+    if (report.status === "success") return "设备已确认";
+    return "";
+  }
+
+  return message.replace(
+    "Get pic Person Feature err, please change a pic",
+    "人脸照片提取特征失败，请更换清晰正脸照"
+  );
+}
+
+function getScopedDeviceLabel(
+  attendanceDeviceId: string,
+  reports: ConstructionAttendanceDeviceIssueReport[],
+  fallbackLabel: string
+) {
+  if (!attendanceDeviceId) return "";
+  const report = reports.find((item) => item.attendance_device_id === attendanceDeviceId);
+  const label = [report?.device_name, report?.serial_number].filter(Boolean).join(" / ");
+  return label || fallbackLabel || attendanceDeviceId;
+}
+
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "-";
   const date = new Date(value);
@@ -856,8 +932,4 @@ function toDateTimeLocalValue(date: Date) {
 
 function isIssueAction(value: string): value is ConstructionAttendanceDeviceIssueAction {
   return actionOptions.some((option) => option.value === value);
-}
-
-function isIssueStatus(value: string): value is ConstructionAttendanceDeviceIssueStatus {
-  return statusOptions.some((option) => option.value === value);
 }

@@ -1,7 +1,41 @@
-const API_BASE_URL = "http://192.168.32.126:8080/api/v1";
+const LOCAL_API_BASE_URL = "http://192.168.32.126:8080/api/v1";
+const PRODUCTION_API_BASE_URL = "https://shanhuai.top/api/v1";
+
+function isDevelopEnv() {
+  if (!wx.getAccountInfoSync) return false;
+  try {
+    const accountInfo = wx.getAccountInfoSync();
+    return accountInfo && accountInfo.miniProgram && accountInfo.miniProgram.envVersion === "develop";
+  } catch (error) {
+    return false;
+  }
+}
+
+const API_BASE_URL = isDevelopEnv() ? LOCAL_API_BASE_URL : PRODUCTION_API_BASE_URL;
+let redirectingToLogin = false;
 
 function apiUrl(path) {
   return `${API_BASE_URL.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
+}
+
+function handleUnauthorized(url, statusCode) {
+  if (statusCode !== 401 || url === "/auth/login") return false;
+
+  wx.removeStorageSync("shanhuai_access_token");
+  wx.removeStorageSync("shanhuai_token_expires_at");
+  wx.removeStorageSync("shanhuai_user");
+  wx.removeStorageSync("shanhuai_managed_projects");
+  wx.removeStorageSync("shanhuai_selected_project");
+
+  if (!redirectingToLogin) {
+    redirectingToLogin = true;
+    wx.showToast({ title: "登录已过期，请重新登录", icon: "none" });
+    wx.reLaunch({
+      url: "/pages/login/login",
+      complete: () => setTimeout(() => { redirectingToLogin = false; }, 1000),
+    });
+  }
+  return true;
 }
 
 function request({ url, method = "GET", data, header = {} }) {
@@ -22,6 +56,10 @@ function request({ url, method = "GET", data, header = {} }) {
       data,
       header: headers,
       success(response) {
+        if (handleUnauthorized(url, response.statusCode)) {
+          reject(new Error("登录已过期，请重新登录"));
+          return;
+        }
         if (response.statusCode >= 200 && response.statusCode < 300 && response.data && response.data.success) {
           resolve(response.data.data);
           return;
@@ -52,6 +90,10 @@ function uploadFile({ url = "/uploads", filePath, name = "file", formData = {}, 
       formData,
       header: headers,
       success(response) {
+        if (handleUnauthorized(url, response.statusCode)) {
+          reject(new Error("登录已过期，请重新登录"));
+          return;
+        }
         let body = response.data;
         try {
           body = JSON.parse(response.data);

@@ -45,3 +45,9 @@ pub struct UpdateUserProjectsRequest {
     #[serde(default)]
     pub project_ids: Vec<Uuid>,
 }
+
+/// Administrator-driven password reset. An omitted password uses the platform default.
+#[derive(Debug, Deserialize)]
+pub struct ResetUserPasswordRequest {
+    pub new_password: Option<String>,
+}

@@ -16,8 +16,12 @@ export type AttendanceCalendarCell = {
 };
 
 export type AttendanceCalendarRow = {
+  workerId?: string;
   worker: string;
   team: string;
+  workType?: string;
+  workerType?: string;
+  attendanceDays?: number;
   monthlyWorkingHours: number;
   monthlyWorkPoint: number;
   days: Record<number, AttendanceCalendarCell>;
@@ -63,12 +67,15 @@ export function buildAttendanceCalendarRows(records: AttendanceRecord[], month: 
     const parsed = parseAttendanceTime(record.time);
     if (!parsed || !toLocalDateKey(parsed.date).startsWith(monthPrefix)) continue;
 
-    const key = `${record.worker}::${record.team}`;
+    const key = record.workerId ?? `${record.worker}::${record.team}`;
     const row =
       rows.get(key) ??
       {
+        workerId: record.workerId,
         worker: record.worker,
         team: record.team,
+        workType: record.workType,
+        workerType: record.workerType,
         monthlyWorkingHours: 0,
         monthlyWorkPoint: 0,
         days: {},
@@ -131,6 +138,7 @@ export function buildAttendanceCalendarRowsFromSummary(summaryRows: AttendanceCa
       }
 
       return {
+        workerId: summary.worker_id,
         worker: summary.worker_name || "未匹配工人",
         team: summary.team_name || "未匹配班组",
         monthlyWorkingHours: toFiniteNumber(summary.total_working_hours) || sumCalendarDays(days, "workingHours"),

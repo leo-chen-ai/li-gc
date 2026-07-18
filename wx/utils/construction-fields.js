@@ -3,6 +3,10 @@ const yesNoOptions = [
   { label: "否", value: "false" },
 ];
 
+const deviceTypeOptions = [
+  { label: "A厂家", value: "A厂家" },
+];
+
 const companyTypeOptions = [
   { label: "总承包单位", value: "1" },
   { label: "监理", value: "2" },
@@ -155,8 +159,7 @@ const unitFields = [
   { key: "company_credit_code", label: "统一社会信用代码", valueType: "string", section: "基础信息" },
   { key: "company_type", label: "单位类型", valueType: "number", control: "select", section: "基础信息", options: companyTypeOptions },
   { key: "register_date", label: "注册日期", valueType: "date", section: "基础信息" },
-  { key: "register_area", label: "注册区域", valueType: "string", section: "基础信息" },
-  { key: "register_area_list", label: "注册区域名称", valueType: "string", section: "基础信息" },
+  { key: "register_area_list", label: "注册区域", valueType: "string", section: "基础信息" },
   { key: "company_address", label: "单位地址", valueType: "string", section: "基础信息", wide: true },
   { key: "company_phone", label: "单位电话", valueType: "string", section: "基础信息" },
   { key: "manager_name", label: "负责人", valueType: "string", section: "负责人" },
@@ -167,11 +170,7 @@ const unitFields = [
   { key: "contract_amount", label: "合同金额", valueType: "number", section: "合同计薪" },
   { key: "salary_calc_type", label: "计薪方式", valueType: "number", control: "select", section: "合同计薪", options: unitSalaryCalcTypeOptions },
   { key: "quantity_unit_type", label: "计量单位", valueType: "number", control: "select", section: "合同计薪", options: quantityUnitTypeOptions },
-  { key: "timer_set_a", label: "计时设置 A", valueType: "number", section: "合同计薪" },
-  { key: "timer_set_b", label: "计时设置 B", valueType: "number", section: "合同计薪" },
-  { key: "timer_set_c", label: "计时设置 C", valueType: "number", section: "合同计薪" },
-  { key: "attachment", label: "附件", valueType: "string", control: "upload", uploadKind: "file", section: "资料附件" },
-  { key: "attachment_file", label: "附件文件", valueType: "json", control: "upload", uploadKind: "file", uploadMultiple: true, section: "资料附件", wide: true },
+  { key: "attachment_file", label: "附件", valueType: "json", control: "upload", uploadKind: "image", uploadMultiple: true, section: "资料附件", wide: true },
   { key: "seal_photo", label: "印章图片", valueType: "string", control: "upload", uploadKind: "image", section: "资料附件" },
 ];
 
@@ -189,7 +188,6 @@ const teamFields = [
   { key: "leader_name", label: "班组长姓名", valueType: "string", section: "班组长", hidden: true },
   { key: "leader_phone", label: "班组长手机号", valueType: "string", section: "班组长", hidden: true },
   { key: "leader_id_card", label: "班组长身份证", valueType: "string", section: "班组长", hidden: true },
-  { key: "team_no", label: "班组编号", valueType: "string", section: "班组长" },
   { key: "remark", label: "备注", valueType: "string", control: "textarea", section: "班组长", wide: true },
 ];
 
@@ -207,28 +205,28 @@ const workerFields = [
   { key: "id_card", label: "身份证号", valueType: "string", section: "基础信息" },
   { key: "nation", label: "民族", valueType: "string", section: "基础信息" },
   { key: "address", label: "住址", valueType: "string", control: "textarea", section: "基础信息", wide: true },
-  { key: "native_place", label: "籍贯", valueType: "number", control: "select", section: "证件信息", options: nativePlaceOptions },
-  { key: "validity_period", label: "开始日期", valueType: "string", section: "证件信息" },
-  { key: "validity_period_end", label: "结束日期", valueType: "string", section: "证件信息" },
-  { key: "visa_office", label: "签发机关", valueType: "string", section: "证件信息" },
-  { key: "is_manage_team", label: "是否带班", valueType: "boolean", control: "select", defaultValue: "false", section: "证件信息", options: yesNoOptions },
-  { key: "is_key_personnel", label: "重点人员", valueType: "boolean", control: "select", defaultValue: "false", section: "证件信息", options: yesNoOptions },
-  { key: "work_type", label: "工种", valueType: "number", control: "select", section: "用工信息", options: workTypeOptions },
-  { key: "worker_type", label: "工人类型", valueType: "number", control: "select", defaultValue: "1", section: "用工信息", options: workerTypeOptions },
-  { key: "political_status", label: "政治面貌", valueType: "number", control: "select", section: "用工信息", options: politicalStatusOptions },
-  { key: "manager_type", label: "管理人员类型", valueType: "string", control: "select", section: "用工信息", options: managerTypeOptions },
+  { key: "native_place", label: "籍贯", valueType: "number", control: "select", section: "基础信息", options: nativePlaceOptions },
+  { key: "validity_period", label: "开始日期", valueType: "string", section: "基础信息" },
+  { key: "validity_period_end", label: "结束日期", valueType: "string", section: "基础信息" },
+  { key: "visa_office", label: "签发机关", valueType: "string", section: "基础信息" },
+  { key: "is_manage_team", label: "是否带班", valueType: "boolean", control: "select", defaultValue: "false", section: "基础信息", options: yesNoOptions },
+  { key: "is_key_personnel", label: "重点人员", valueType: "boolean", control: "select", defaultValue: "false", section: "基础信息", options: yesNoOptions },
+  { key: "work_type", label: "工种", valueType: "number", control: "select", required: true, section: "基础信息", options: workTypeOptions },
+  { key: "worker_type", label: "工人类型", valueType: "number", control: "select", required: true, defaultValue: "1", section: "基础信息", options: workerTypeOptions },
+  { key: "political_status", label: "政治面貌", valueType: "number", control: "select", required: true, section: "基础信息", options: politicalStatusOptions },
+  { key: "manager_type", label: "管理人员类型", valueType: "string", control: "select", required: true, visibleWhenWorkerType: "1001", section: "基础信息", options: managerTypeOptions },
   { key: "settlement_type", label: "结算方式", valueType: "number", control: "select", section: "结算银行卡", options: salaryCalcTypeOptions },
   { key: "quantity_unit_type", label: "计量单位", valueType: "number", control: "select", section: "结算银行卡", options: quantityUnitTypeOptions },
   { key: "unit_price", label: "单价", valueType: "number", section: "结算银行卡" },
   { key: "salary_bank_card", label: "工资银行卡", valueType: "string", section: "结算银行卡" },
   { key: "salary_bank", label: "工资银行", valueType: "string", control: "select", section: "结算银行卡", options: salaryBankOptions },
-  { key: "education", label: "文化程度", valueType: "number", control: "select", section: "保险与状态", options: educationOptions },
-  { key: "has_major_medical_history", label: "重大病史", valueType: "boolean", control: "select", defaultValue: "false", section: "保险与状态", options: yesNoOptions },
-  { key: "current_address", label: "现住址", valueType: "string", control: "textarea", section: "保险与状态", wide: true },
-  { key: "has_insurance", label: "工伤或意外伤害保险是否购买", valueType: "boolean", control: "select", defaultValue: "false", section: "保险与状态", options: yesNoOptions },
-  { key: "work_status", label: "在场状态", valueType: "number", control: "select", defaultValue: "1", section: "保险与状态", options: workStatusOptions },
-  { key: "entry_time", label: "进场日期", valueType: "date", section: "保险与状态" },
-  { key: "exit_time", label: "退场日期", valueType: "date", section: "保险与状态" },
+  { key: "education", label: "文化程度", valueType: "number", control: "select", hidden: true, section: "保险与状态", options: educationOptions },
+  { key: "has_major_medical_history", label: "重大病史", valueType: "boolean", control: "select", defaultValue: "false", hidden: true, section: "保险与状态", options: yesNoOptions },
+  { key: "current_address", label: "现住址", valueType: "string", control: "textarea", hidden: true, section: "保险与状态", wide: true },
+  { key: "has_insurance", label: "工伤或意外伤害保险是否购买", valueType: "boolean", control: "select", defaultValue: "false", hidden: true, section: "保险与状态", options: yesNoOptions },
+  { key: "work_status", label: "在场状态", valueType: "number", control: "select", defaultValue: "1", hidden: true, section: "保险与状态", options: workStatusOptions },
+  { key: "entry_time", label: "进场日期", valueType: "date", hidden: true, section: "保险与状态" },
+  { key: "exit_time", label: "退场日期", valueType: "date", hidden: true, section: "保险与状态" },
   { key: "dormitory_id", label: "宿舍 ID", valueType: "string", section: "资料附件" },
   { key: "settlement_file", label: "离场结算单", valueType: "json", control: "upload", uploadKind: "file", uploadMultiple: true, section: "资料附件", wide: true },
   { key: "labor_contract_file", label: "劳动合同", valueType: "json", control: "upload", uploadKind: "file", uploadMultiple: true, section: "资料附件", wide: true },
@@ -247,7 +245,7 @@ const attendanceFields = [
 ];
 
 const deviceFields = [
-  { key: "device_type", label: "设备类型", valueType: "string", required: true, defaultValue: "A厂家", section: "基础信息" },
+  { key: "device_type", label: "厂家类型", valueType: "string", control: "select", required: true, defaultValue: "A厂家", section: "基础信息", options: deviceTypeOptions },
   { key: "serial_number", label: "设备序列号", valueType: "string", required: true, section: "基础信息" },
   { key: "device_name", label: "设备名称", valueType: "string", required: true, section: "基础信息" },
   { key: "direction", label: "进出方向", valueType: "number", control: "select", defaultValue: "0", section: "基础信息", options: deviceDirectionOptions },
@@ -272,6 +270,7 @@ const optionSets = {
   salaryCalcTypeOptions,
   workStatusOptions,
   attendanceDirectionOptions,
+  deviceTypeOptions,
   deviceDirectionOptions,
 };
 
@@ -282,8 +281,28 @@ function optionLabel(fields, key, value, fallback = "未填写") {
   return option ? option.label : String(value);
 }
 
+function inferNativePlaceFromAddress(address) {
+  const normalized = String(address || "").trim();
+  if (!normalized) return null;
+
+  const option = nativePlaceOptions
+    .filter((item) => item.value !== "0")
+    .sort((left, right) => {
+      const leftIsCity = Number(left.value) % 10000 !== 0 ? 1 : 0;
+      const rightIsCity = Number(right.value) % 10000 !== 0 ? 1 : 0;
+      return rightIsCity - leftIsCity || right.label.length - left.label.length;
+    })
+    .find((item) => {
+      const shortLabel = item.label.replace(/[省市]$/, "");
+      return normalized.includes(item.label) || normalized.includes(shortLabel);
+    });
+
+  return option ? option.value : null;
+}
+
 module.exports = {
   fieldSets,
   optionSets,
   optionLabel,
+  inferNativePlaceFromAddress,
 };

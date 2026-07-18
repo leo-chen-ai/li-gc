@@ -60,7 +60,6 @@ const roleLabel = (role: string) => (role === "admin" ? "系统管理员" : "普
 
 const columnLabels: Record<string, string> = {
   name: "用户",
-  email: "邮箱",
   role: "角色",
   managed_projects: "可管理项目",
   created_at: "创建时间",
@@ -158,28 +157,6 @@ export function UsersTable({
               )}
             </div>
           </div>
-        );
-      },
-    },
-    {
-      accessorKey: "email",
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-3 h-8"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-        >
-          邮箱
-          <ArrowUpDown className="ml-2 h-3 w-3" />
-        </Button>
-      ),
-      cell: ({ row }) => {
-        const email = row.getValue("email") as string;
-        return email ? (
-          <span>{email}</span>
-        ) : (
-          <span className="text-muted-foreground">未填写</span>
         );
       },
     },
@@ -284,10 +261,10 @@ export function UsersTable({
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => onResetPassword(user)}
-                disabled={isSelf || !user.email}
+                disabled={isSelf}
               >
                 <Key className="mr-2 h-4 w-4" />
-                {!user.email ? "未填写邮箱" : "重置密码"}
+                设置新密码
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => onBlockAccount(user)}

@@ -1,0 +1,12 @@
+DROP TABLE IF EXISTS device_mqtt_messages;
+DROP TABLE IF EXISTS device_dispatch_events;
+DROP TABLE IF EXISTS device_dispatch_jobs;
+DROP TABLE IF EXISTS device_dispatch_batches;
+DROP TABLE IF EXISTS integration_token_cache;
+DROP TABLE IF EXISTS integration_event_logs;
+DROP TABLE IF EXISTS integration_attempts;
+DROP TABLE IF EXISTS integration_jobs;
+DROP TABLE IF EXISTS integration_outbox_events;
+DROP TABLE IF EXISTS integration_entity_mappings;
+DROP TABLE IF EXISTS integration_project_bindings;
+DROP TABLE IF EXISTS integration_platforms;

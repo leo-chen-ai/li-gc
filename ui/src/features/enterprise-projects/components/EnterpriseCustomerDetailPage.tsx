@@ -293,7 +293,7 @@ export function EnterpriseCustomerDetailPage({ customerId }: { customerId: strin
                   }
                 />
               </div>
-              <Field label="合同金额(元)" value={projectForm.contract_amount} onChange={(contract_amount) => setProjectForm({ ...projectForm, contract_amount })} />
+              <Field type="number" step="0.01" inputMode="decimal" label="合同金额(元)" value={projectForm.contract_amount} onChange={(contract_amount) => setProjectForm({ ...projectForm, contract_amount })} />
               <Field label="负责人" value={projectForm.owner_name} onChange={(owner_name) => setProjectForm({ ...projectForm, owner_name })} />
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-slate-700">状态</label>
@@ -342,12 +342,16 @@ function Field({
   value,
   type = "text",
   disabled = false,
+  step,
+  inputMode,
   onChange,
 }: {
   label: string;
   value: string;
   type?: string;
   disabled?: boolean;
+  step?: string;
+  inputMode?: "numeric" | "decimal";
   onChange: (value: string) => void;
 }) {
   return (
@@ -357,6 +361,8 @@ function Field({
         type={type}
         value={value}
         disabled={disabled}
+        step={step}
+        inputMode={inputMode}
         onChange={(event) => onChange(event.target.value)}
       />
     </div>

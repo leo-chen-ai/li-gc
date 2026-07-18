@@ -6,11 +6,11 @@ use crate::{
         admin::user::{
             dto::{
                 AdminUserResponse, CreateAdminUserRequest, ManagedProjectResponse,
-                UpdateUserProjectsRequest, UpdateUserRoleRequest,
+                ResetUserPasswordRequest, UpdateUserProjectsRequest, UpdateUserRoleRequest,
             },
             repository::AdminUserWithProjects,
         },
-        auth::{AuthError, AuthUser},
+        auth::{AuthError, AuthUser, auth_method::AuthProvider},
         user::User,
     },
     infrastructure::web::response::{
@@ -211,6 +211,69 @@ pub async fn update_user_projects(
         .with_message("User project permissions updated"))
 }
 
+/// PUT /api/v1/admin/users/:id/password
+///
+/// Administrators set a new password directly. When omitted, the default is 888888.
+pub async fn reset_user_password(
+    State(state): State<AppState>,
+    Path(user_id): Path<Uuid>,
+    Json(req): Json<ResetUserPasswordRequest>,
+) -> ApiResult<()> {
+    let password = req.new_password.as_deref().unwrap_or("888888").trim();
+    if password.len() < 6 {
+        return Err(invalid_input("Password must be at least 6 characters"));
+    }
+
+    state
+        .user_repo
+        .find_by_id(state.db.pool(), user_id)
+        .await
+        .map_err(|e| ApiError::default().log_only(e))?
+        .ok_or_else(user_not_found)?;
+
+    let auth_method = state
+        .auth_service
+        .auth_method_service()
+        .find_by_user_and_provider(user_id, AuthProvider::Password)
+        .await
+        .map_err(|e| ApiError::default().log_only(e))?
+        .ok_or_else(|| invalid_input("Password auth not found for this user"))?;
+
+    state
+        .auth_service
+        .auth_method_service()
+        .update_password(auth_method.id, password)
+        .await
+        .map_err(|e| ApiError::default().log_only(e))?;
+
+    Ok(ApiSuccess::default().with_message("User password reset successfully"))
+}
+
+/// DELETE /api/v1/admin/users/:id
+pub async fn delete_user(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Path(user_id): Path<Uuid>,
+) -> ApiResult<()> {
+    if user_id == auth_user.user_id {
+        return Err(ApiError::default()
+            .with_code(StatusCode::FORBIDDEN)
+            .with_error_code(generic::FORBIDDEN)
+            .with_message("Cannot delete your own account"));
+    }
+
+    if !state
+        .admin_user_repo
+        .delete_user(state.db.pool(), user_id)
+        .await
+        .map_err(|e| ApiError::default().log_only(e))?
+    {
+        return Err(user_not_found());
+    }
+
+    Ok(ApiSuccess::default().with_message("User deleted successfully"))
+}
+
 async fn ensure_role_exists(state: &AppState, role: &str) -> Result<(), ApiError> {
     if state
         .admin_role_repo
@@ -267,6 +330,13 @@ fn invalid_input(message: &str) -> ApiError {
         .with_code(StatusCode::BAD_REQUEST)
         .with_error_code(generic::INVALID_INPUT)
         .with_message(message)
+}
+
+fn user_not_found() -> ApiError {
+    ApiError::default()
+        .with_code(StatusCode::NOT_FOUND)
+        .with_error_code(generic::NOT_FOUND)
+        .with_message("User not found")
 }
 
 fn map_create_user_error(error: AuthError) -> ApiError {

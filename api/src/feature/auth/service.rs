@@ -111,7 +111,7 @@ impl AuthService {
             let refresh_expiry: i64 = std::env::var("JWT_REFRESH_EXPIRY_SECS")
                 .ok()
                 .and_then(|v| v.parse().ok())
-                .unwrap_or(604800); // default 7 days
+                .unwrap_or(2_592_000); // default 30 days
 
             let expires_at =
                 chrono::DateTime::from_timestamp(tokens.session_iat + refresh_expiry, 0)
@@ -218,7 +218,7 @@ impl AuthService {
             let refresh_expiry: i64 = std::env::var("JWT_REFRESH_EXPIRY_SECS")
                 .ok()
                 .and_then(|v| v.parse().ok())
-                .unwrap_or(604800); // default 7 days
+                .unwrap_or(2_592_000); // default 30 days
 
             let expires_at =
                 chrono::DateTime::from_timestamp(tokens.session_iat + refresh_expiry, 0)
@@ -349,6 +349,78 @@ impl AuthService {
             client: Some("miniapp".to_string()),
             managed_projects: None,
         })
+    }
+
+    /// Create a normal web login session for an already-authenticated user.
+    pub async fn login_user_by_id(
+        &self,
+        user_id: uuid::Uuid,
+        device_info: Option<&DeviceInfo>,
+    ) -> Result<(AuthResponse, Cookie<'static>), AuthError> {
+        let user = self
+            .user_repo
+            .find_by_id(self.db.pool(), user_id)
+            .await
+            .map_err(|_| AuthError::Database(sqlx::Error::RowNotFound))?
+            .ok_or(AuthError::InvalidCredentials)?;
+
+        if !user.is_active {
+            return Err(AuthError::InvalidCredentials);
+        }
+
+        let profile = self
+            .profile_repo
+            .find_by_user_id(self.db.pool(), user.id)
+            .await
+            .ok()
+            .flatten();
+
+        let roles = vec![user.role()];
+        let tokens =
+            create_token_pair(user.id, &user.email, &roles).map_err(|_| AuthError::HashError)?;
+
+        if let Some(info) = device_info {
+            let refresh_expiry: i64 = std::env::var("JWT_REFRESH_EXPIRY_SECS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(2_592_000);
+
+            let expires_at =
+                chrono::DateTime::from_timestamp(tokens.session_iat + refresh_expiry, 0)
+                    .unwrap_or_else(|| chrono::Utc::now() + chrono::Duration::days(7));
+
+            let _ = self
+                .session_service
+                .create_session(user.id, &tokens.session_id, info, expires_at)
+                .await;
+        }
+
+        let refresh_cookie = create_refresh_cookie(&tokens.refresh_token, &self.config);
+        let username = user.username.clone();
+        let role = user.role().to_string();
+
+        Ok((
+            AuthResponse {
+                user: UserResponse {
+                    id: user.id,
+                    email: user.email,
+                    username,
+                    name: profile
+                        .as_ref()
+                        .and_then(|p| p.full_name.clone())
+                        .unwrap_or_default(),
+                    avatar_url: profile.as_ref().and_then(|p| p.avatar_url.clone()),
+                    role,
+                },
+                token: TokenResponse {
+                    access_token: tokens.access_token,
+                    expires_in: tokens.expires_in,
+                },
+                client: None,
+                managed_projects: None,
+            },
+            refresh_cookie,
+        ))
     }
 
     /// OAuth login/register

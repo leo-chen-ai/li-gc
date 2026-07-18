@@ -54,6 +54,8 @@ import { formatProjectTitle } from "../lib/project-title";
 import { buildProjectListParams } from "../lib/project-table-operations";
 import { ConstructionRecordForm } from "./ConstructionRecordForm";
 import { ProjectStatusBadge } from "./ProjectStatusBadge";
+import { ProjectReportingPlatforms } from "./ProjectReportingPlatforms";
+import { useAuthUser } from "@/stores/use-auth-store";
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50] as const;
 const PROJECT_STATUS_LABEL: Record<number, Project["status"]> = {
@@ -81,6 +83,8 @@ type ProjectRow = Project & {
 
 export function ProjectsPage() {
   const navigate = useNavigate();
+  const user = useAuthUser();
+  const isAdmin = user?.role === "admin";
   const createProject = useCreateProjectMutation();
   const deleteProject = useDeleteProjectMutation();
   const [keyword, setKeyword] = useState("");
@@ -196,13 +200,15 @@ export function ProjectsPage() {
             <CompactStat label="重点关注" value={`${focusProjects} 个`} helper="关注/预警项目" accent="amber" />
           </div>
 
-          <Button
-            className="h-9 gap-2 justify-self-start bg-[#0f6b5d] text-white hover:bg-[#0b5148] lg:justify-self-end"
-            onClick={openCreateForm}
-          >
-            <Plus className="size-4" />
-            新增项目
-          </Button>
+          {isAdmin ? (
+            <Button
+              className="h-9 gap-2 justify-self-start bg-[#0f6b5d] text-white hover:bg-[#0b5148] lg:justify-self-end"
+              onClick={openCreateForm}
+            >
+              <Plus className="size-4" />
+              新增项目
+            </Button>
+          ) : null}
         </div>
 
         <div className="flex flex-wrap items-center gap-3 bg-[#f8faf9] px-4 py-2.5 dark:bg-muted/30">
@@ -283,6 +289,10 @@ export function ProjectsPage() {
                       <span>至</span>
                       <span>{project.finishDate}</span>
                     </div>
+                    <div className="grid grid-cols-[auto_1fr] items-start gap-2 border-t border-slate-100 pt-1.5 dark:border-border">
+                      <span className="text-xs text-slate-400 dark:text-muted-foreground">上报列表</span>
+                      <ProjectReportingPlatforms platforms={project.raw?.reporting_platforms} />
+                    </div>
                   </div>
                 </TableCell>
                 <TableCell className="py-4">
@@ -344,19 +354,21 @@ export function ProjectsPage() {
                       <Pencil className="size-4" />
                       编辑
                     </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="gap-1 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/30"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setProjectPendingDelete(project);
-                      }}
-                    >
-                      <Trash2 className="size-4" />
-                      删除
-                    </Button>
+                    {isAdmin ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="gap-1 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/30"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setProjectPendingDelete(project);
+                        }}
+                      >
+                        <Trash2 className="size-4" />
+                        删除
+                      </Button>
+                    ) : null}
                   </div>
                 </TableCell>
               </TableRow>

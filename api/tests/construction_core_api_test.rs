@@ -76,6 +76,40 @@ async fn delete_authed(
     (status, json)
 }
 
+async fn seed_attendance_device_issue_report(
+    pool: &sqlx::PgPool,
+    project_id: Uuid,
+    worker_id: Uuid,
+    device_id: Uuid,
+    action: &str,
+    status: &str,
+    issued_at: &str,
+    message: &str,
+    remark: Option<&str>,
+) -> Uuid {
+    sqlx::query_scalar::<_, Uuid>(
+        r#"
+        INSERT INTO construction_attendance_device_issue_reports (
+            project_id, worker_id, attendance_device_id,
+            action, status, issued_at, message, remark
+        )
+        VALUES ($1, $2, $3, $4, $5, $6::timestamptz, $7, $8)
+        RETURNING id
+        "#,
+    )
+    .bind(project_id)
+    .bind(worker_id)
+    .bind(device_id)
+    .bind(action)
+    .bind(status)
+    .bind(issued_at)
+    .bind(message)
+    .bind(remark)
+    .fetch_one(pool)
+    .await
+    .expect("seed attendance device issue report")
+}
+
 async fn raw_get_authed(
     app: axum::Router,
     uri: &str,
@@ -125,6 +159,22 @@ async fn admin_can_search_and_paginate_projects_on_backend() {
     assert_eq!(status, StatusCode::CREATED, "{body}");
     let other_project_id = body["data"]["id"].as_str().expect("other project id");
 
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        "/api/v1/admin/platform-configs",
+        &token,
+        json!({
+            "project_id": target_project_id,
+            "platform_name": "宁波市住建",
+            "platform_type": "ningbo_housing",
+            "config": {},
+            "is_enabled": true
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+
     let (status, body) = get_authed(
         app.clone(),
         "/api/v1/admin/projects?page=1&page_size=1&keyword=%E7%9B%AE%E6%A0%87&status=1",
@@ -139,6 +189,23 @@ async fn admin_can_search_and_paginate_projects_on_backend() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["id"], target_project_id);
     assert_eq!(items[0]["name"], "后端分页搜索目标项目");
+    assert_eq!(
+        items[0]["reporting_platforms"][0]["platform_name"],
+        "宁波市住建"
+    );
+    assert_eq!(items[0]["reporting_platforms"][0]["is_enabled"], true);
+
+    let (status, body) = get_authed(
+        app.clone(),
+        &format!("/api/v1/admin/projects/{target_project_id}"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["data"]["reporting_platforms"][0]["platform_name"],
+        "宁波市住建"
+    );
 
     let (status, _) = delete_authed(
         app.clone(),
@@ -158,7 +225,7 @@ async fn admin_can_search_and_paginate_projects_on_backend() {
 
 #[tokio::test]
 async fn admin_can_manage_project_nested_resources_and_fake_attendance() {
-    let (app, _c) = build_test_app().await;
+    let (app, pool, _c) = build_test_app_with_pool().await;
     let token = admin_token();
 
     let (status, body) = authed_json(
@@ -178,6 +245,7 @@ async fn admin_can_manage_project_nested_resources_and_fake_attendance() {
     .await;
     assert_eq!(status, StatusCode::CREATED);
     let project_id = body["data"]["id"].as_str().expect("project id");
+    let project_uuid = Uuid::parse_str(project_id).expect("project uuid");
     assert_eq!(body["data"]["name"], "接口测试项目");
 
     let (status, body) = authed_json(
@@ -190,7 +258,7 @@ async fn admin_can_manage_project_nested_resources_and_fake_attendance() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["data"]["name"], "接口测试项目-修改");
-    assert_eq!(body["data"]["labor_cost"], 8420);
+    assert_eq!(body["data"]["labor_cost"].as_f64(), Some(8420.0));
 
     let (status, body) = get_authed(
         app.clone(),
@@ -317,6 +385,7 @@ async fn admin_can_manage_project_nested_resources_and_fake_attendance() {
     .await;
     assert_eq!(status, StatusCode::CREATED);
     let worker_id = body["data"]["id"].as_str().expect("worker id");
+    let worker_uuid = Uuid::parse_str(worker_id).expect("worker uuid");
 
     let (status, body) = authed_json(
         app.clone(),
@@ -397,6 +466,34 @@ async fn admin_can_manage_project_nested_resources_and_fake_attendance() {
     assert_eq!(attendance_records.len(), 1);
     assert_eq!(attendance_records[0]["id"], attendance_id);
 
+    let attendance_uuid = Uuid::parse_str(attendance_id).expect("attendance uuid");
+    sqlx::query(
+        r#"
+        INSERT INTO construction_attendance_record_photos (
+            attendance_record_id, project_id, worker_id, photo_kind, photo_data, source
+        )
+        VALUES ($1, $2, $3, 'closeup', 'split-closeup-base64', 'test')
+        "#,
+    )
+    .bind(attendance_uuid)
+    .bind(project_uuid)
+    .bind(worker_uuid)
+    .execute(&pool)
+    .await
+    .expect("insert split attendance photo");
+
+    let (status, body) = get_authed(
+        app.clone(),
+        &format!("/api/v1/admin/projects/{project_id}/attendance-records?keyword=SN-001-UPDATED"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body["data"]["items"][0]["closeup_photo"],
+        "split-closeup-base64"
+    );
+
     let (status, body) = get_authed(
         app.clone(),
         &format!("/api/v1/admin/projects/{project_id}/attendance-records/{attendance_id}"),
@@ -405,6 +502,7 @@ async fn admin_can_manage_project_nested_resources_and_fake_attendance() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["data"]["serial_number"], "SN-001-UPDATED");
+    assert_eq!(body["data"]["closeup_photo"], "split-closeup-base64");
 
     let (status, body) = delete_authed(
         app.clone(),
@@ -455,6 +553,172 @@ async fn admin_can_manage_project_nested_resources_and_fake_attendance() {
             .iter()
             .any(|project| project["id"].as_str() == Some(project_id))
     );
+}
+
+#[tokio::test]
+async fn admin_can_configure_generate_and_list_managed_attendance() {
+    let (app, _c) = build_test_app().await;
+    let token = admin_token();
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        "/api/v1/admin/projects",
+        &token,
+        json!({
+            "name": "自动托管测试项目",
+            "address": "托管路 1 号",
+            "status": 1
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let project_id = body["data"]["id"].as_str().expect("project id");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/units"),
+        &token,
+        json!({
+            "company_name": "自动托管测试单位",
+            "company_credit_code": "91320000AUTO001X",
+            "company_type": 1
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let unit_id = body["data"]["id"].as_str().expect("unit id");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/teams"),
+        &token,
+        json!({
+            "unit_id": unit_id,
+            "name": "夜班托管班组",
+            "work_type": 10,
+            "attendance_start_time": "19:00",
+            "attendance_end_time": "23:30"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let team_id = body["data"]["id"].as_str().expect("team id");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/workers"),
+        &token,
+        json!({
+            "unit_id": unit_id,
+            "team_id": team_id,
+            "id_card": "320800199001011234",
+            "name": "张三",
+            "gender": 1,
+            "phone": "13900000000",
+            "work_status": 1
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let worker_id = body["data"]["id"].as_str().expect("worker id");
+
+    let (status, _body) = authed_json(
+        app.clone(),
+        "POST",
+        "/api/v1/admin/managed-attendance/photo-groups",
+        &token,
+        json!({
+            "project_id": project_id,
+            "name": "非法照片组",
+            "generation_status": "ready",
+            "in_photos": [123],
+            "out_photos": ["https://example.com/zhangsan-out.jpg"]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        "/api/v1/admin/managed-attendance/photo-groups",
+        &token,
+        json!({
+            "project_id": project_id,
+            "name": "张三夜班照片组",
+            "generation_status": "ready",
+            "in_photos": ["https://example.com/zhangsan-in.jpg"],
+            "out_photos": ["https://example.com/zhangsan-out.jpg"],
+            "remark": "AI 生图后续接入，当前先保存照片组 URL"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let photo_group_id = body["data"]["id"].as_str().expect("photo group id");
+    assert_eq!(body["data"]["name"], "张三夜班照片组");
+    assert_eq!(body["data"]["generation_status"], "ready");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        "/api/v1/admin/managed-attendance/configs",
+        &token,
+        json!({
+            "project_id": project_id,
+            "worker_id": worker_id,
+            "photo_group_id": photo_group_id,
+            "monthly_attendance_days": 3,
+            "shift": "night",
+            "check_in_time": "19:10",
+            "check_out_time": "23:05",
+            "is_enabled": true,
+            "remark": "张三夜班托管"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let config_id = body["data"]["id"].as_str().expect("config id");
+    assert_eq!(body["data"]["worker_name"], "张三");
+    assert_eq!(body["data"]["shift"], "night");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/managed-attendance/configs/{config_id}/generate"),
+        &token,
+        json!({ "month": "2026-07" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["generated_count"], 6);
+    assert_eq!(body["data"]["attendance_days"], 3);
+
+    let (status, body) = get_authed(
+        app.clone(),
+        &format!(
+            "/api/v1/admin/managed-attendance/records?project_id={project_id}&month=2026-07&page=1&page_size=10"
+        ),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["total"], 6);
+    let records = body["data"]["items"].as_array().expect("record items");
+    assert_eq!(records.len(), 6);
+    assert_eq!(records[0]["worker_name"], "张三");
+    assert_eq!(records[0]["shift"], "night");
+    assert_eq!(records[0]["photo_group_name"], "张三夜班照片组");
+    assert_eq!(records[0]["status"], "generated");
+    assert!(records.iter().any(|record| {
+        record["direction"] == 0 && record["photo_url"] == "https://example.com/zhangsan-in.jpg"
+    }));
+    assert!(records.iter().any(|record| {
+        record["direction"] == 1 && record["photo_url"] == "https://example.com/zhangsan-out.jpg"
+    }));
 }
 
 #[tokio::test]
@@ -1080,7 +1344,7 @@ async fn admin_can_search_and_paginate_project_attendance_devices_on_backend() {
 
 #[tokio::test]
 async fn admin_can_crud_search_paginate_attendance_device_issue_reports() {
-    let (app, _c) = build_test_app().await;
+    let (app, pool, _c) = build_test_app_with_pool().await;
     let token = admin_token();
 
     let (status, body) = authed_json(
@@ -1180,31 +1444,50 @@ async fn admin_can_crud_search_paginate_attendance_device_issue_reports() {
         }),
     )
     .await;
-    assert_eq!(status, StatusCode::CREATED, "{body}");
-    let report_id = body["data"]["id"].as_str().expect("report id");
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["message"], "MQTT_BROKER_URL 未配置，无法下发人员");
+
+    let project_uuid = Uuid::parse_str(project_id).expect("project uuid");
+    let worker_uuid = Uuid::parse_str(worker_id).expect("worker uuid");
+    let device_uuid = Uuid::parse_str(device_id).expect("device uuid");
+    let report_id = seed_attendance_device_issue_report(
+        &pool,
+        project_uuid,
+        worker_uuid,
+        device_uuid,
+        "create",
+        "pending",
+        "2026-06-20T08:30:00Z",
+        "等待设备回执",
+        Some("首条下发"),
+    )
+    .await
+    .to_string();
+    let (status, body) = get_authed(
+        app.clone(),
+        &format!("/api/v1/admin/attendance-device-issue-reports/{report_id}"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["data"]["project_id"], project_id);
     assert_eq!(body["data"]["worker_name"], "人员下发工人");
     assert_eq!(body["data"]["device_name"], "南门下发考勤机");
     assert_eq!(body["data"]["serial_number"], "ISSUE-DEVICE-001");
 
     for index in 0..11 {
-        let (status, body) = authed_json(
-            app.clone(),
-            "POST",
-            "/api/v1/admin/attendance-device-issue-reports",
-            &token,
-            json!({
-                "project_id": project_id,
-                "worker_id": worker_id,
-                "attendance_device_id": device_id,
-                "action": if index % 2 == 0 { "update" } else { "delete" },
-                "status": "success",
-                "issued_at": format!("2026-06-20T09:{index:02}:00Z"),
-                "message": format!("批量下发{index:02}")
-            }),
+        seed_attendance_device_issue_report(
+            &pool,
+            project_uuid,
+            worker_uuid,
+            device_uuid,
+            if index % 2 == 0 { "update" } else { "create" },
+            "success",
+            &format!("2026-06-20T09:{index:02}:00Z"),
+            &format!("批量下发{index:02}"),
+            None,
         )
         .await;
-        assert_eq!(status, StatusCode::CREATED, "{body}");
     }
 
     let (status, body) = authed_json(
@@ -1946,7 +2229,7 @@ async fn miniapp_project_routes_support_construction_crud() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["data"]["manager_name"], "更新负责人");
-    assert_eq!(body["data"]["contract_amount"], 2345);
+    assert_eq!(body["data"]["contract_amount"].as_f64(), Some(2345.0));
 
     let (status, body) = get_authed(
         app.clone(),

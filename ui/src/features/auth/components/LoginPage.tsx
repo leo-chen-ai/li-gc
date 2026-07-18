@@ -18,9 +18,15 @@ export function LoginPage() {
   if (isAuthenticated) return null;
 
   return (
-    <div className="min-h-screen bg-[#eef7f1] text-slate-950 dark:bg-[#071f22] dark:text-white">
-      <div className="grid min-h-screen w-full lg:grid-cols-[56vw_44vw]">
+    <div className="h-dvh overflow-hidden bg-[#eef7f1] text-slate-950 dark:bg-[#071f22] dark:text-white">
+      <div className="grid h-full w-full lg:grid-cols-[56vw_44vw]">
         <section className="relative hidden overflow-hidden bg-[#dcefe4] lg:block">
+          <img
+            src="/login-construction-bg.jpg"
+            alt=""
+            aria-hidden="true"
+            className="absolute inset-x-0 bottom-0 h-[42%] w-full object-cover object-left-bottom opacity-[0.08] mix-blend-multiply grayscale"
+          />
           <div
             className="absolute inset-0 opacity-60"
             aria-hidden="true"
@@ -32,35 +38,31 @@ export function LoginPage() {
           />
           <div className="absolute inset-x-0 bottom-0 h-1/2 bg-[linear-gradient(180deg,rgba(220,239,228,0)_0%,rgba(196,226,209,0.72)_100%)]" />
 
-          <div className="relative flex h-full flex-col justify-between px-16 py-14">
-            <div className="flex items-center gap-3">
-              <div className="flex size-10 items-center justify-center rounded-lg bg-[#0f6b5d] text-lg font-semibold text-white shadow-[0_12px_30px_rgba(15,107,93,0.18)]">
-                山
+          <div className="absolute left-12 top-10 z-10 flex items-center gap-4 xl:left-16 xl:top-14">
+            <div className="flex size-14 items-center justify-center rounded-xl bg-[#0f6b5d] text-[34px] font-semibold leading-none text-white shadow-[0_16px_36px_rgba(15,107,93,0.22)] ring-1 ring-[#073d35]/10">
+              山
+            </div>
+            <div className="text-[#0b3d34]">
+              <div className="text-[30px] font-semibold leading-none tracking-normal">
+                山淮筑
               </div>
-              <span className="text-lg font-semibold text-[#0b3d34]">山淮筑</span>
+              <div className="mt-2 text-[10px] font-semibold uppercase tracking-[0.28em] text-[#0b3d34]/68">
+                SHANHUAI ZHU
+              </div>
             </div>
+          </div>
 
-            <div className="max-w-[520px]">
-              <div className="mb-5 h-1 w-12 rounded-full bg-[#0f6b5d]" />
-              <h1 className="text-[48px] font-semibold leading-tight tracking-normal text-[#0b3d34]">
-                工程劳务
-                <br />
-                一体化管理系统
-              </h1>
-              <p className="mt-5 max-w-[420px] text-base leading-7 text-[#35665b]">
-                项目、人员、考勤和合同数据统一归档，现场管理更清楚。
-              </p>
-            </div>
-
-            <div className="grid max-w-[520px] grid-cols-3 border-y border-[#0f6b5d]/12 py-4 text-sm font-medium text-[#35665b]">
-              <div>项目台账</div>
-              <div>人员实名</div>
-              <div>考勤记录</div>
-            </div>
+          <div className="relative flex h-full items-center justify-center px-12 pb-16 pt-32 xl:px-16">
+            <img
+              src="/login-construction-illustration.jpg"
+              alt=""
+              aria-hidden="true"
+              className="w-full max-w-[780px] mix-blend-multiply opacity-95 drop-shadow-[0_28px_48px_rgba(15,107,93,0.12)]"
+            />
           </div>
         </section>
 
-        <section className="relative flex min-h-screen flex-col bg-[#f8fcf9] px-5 py-6 dark:bg-[#071f22] sm:px-8 lg:px-10">
+        <section className="relative flex h-dvh flex-col overflow-hidden bg-[#f8fcf9] px-5 py-4 dark:bg-[#071f22] sm:px-8 lg:px-10">
           <div className="flex justify-end">
             <div className="hidden items-center gap-1 rounded-full border border-slate-900/10 bg-white/72 p-1 text-xs font-semibold text-slate-600 shadow-sm backdrop-blur-md dark:border-white/14 dark:bg-white/10 dark:text-white/82 sm:flex">
             <button
@@ -102,8 +104,8 @@ export function LoginPage() {
           </div>
           </div>
 
-          <div className="mx-auto flex w-full max-w-[440px] flex-1 flex-col justify-center space-y-5 py-8">
-            <section className="w-full rounded-2xl border border-slate-200/80 bg-white p-5 shadow-[0_24px_70px_rgba(15,23,42,0.12)] dark:border-white/16 dark:bg-[#09272d] dark:shadow-[0_32px_90px_rgba(0,0,0,0.42)] sm:p-7 lg:p-8">
+          <div className="mx-auto flex w-full max-w-[440px] flex-1 flex-col justify-center space-y-3 py-3">
+            <section className="w-full rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_24px_70px_rgba(15,23,42,0.12)] dark:border-white/16 dark:bg-[#09272d] dark:shadow-[0_32px_90px_rgba(0,0,0,0.42)] sm:p-5 lg:p-6">
               <LoginForm />
             </section>
 

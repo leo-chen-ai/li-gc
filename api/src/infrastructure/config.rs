@@ -213,6 +213,8 @@ pub struct Config {
     pub server: ServerConfig,
     pub database: DatabaseConfig,
     pub redis_url: Option<String>,
+    pub nats_url: Option<String>,
+    pub mqtt_broker_url: Option<String>,
     pub cookie: CookieConfig,
     pub upload: UploadConfig,
     pub ocr: OcrConfig,
@@ -229,6 +231,8 @@ impl Config {
 
         // Redis is optional - if not configured, caching features will be disabled
         let redis_url = env::var("REDIS_URL").ok();
+        let nats_url = env::var("NATS_URL").ok();
+        let mqtt_broker_url = env::var("MQTT_BROKER_URL").ok();
 
         Ok(Self {
             rust_env,
@@ -236,6 +240,8 @@ impl Config {
             server: ServerConfig::from_env(),
             database: DatabaseConfig::from_env()?,
             redis_url,
+            nats_url,
+            mqtt_broker_url,
             cookie: CookieConfig::from_env(is_production),
             upload: UploadConfig::from_env(),
             ocr: OcrConfig::from_env(),

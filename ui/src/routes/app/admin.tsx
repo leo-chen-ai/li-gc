@@ -1,4 +1,4 @@
-import { Outlet, useNavigate } from "@tanstack/react-router";
+import { Outlet, useLocation, useNavigate } from "@tanstack/react-router";
 import { createFileRoute } from "@tanstack/react-router";
 import { Bell, Menu, Search } from "lucide-react";
 import type { CSSProperties } from "react";
@@ -40,14 +40,24 @@ function AdminLayout() {
 }
 
 function AdminContent() {
+  const location = useLocation();
   const navigate = useNavigate();
   const user = useAuthUser();
   const unreadCount = notifications.filter((n) => n.unread).length;
+  const scopedUserPages = [
+    "/app/admin/projects",
+    "/app/admin/attendance-devices",
+    "/app/admin/attendance-device-issue-reports",
+    "/app/admin/personnel-workers",
+  ];
+  const canUseScopedPage = scopedUserPages.some(
+    (path) => location.pathname === path || location.pathname.startsWith(`${path}/`)
+  );
 
   // Note: Authenticated guard is handled by app.tsx 
 
   // Redirect standard users to their workspace
-  if (user?.role !== "admin") {
+  if (user?.role !== "admin" && !canUseScopedPage) {
     navigate({ to: "/app" });
     return null;
   }
@@ -56,7 +66,6 @@ function AdminContent() {
     <SidebarProvider
       style={{
         "--sidebar-width": "11rem",
-        "--sidebar-width-icon": "3.25rem",
       } as CSSProperties}
     >
       <AppSidebar />

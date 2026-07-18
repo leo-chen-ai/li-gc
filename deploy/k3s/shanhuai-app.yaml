@@ -12,9 +12,11 @@ data:
   RUST_ENV: production
   RUST_LOG: info
   SERVER_PORT: "8080"
-  CORS_ALLOWED_ORIGINS: "http://36.151.143.235:30081,http://admin.shanhuai.top,https://admin.shanhuai.top"
+  CORS_ALLOWED_ORIGINS: "http://36.151.143.235:30081,http://shanhuai.top,https://shanhuai.top,http://admin.shanhuai.top,https://admin.shanhuai.top"
   DB_MAX_CONNECTIONS: "5"
   DB_MIN_CONNECTIONS: "1"
+  NATS_URL: nats://nats.shanhuai-infra.svc.cluster.local:4222
+  MQTT_BROKER_URL: mqtt://emqx.shanhuai-infra.svc.cluster.local:1883
   BOOTSTRAP_ENABLED: "true"
   COOKIE_SAMESITE: lax
   COOKIE_SECURE: "false"
@@ -184,6 +186,88 @@ metadata:
   labels:
     app.kubernetes.io/name: shanhuai-admin
     app.kubernetes.io/part-of: shanhuai-gc
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - shanhuai.top
+      secretName: shanhuai-top-tls
+  rules:
+    - host: shanhuai.top
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: shanhuai-ui
+                port:
+                  name: http
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    email: admin@shanhuai.top
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: traefik
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: shanhuai-redirect-https
+  namespace: shanhuai-app
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shanhuai-admin-http
+  namespace: shanhuai-app
+  labels:
+    app.kubernetes.io/name: shanhuai-admin-http
+    app.kubernetes.io/part-of: shanhuai-gc
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    traefik.ingress.kubernetes.io/router.middlewares: shanhuai-app-shanhuai-redirect-https@kubernetescrd
+    traefik.ingress.kubernetes.io/router.priority: "1"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: shanhuai.top
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: shanhuai-ui
+                port:
+                  name: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shanhuai-admin-legacy
+  namespace: shanhuai-app
+  labels:
+    app.kubernetes.io/name: shanhuai-admin-legacy
+    app.kubernetes.io/part-of: shanhuai-gc
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
 spec:
   ingressClassName: traefik
   rules:

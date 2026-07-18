@@ -234,6 +234,61 @@
   background: #0a9875;
 }
 
+.upload-list {
+  display: grid;
+  gap: 12rpx;
+  margin-top: 12rpx;
+}
+
+.upload-item {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+  min-height: 72rpx;
+  padding: 10rpx 14rpx;
+  border: 1rpx solid #e0eaec;
+  border-radius: 14rpx;
+  background: #f8fbfb;
+}
+
+.upload-thumb,
+.upload-file-icon {
+  width: 52rpx;
+  height: 52rpx;
+  flex: 0 0 52rpx;
+  border-radius: 10rpx;
+}
+
+.upload-thumb {
+  background: #edf4f2;
+}
+
+.upload-file-icon {
+  color: #0a8066;
+  font-size: 22rpx;
+  font-weight: 800;
+  line-height: 52rpx;
+  text-align: center;
+  background: #e5f3ef;
+}
+
+.upload-file-name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: #233033;
+  font-size: 24rpx;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-view-action {
+  flex: 0 0 auto;
+  color: #0a8066;
+  font-size: 23rpx;
+  font-weight: 800;
+}
+
 .price-row {
   display: grid;
   grid-template-columns: 1fr 52rpx;

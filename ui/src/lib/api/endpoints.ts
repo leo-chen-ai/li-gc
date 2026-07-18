@@ -8,6 +8,11 @@ export const API_ENDPOINTS = {
     ME: "/auth/me",
     CHANGE_PASSWORD: "/auth/change-password",
     SESSIONS: "/auth/sessions",
+    SCAN_LOGIN_SESSIONS: "/auth/scan-login/sessions",
+    SCAN_LOGIN_SESSION: (scanToken: string) =>
+      `/auth/scan-login/sessions/${encodeURIComponent(scanToken)}`,
+    SCAN_LOGIN_QR: (scanToken: string) =>
+      `/auth/scan-login/sessions/${encodeURIComponent(scanToken)}/qr.svg`,
   },
   USER: {
     ME: "/users/me",
@@ -16,6 +21,50 @@ export const API_ENDPOINTS = {
   UPLOADS: "/uploads",
   OCR: {
     ID_CARD: "/ocr/id-card",
+  },
+  MANAGEMENT: {
+    PROJECTS: "/management/projects",
+    PROJECT_OPTIONS: "/management/projects/options",
+    PROJECT: (projectId: string) => `/management/projects/${projectId}`,
+    PROJECT_UNITS: (projectId: string) => `/management/projects/${projectId}/units`,
+    PROJECT_UNIT: (projectId: string, unitId: string) =>
+      `/management/projects/${projectId}/units/${unitId}`,
+    PROJECT_TEAMS: (projectId: string) => `/management/projects/${projectId}/teams`,
+    PROJECT_TEAM: (projectId: string, teamId: string) =>
+      `/management/projects/${projectId}/teams/${teamId}`,
+    PROJECT_WORKERS: (projectId: string) => `/management/projects/${projectId}/workers`,
+    PROJECT_WORKERS_EXPORT: (projectId: string) =>
+      `/management/projects/${projectId}/workers/export`,
+    PROJECT_WORKER: (projectId: string, workerId: string) =>
+      `/management/projects/${projectId}/workers/${workerId}`,
+    PROJECT_WORKER_CONTRACT_DOWNLOAD: (projectId: string, workerId: string) =>
+      `/management/projects/${projectId}/workers/${workerId}/contract-download`,
+    PROJECT_ATTENDANCE: (projectId: string) =>
+      `/management/projects/${projectId}/attendance-records`,
+    PROJECT_ATTENDANCE_EXPORT: (projectId: string) =>
+      `/management/projects/${projectId}/attendance-records/export`,
+    PROJECT_ATTENDANCE_RECORD: (projectId: string, attendanceId: string) =>
+      `/management/projects/${projectId}/attendance-records/${attendanceId}`,
+    PROJECT_WAGE_BATCHES: (projectId: string) =>
+      `/management/projects/${projectId}/wage-batches`,
+    PROJECT_WAGE_BATCH: (projectId: string, batchId: string) =>
+      `/management/projects/${projectId}/wage-batches/${batchId}`,
+    PROJECT_WAGE_IMPORT: (projectId: string) =>
+      `/management/projects/${projectId}/wage-batches/import`,
+    PROJECT_WAGE_EXPORT: (projectId: string) =>
+      `/management/projects/${projectId}/wage-batches/export`,
+    PROJECT_ATTENDANCE_DEVICES: (projectId: string) =>
+      `/management/projects/${projectId}/attendance-devices`,
+    PROJECT_ATTENDANCE_DEVICE: (projectId: string, deviceId: string) =>
+      `/management/projects/${projectId}/attendance-devices/${deviceId}`,
+    PROJECT_ATTENDANCE_DEVICE_ISSUE_WORKERS: (projectId: string, deviceId: string) =>
+      `/management/projects/${projectId}/attendance-devices/${deviceId}/issue-workers`,
+    ATTENDANCE_DEVICE_ISSUE_REPORTS: "/management/attendance-device-issue-reports",
+    ATTENDANCE_DEVICE_ISSUE_REPORT: (reportId: string) =>
+      `/management/attendance-device-issue-reports/${reportId}`,
+    PERSONNEL_WORKERS: "/management/personnel-workers",
+    PERSONNEL_WORKER: (workerId: string) =>
+      `/management/personnel-workers/${workerId}`,
   },
   ADMIN: {
     USERS: "/admin/users",
@@ -28,6 +77,8 @@ export const API_ENDPOINTS = {
     REGISTRATION_LEADS: "/admin/registration-leads",
     USER_PROJECTS: (id: string) => `/admin/users/${id}/projects`,
     USER_ROLE: (id: string) => `/admin/users/${id}/role`,
+    USER: (id: string) => `/admin/users/${id}`,
+    USER_PASSWORD: (id: string) => `/admin/users/${id}/password`,
     API_KEYS: "/admin/api-keys",
     API_KEY_REVOKE: (id: string) => `/admin/api-keys/${id}/revoke`,
     API_KEY_DELETE: (id: string) => `/admin/api-keys/${id}`,
@@ -41,10 +92,14 @@ export const API_ENDPOINTS = {
     PROJECT_TEAM: (projectId: string, teamId: string) =>
       `/admin/projects/${projectId}/teams/${teamId}`,
     PROJECT_WORKERS: (projectId: string) => `/admin/projects/${projectId}/workers`,
+    PROJECT_WORKERS_EXPORT: (projectId: string) =>
+      `/admin/projects/${projectId}/workers/export`,
     PROJECT_WORKER: (projectId: string, workerId: string) =>
       `/admin/projects/${projectId}/workers/${workerId}`,
     PROJECT_ATTENDANCE: (projectId: string) =>
       `/admin/projects/${projectId}/attendance-records`,
+    PROJECT_ATTENDANCE_EXPORT: (projectId: string) =>
+      `/admin/projects/${projectId}/attendance-records/export`,
     PROJECT_ATTENDANCE_RECORD: (projectId: string, attendanceId: string) =>
       `/admin/projects/${projectId}/attendance-records/${attendanceId}`,
     PROJECT_WAGE_BATCHES: (projectId: string) =>
@@ -97,8 +152,24 @@ export const API_ENDPOINTS = {
       `/admin/projects/${projectId}/attendance-devices`,
     PROJECT_ATTENDANCE_DEVICE: (projectId: string, deviceId: string) =>
       `/admin/projects/${projectId}/attendance-devices/${deviceId}`,
+    PROJECT_ATTENDANCE_DEVICE_ISSUE_WORKERS: (projectId: string, deviceId: string) =>
+      `/admin/projects/${projectId}/attendance-devices/${deviceId}/issue-workers`,
     ATTENDANCE_DEVICE_ISSUE_REPORTS: "/admin/attendance-device-issue-reports",
     ATTENDANCE_DEVICE_ISSUE_REPORT: (reportId: string) =>
       `/admin/attendance-device-issue-reports/${reportId}`,
+    ATTENDANCE_ALERT_CONFIGS: "/admin/attendance-alert-configs",
+    ATTENDANCE_ALERT_CONFIG: (configId: string) =>
+      `/admin/attendance-alert-configs/${configId}`,
+    ATTENDANCE_ALERT_LOGS: "/admin/attendance-alert-logs",
+    ATTENDANCE_ALERT_RUN: "/admin/attendance-alerts/run",
+    MANAGED_ATTENDANCE_PHOTO_GROUPS: "/admin/managed-attendance/photo-groups",
+    MANAGED_ATTENDANCE_PHOTO_GROUP: (photoGroupId: string) =>
+      `/admin/managed-attendance/photo-groups/${photoGroupId}`,
+    MANAGED_ATTENDANCE_CONFIGS: "/admin/managed-attendance/configs",
+    MANAGED_ATTENDANCE_CONFIG: (configId: string) =>
+      `/admin/managed-attendance/configs/${configId}`,
+    MANAGED_ATTENDANCE_GENERATE: (configId: string) =>
+      `/admin/managed-attendance/configs/${configId}/generate`,
+    MANAGED_ATTENDANCE_RECORDS: "/admin/managed-attendance/records",
   },
 } as const;

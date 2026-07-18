@@ -6,19 +6,23 @@ use axum::{
 };
 use base64::{Engine as _, engine::general_purpose};
 use bytes::Bytes;
-use chrono::Datelike;
+use chrono::{Datelike, NaiveTime, TimeZone, Timelike};
 use percent_encoding::percent_decode_str;
+use serde::Serialize;
 use serde_json::Value;
 use sqlx::{Postgres, QueryBuilder, Row};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::{Cursor, Read, Write},
 };
 use uuid::Uuid;
 use zip::{ZipArchive, ZipWriter, write::SimpleFileOptions};
 
 use crate::{
-    feature::auth::AuthUser,
+    feature::auth::{AuthUser, Role},
+    feature::device_mqtt::issuer::{
+        issue_device_workers_via_broker, issue_single_worker_via_broker,
+    },
     infrastructure::web::response::{ApiError, ApiResult, ApiSuccess},
     state::AppState,
 };
@@ -36,6 +40,7 @@ enum ColumnKind {
     Integer,
     SmallInt,
     BigInt,
+    Money,
     Boolean,
     Date,
     Timestamp,
@@ -52,9 +57,9 @@ const PROJECT_COLUMNS: &[ColumnSpec] = &[
     column("street", ColumnKind::Text),
     column("start_date", ColumnKind::Date),
     column("finish_date", ColumnKind::Date),
-    column("invest_total", ColumnKind::BigInt),
+    column("invest_total", ColumnKind::Money),
     column("investment_nature", ColumnKind::Integer),
-    column("labor_cost", ColumnKind::BigInt),
+    column("labor_cost", ColumnKind::Money),
     column("status", ColumnKind::Integer),
     column("category", ColumnKind::Integer),
     column("industry", ColumnKind::Integer),
@@ -97,9 +102,9 @@ const PROJECT_COLUMNS: &[ColumnSpec] = &[
     column("nationality", ColumnKind::Text),
     column("manager_id_card", ColumnKind::Text),
     column("labor_manager_id_card", ColumnKind::Text),
-    column("contract_amount", ColumnKind::BigInt),
+    column("contract_amount", ColumnKind::Money),
     column("injury_insurance_number", ColumnKind::Text),
-    column("margin_amount", ColumnKind::BigInt),
+    column("margin_amount", ColumnKind::Money),
     column("pay_date", ColumnKind::Date),
     column("margin_photos", ColumnKind::Text),
     column("injury_insurance_photos", ColumnKind::Text),
@@ -131,7 +136,7 @@ const UNIT_COLUMNS: &[ColumnSpec] = &[
     column("legal_person_name", ColumnKind::Text),
     column("legal_person_id_card", ColumnKind::Text),
     column("company_phone", ColumnKind::Text),
-    column("contract_amount", ColumnKind::BigInt),
+    column("contract_amount", ColumnKind::Money),
     column("attachment", ColumnKind::Text),
     column("register_area_list", ColumnKind::Text),
     column("attachment_file", ColumnKind::Json),
@@ -178,7 +183,7 @@ const WORKER_COLUMNS: &[ColumnSpec] = &[
     column("education", ColumnKind::Integer),
     column("settlement_type", ColumnKind::SmallInt),
     column("quantity_unit_type", ColumnKind::SmallInt),
-    column("unit_price", ColumnKind::BigInt),
+    column("unit_price", ColumnKind::Money),
     column("salary_bank_card", ColumnKind::Text),
     column("salary_bank", ColumnKind::Text),
     column("has_insurance", ColumnKind::Boolean),
@@ -288,14 +293,39 @@ const PLATFORM_LOG_COLUMNS: &[ColumnSpec] = &[
     column("occurred_at", ColumnKind::Timestamp),
 ];
 
-pub async fn list_projects(State(state): State<AppState>, uri: Uri) -> ApiResult<Value> {
+const MANAGED_ATTENDANCE_PHOTO_GROUP_COLUMNS: &[ColumnSpec] = &[
+    column("project_id", ColumnKind::Uuid),
+    column("name", ColumnKind::Text),
+    column("generation_status", ColumnKind::Text),
+    column("in_photos", ColumnKind::Json),
+    column("out_photos", ColumnKind::Json),
+    column("remark", ColumnKind::Text),
+];
+
+const MANAGED_ATTENDANCE_CONFIG_COLUMNS: &[ColumnSpec] = &[
+    column("project_id", ColumnKind::Uuid),
+    column("worker_id", ColumnKind::Uuid),
+    column("photo_group_id", ColumnKind::Uuid),
+    column("monthly_attendance_days", ColumnKind::SmallInt),
+    column("shift", ColumnKind::Text),
+    column("check_in_time", ColumnKind::Text),
+    column("check_out_time", ColumnKind::Text),
+    column("is_enabled", ColumnKind::Boolean),
+    column("remark", ColumnKind::Text),
+];
+
+pub async fn list_projects(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    uri: Uri,
+) -> ApiResult<Value> {
     let (has_query, params) = project_list_params(&uri)?;
     let total = if has_query {
-        fetch_project_total(state.db.pool(), &params).await?
+        fetch_project_total(state.db.pool(), &auth_user, &params).await?
     } else {
         0
     };
-    let items = fetch_project_items(state.db.pool(), &params, has_query).await?;
+    let items = fetch_project_items(state.db.pool(), &auth_user, &params, has_query).await?;
 
     if !has_query {
         return Ok(ApiSuccess::default().with_data(items));
@@ -311,6 +341,7 @@ pub async fn list_projects(State(state): State<AppState>, uri: Uri) -> ApiResult
 
 async fn fetch_project_items(
     pool: &sqlx::PgPool,
+    auth_user: &AuthUser,
     params: &ProjectListParams,
     paginated: bool,
 ) -> Result<Value, ApiError> {
@@ -328,7 +359,20 @@ async fn fetch_project_items(
                 CASE
                     WHEN COALESCE(w.worker_count, 0) = 0 THEN 0
                     ELSE ROUND(COALESCE(a.attendance_today, 0)::numeric * 100 / w.worker_count)::int
-                END AS attendance_rate
+                END AS attendance_rate,
+                COALESCE((
+                    SELECT jsonb_agg(
+                        jsonb_build_object(
+                            'platform_name', pc.platform_name,
+                            'platform_type', pc.platform_type,
+                            'is_enabled', pc.is_enabled
+                        )
+                        ORDER BY pc.created_at
+                    )
+                    FROM construction_platform_configs pc
+                    WHERE pc.project_id = p.id
+                      AND pc.is_deleted = FALSE
+                ), '[]'::jsonb) AS reporting_platforms
             FROM construction_projects p
             LEFT JOIN (
                 SELECT project_id, COUNT(*)::int AS unit_count
@@ -358,6 +402,7 @@ async fn fetch_project_items(
             WHERE p.is_deleted = FALSE
         "#,
     );
+    push_accessible_project_scope(&mut query, auth_user, "p.id");
     push_project_list_filters(&mut query, params);
     query.push(" ORDER BY p.created_at DESC");
     if paginated {
@@ -378,11 +423,13 @@ async fn fetch_project_items(
 
 async fn fetch_project_total(
     pool: &sqlx::PgPool,
+    auth_user: &AuthUser,
     params: &ProjectListParams,
 ) -> Result<i64, ApiError> {
     let mut query = QueryBuilder::<Postgres>::new(
         "SELECT COUNT(*)::bigint FROM construction_projects p WHERE p.is_deleted = FALSE",
     );
+    push_accessible_project_scope(&mut query, auth_user, "p.id");
     push_project_list_filters(&mut query, params);
 
     query
@@ -464,6 +511,65 @@ pub async fn list_project_options(State(state): State<AppState>, uri: Uri) -> Ap
 
     query
         .push(" ORDER BY updated_at DESC LIMIT ")
+        .push_bind(limit);
+    query.push(") r");
+
+    let rows = query
+        .build_query_scalar::<Value>()
+        .fetch_one(state.db.pool())
+        .await
+        .map_err(db_error)?;
+
+    Ok(ApiSuccess::default().with_data(rows))
+}
+
+pub async fn list_accessible_project_options(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    uri: Uri,
+) -> ApiResult<Value> {
+    let (keyword, limit) = project_options_params(&uri);
+
+    let mut query = QueryBuilder::<Postgres>::new(
+        r#"
+        SELECT COALESCE(jsonb_agg(to_jsonb(r) ORDER BY r.updated_at DESC), '[]'::jsonb)
+        FROM (
+            SELECT
+                p.id,
+                p.name,
+                p.work_permit,
+                p.status,
+                p.address,
+                p.address_code_list,
+                p.build_unit,
+                p.contractor,
+                p.updated_at
+            FROM construction_projects p
+            WHERE p.is_deleted = FALSE
+        "#,
+    );
+    push_accessible_project_scope(&mut query, &auth_user, "p.id");
+
+    if !keyword.is_empty() {
+        let pattern = format!("%{keyword}%");
+        query
+            .push(" AND (p.name ILIKE ")
+            .push_bind(pattern.clone())
+            .push(" OR p.work_permit ILIKE ")
+            .push_bind(pattern.clone())
+            .push(" OR p.build_unit ILIKE ")
+            .push_bind(pattern.clone())
+            .push(" OR p.contractor ILIKE ")
+            .push_bind(pattern.clone())
+            .push(" OR p.address ILIKE ")
+            .push_bind(pattern.clone())
+            .push(" OR p.address_code_list ILIKE ")
+            .push_bind(pattern)
+            .push(")");
+    }
+
+    query
+        .push(" ORDER BY p.updated_at DESC LIMIT ")
         .push_bind(limit);
     query.push(") r");
 
@@ -563,6 +669,7 @@ struct ResourceListParams {
     page: i64,
     page_size: i64,
     keyword: String,
+    project_id: Option<Uuid>,
     unit_id: Option<Uuid>,
     team_id: Option<Uuid>,
     company_type: Option<i32>,
@@ -570,6 +677,7 @@ struct ResourceListParams {
     work_type: Option<i32>,
     settlement_type: Option<i16>,
     work_status: Option<i16>,
+    auth_status: Option<AuthStatusFilter>,
     direction: Option<i16>,
     attendance_date: Option<chrono::NaiveDate>,
     attendance_month: Option<chrono::NaiveDate>,
@@ -582,15 +690,34 @@ struct ModuleListParams {
     page_size: i64,
     keyword: String,
     project_id: Option<Uuid>,
+    worker_id: Option<Uuid>,
+    attendance_device_id: Option<Uuid>,
     status: Option<String>,
     platform_type: Option<String>,
     action: Option<String>,
+    include_delete_actions: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ResourceListView {
     List,
     Calendar,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum AuthStatusFilter {
+    Exact(i16),
+    Unverified,
+}
+
+fn parse_auth_status_filter(value: &str) -> Result<AuthStatusFilter, ApiError> {
+    match value {
+        "unverified" | "not_verified" | "uncertified" => Ok(AuthStatusFilter::Unverified),
+        _ => value
+            .parse::<i16>()
+            .map(AuthStatusFilter::Exact)
+            .map_err(|_| invalid_column_value("auth_status", "integer or unverified")),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -658,6 +785,7 @@ fn resource_list_params(uri: &Uri) -> Result<ResourceListParams, ApiError> {
     let mut page_size = 10_i64;
     let mut view = ResourceListView::List;
     let mut keyword = String::new();
+    let mut project_id = None;
     let mut unit_id = None;
     let mut team_id = None;
     let mut company_type = None;
@@ -665,6 +793,7 @@ fn resource_list_params(uri: &Uri) -> Result<ResourceListParams, ApiError> {
     let mut work_type = None;
     let mut settlement_type = None;
     let mut work_status = None;
+    let mut auth_status = None;
     let mut direction = None;
     let mut attendance_date = None;
     let mut attendance_month = None;
@@ -692,6 +821,12 @@ fn resource_list_params(uri: &Uri) -> Result<ResourceListParams, ApiError> {
                 }
                 "page_size" => {
                     page_size = trimmed.parse::<i64>().unwrap_or(10).clamp(1, 100);
+                }
+                "project_id" if !trimmed.is_empty() => {
+                    project_id = Some(
+                        Uuid::parse_str(trimmed)
+                            .map_err(|_| invalid_column_value("project_id", "uuid"))?,
+                    );
                 }
                 "unit_id" if !trimmed.is_empty() => {
                     unit_id = Some(
@@ -740,6 +875,9 @@ fn resource_list_params(uri: &Uri) -> Result<ResourceListParams, ApiError> {
                             .map_err(|_| invalid_column_value("work_status", "integer"))?,
                     );
                 }
+                "auth_status" if !trimmed.is_empty() => {
+                    auth_status = Some(parse_auth_status_filter(trimmed)?);
+                }
                 "direction" if !trimmed.is_empty() => {
                     direction = Some(
                         trimmed
@@ -766,6 +904,7 @@ fn resource_list_params(uri: &Uri) -> Result<ResourceListParams, ApiError> {
         page,
         page_size,
         keyword: keyword.trim().to_owned(),
+        project_id,
         unit_id,
         team_id,
         company_type,
@@ -773,6 +912,7 @@ fn resource_list_params(uri: &Uri) -> Result<ResourceListParams, ApiError> {
         work_type,
         settlement_type,
         work_status,
+        auth_status,
         direction,
         attendance_date,
         attendance_month,
@@ -785,9 +925,12 @@ fn module_list_params(uri: &Uri) -> Result<ModuleListParams, ApiError> {
     let mut page_size = 10_i64;
     let mut keyword = String::new();
     let mut project_id = None;
+    let mut worker_id = None;
+    let mut attendance_device_id = None;
     let mut status = None;
     let mut platform_type = None;
     let mut action = None;
+    let mut include_delete_actions = false;
 
     if let Some(query) = uri.query() {
         for pair in query.split('&') {
@@ -806,6 +949,18 @@ fn module_list_params(uri: &Uri) -> Result<ModuleListParams, ApiError> {
                             .map_err(|_| invalid_column_value("project_id", "uuid"))?,
                     );
                 }
+                "worker_id" if !trimmed.is_empty() => {
+                    worker_id = Some(
+                        Uuid::parse_str(trimmed)
+                            .map_err(|_| invalid_column_value("worker_id", "uuid"))?,
+                    );
+                }
+                "attendance_device_id" if !trimmed.is_empty() => {
+                    attendance_device_id = Some(
+                        Uuid::parse_str(trimmed)
+                            .map_err(|_| invalid_column_value("attendance_device_id", "uuid"))?,
+                    );
+                }
                 "status" if !trimmed.is_empty() && trimmed != "all" => {
                     status = Some(trimmed.to_owned());
                 }
@@ -813,7 +968,13 @@ fn module_list_params(uri: &Uri) -> Result<ModuleListParams, ApiError> {
                     platform_type = Some(trimmed.to_owned());
                 }
                 "action" if !trimmed.is_empty() && trimmed != "all" => {
+                    if trimmed == "delete" {
+                        include_delete_actions = true;
+                    }
                     action = Some(trimmed.to_owned());
+                }
+                "include_delete_actions" | "include_delete" => {
+                    include_delete_actions = matches!(trimmed, "1" | "true" | "yes");
                 }
                 _ => {}
             }
@@ -825,9 +986,12 @@ fn module_list_params(uri: &Uri) -> Result<ModuleListParams, ApiError> {
         page_size,
         keyword: keyword.trim().to_owned(),
         project_id,
+        worker_id,
+        attendance_device_id,
         status,
         platform_type,
         action,
+        include_delete_actions,
     })
 }
 
@@ -1352,6 +1516,1074 @@ fn build_wage_export_csv(rows: Vec<WageExportRow>) -> String {
     )
 }
 
+const WORKER_ADVANCED_EXPORT_FORMATS: &[&str] = &[
+    "worker_basic",
+    "worker_bank",
+    "worker_photos",
+    "worker_json",
+];
+const ATTENDANCE_ADVANCED_EXPORT_FORMATS: &[&str] = &[
+    "attendance_time",
+    "attendance_status",
+    "work_hours",
+    "work_record",
+    "attendance_records",
+    "attendance_json",
+];
+
+#[derive(Debug, Clone)]
+struct ProjectAdvancedExportParams {
+    formats: Vec<String>,
+    keyword: String,
+    unit_id: Option<Uuid>,
+    unit_ids: Vec<Uuid>,
+    team_id: Option<Uuid>,
+    team_ids: Vec<Uuid>,
+    worker_ids: Vec<Uuid>,
+    work_status: Option<i16>,
+    work_type: Option<i32>,
+    direction: Option<i16>,
+    attendance_date: Option<chrono::NaiveDate>,
+    attendance_month: chrono::NaiveDate,
+    attendance_filter: String,
+    sort_by: String,
+}
+
+#[derive(Clone, Serialize)]
+struct ProjectExportWorker {
+    id: String,
+    project_name: String,
+    unit_name: String,
+    team_name: String,
+    name: String,
+    gender: String,
+    id_card: String,
+    phone: String,
+    work_type: String,
+    worker_type: String,
+    work_status: String,
+    entry_time: String,
+    exit_time: String,
+    address: String,
+    current_address: String,
+    settlement_type: String,
+    unit_price: String,
+    salary_bank_card: String,
+    salary_bank: String,
+}
+
+#[derive(Clone, Serialize)]
+struct ProjectExportAttendanceRecord {
+    id: String,
+    worker_id: String,
+    project_name: String,
+    worker_name: String,
+    id_card: String,
+    phone: String,
+    unit_name: String,
+    team_name: String,
+    direction: String,
+    direction_value: i16,
+    trigger_time: String,
+    attendance_date: String,
+    attendance_time: String,
+    equipment_id: String,
+    serial_number: String,
+    photo_path: String,
+    overall_photo: String,
+    closeup_photo: String,
+}
+
+fn project_export_params(
+    body: &Value,
+    allowed_formats: &[&str],
+    default_formats: &[&str],
+) -> Result<ProjectAdvancedExportParams, ApiError> {
+    let object = body
+        .as_object()
+        .ok_or_else(|| invalid_input("Request body must be a JSON object"))?;
+    let today = chrono::Utc::now().date_naive();
+    let default_month = chrono::NaiveDate::from_ymd_opt(today.year(), today.month(), 1)
+        .ok_or_else(|| invalid_column_value("attendance_month", "YYYY-MM"))?;
+
+    Ok(ProjectAdvancedExportParams {
+        formats: parse_export_formats(object.get("formats"), allowed_formats, default_formats)?,
+        keyword: export_string_from_keys(object, &["keyword", "q", "name"]).unwrap_or_default(),
+        unit_id: export_uuid_from_keys(
+            object,
+            &[
+                "unit_id",
+                "unitId",
+                "participating_unit_id",
+                "participatingUnitId",
+            ],
+        )?,
+        unit_ids: export_uuid_list_from_keys(
+            object,
+            &[
+                "unit_ids",
+                "unitIds",
+                "participating_unit_ids",
+                "participatingUnitIds",
+            ],
+        )?,
+        team_id: export_uuid_from_keys(object, &["team_id", "teamId"])?,
+        team_ids: export_uuid_list_from_keys(object, &["team_ids", "teamIds"])?,
+        worker_ids: export_uuid_list_from_keys(object, &["worker_ids", "workerIds"])?,
+        work_status: export_i16_from_keys(object, &["work_status", "workStatus"])?,
+        work_type: export_i32_from_keys(object, &["work_type", "workType"])?,
+        direction: export_i16_from_keys(object, &["direction"])?,
+        attendance_date: export_date_from_keys(object, &["attendance_date", "attendanceDate"])?,
+        attendance_month: export_month_from_keys(
+            object,
+            &["attendance_month", "attendanceMonth", "month", "date"],
+        )?
+        .unwrap_or(default_month),
+        attendance_filter: export_string_from_keys(
+            object,
+            &["attendance_filter", "attendanceFilter"],
+        )
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "all".to_owned()),
+        sort_by: export_string_from_keys(object, &["sort_by", "sortBy"])
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "attendance_days_desc".to_owned()),
+    })
+}
+
+fn parse_export_formats(
+    value: Option<&Value>,
+    allowed_formats: &[&str],
+    default_formats: &[&str],
+) -> Result<Vec<String>, ApiError> {
+    let mut formats = Vec::new();
+    match value {
+        Some(Value::Array(items)) => {
+            for item in items {
+                if let Some(value) = value_as_clean_string(item) {
+                    formats.push(value);
+                }
+            }
+        }
+        Some(value) => {
+            if let Some(value) = value_as_clean_string(value) {
+                formats.extend(
+                    value
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|item| !item.is_empty())
+                        .map(str::to_owned),
+                );
+            }
+        }
+        None => {}
+    }
+
+    if formats.is_empty() {
+        formats = default_formats
+            .iter()
+            .map(|item| (*item).to_owned())
+            .collect();
+    }
+
+    let mut deduped = Vec::with_capacity(formats.len());
+    for format in formats {
+        if !allowed_formats.contains(&format.as_str()) {
+            return Err(invalid_column_value("formats", &allowed_formats.join(",")));
+        }
+        if !deduped.contains(&format) {
+            deduped.push(format);
+        }
+    }
+    Ok(deduped)
+}
+
+fn export_string_from_keys(
+    object: &serde_json::Map<String, Value>,
+    keys: &[&str],
+) -> Option<String> {
+    keys.iter()
+        .find_map(|key| object.get(*key).and_then(value_as_clean_string))
+}
+
+fn export_uuid_from_keys(
+    object: &serde_json::Map<String, Value>,
+    keys: &[&str],
+) -> Result<Option<Uuid>, ApiError> {
+    let Some(value) = keys.iter().find_map(|key| object.get(*key)) else {
+        return Ok(None);
+    };
+    let Some(value) = value_as_clean_string(value) else {
+        return Ok(None);
+    };
+    if value == "0" || value == "all" {
+        return Ok(None);
+    }
+    Uuid::parse_str(&value)
+        .map(Some)
+        .map_err(|_| invalid_column_value(keys[0], "uuid"))
+}
+
+fn export_uuid_list_from_keys(
+    object: &serde_json::Map<String, Value>,
+    keys: &[&str],
+) -> Result<Vec<Uuid>, ApiError> {
+    let Some(value) = keys.iter().find_map(|key| object.get(*key)) else {
+        return Ok(Vec::new());
+    };
+    let raw_values = match value {
+        Value::Array(items) => items
+            .iter()
+            .filter_map(value_as_clean_string)
+            .collect::<Vec<_>>(),
+        value => value_as_clean_string(value)
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+            .map(str::to_owned)
+            .collect::<Vec<_>>(),
+    };
+
+    let mut ids = Vec::new();
+    for value in raw_values {
+        if value == "0" || value == "all" {
+            continue;
+        }
+        let id = Uuid::parse_str(&value).map_err(|_| invalid_column_value(keys[0], "uuid[]"))?;
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    Ok(ids)
+}
+
+fn export_i16_from_keys(
+    object: &serde_json::Map<String, Value>,
+    keys: &[&str],
+) -> Result<Option<i16>, ApiError> {
+    let Some(value) = keys.iter().find_map(|key| object.get(*key)) else {
+        return Ok(None);
+    };
+    let Some(value) = value_as_clean_string(value) else {
+        return Ok(None);
+    };
+    if value == "all" || value == "0_all" {
+        return Ok(None);
+    }
+    match value.as_str() {
+        "active" => return Ok(Some(1)),
+        "inactive" => return Ok(Some(2)),
+        _ => {}
+    }
+    value
+        .parse::<i16>()
+        .map(Some)
+        .map_err(|_| invalid_column_value(keys[0], "integer"))
+}
+
+fn export_i32_from_keys(
+    object: &serde_json::Map<String, Value>,
+    keys: &[&str],
+) -> Result<Option<i32>, ApiError> {
+    let Some(value) = keys.iter().find_map(|key| object.get(*key)) else {
+        return Ok(None);
+    };
+    let Some(value) = value_as_clean_string(value) else {
+        return Ok(None);
+    };
+    if value == "all" {
+        return Ok(None);
+    }
+    value
+        .parse::<i32>()
+        .map(Some)
+        .map_err(|_| invalid_column_value(keys[0], "integer"))
+}
+
+fn export_date_from_keys(
+    object: &serde_json::Map<String, Value>,
+    keys: &[&str],
+) -> Result<Option<chrono::NaiveDate>, ApiError> {
+    let Some(value) = export_string_from_keys(object, keys) else {
+        return Ok(None);
+    };
+    if value == "all" {
+        return Ok(None);
+    }
+    chrono::NaiveDate::parse_from_str(&value, "%Y-%m-%d")
+        .map(Some)
+        .map_err(|_| invalid_column_value(keys[0], "YYYY-MM-DD"))
+}
+
+fn export_month_from_keys(
+    object: &serde_json::Map<String, Value>,
+    keys: &[&str],
+) -> Result<Option<chrono::NaiveDate>, ApiError> {
+    let Some(value) = export_string_from_keys(object, keys) else {
+        return Ok(None);
+    };
+    if value == "all" {
+        return Ok(None);
+    }
+    parse_payroll_month(&value).map(Some)
+}
+
+fn value_as_clean_string(value: &Value) -> Option<String> {
+    match value {
+        Value::Null => None,
+        Value::String(value) => {
+            let value = value.trim();
+            if value.is_empty() {
+                None
+            } else {
+                Some(value.to_owned())
+            }
+        }
+        Value::Number(value) => Some(value.to_string()),
+        Value::Bool(value) => Some(value.to_string()),
+        Value::Array(_) | Value::Object(_) => None,
+    }
+}
+
+async fn fetch_project_export_workers(
+    pool: &sqlx::PgPool,
+    auth_user: &AuthUser,
+    project_id: Uuid,
+    params: &ProjectAdvancedExportParams,
+) -> Result<Vec<ProjectExportWorker>, ApiError> {
+    let mut query = QueryBuilder::<Postgres>::new(
+        r#"
+SELECT
+    w.id::text AS id,
+    COALESCE(p.name, '未命名项目') AS project_name,
+    COALESCE(u.company_name, '') AS unit_name,
+    COALESCE(t.name, '') AS team_name,
+    COALESCE(w.name, '') AS name,
+    COALESCE(w.id_card, '') AS id_card,
+    COALESCE(w.phone, '') AS phone,
+    COALESCE(w.gender, 1)::smallint AS gender,
+    w.work_type AS work_type,
+    w.worker_type AS worker_type,
+    COALESCE(w.work_status, 1)::smallint AS work_status,
+    w.settlement_type AS settlement_type,
+    COALESCE(to_char(w.entry_time, 'YYYY-MM-DD'), '') AS entry_time,
+    COALESCE(to_char(w.exit_time, 'YYYY-MM-DD'), '') AS exit_time,
+    COALESCE(w.address, '') AS address,
+    COALESCE(w.current_address, '') AS current_address,
+    COALESCE(w.unit_price::text, '') AS unit_price,
+    COALESCE(w.salary_bank_card, '') AS salary_bank_card,
+    COALESCE(w.salary_bank, '') AS salary_bank
+FROM construction_workers w
+JOIN construction_projects p ON p.id = w.project_id AND p.is_deleted = FALSE
+LEFT JOIN construction_units u ON u.id = w.unit_id AND u.is_deleted = FALSE
+LEFT JOIN construction_teams t ON t.id = w.team_id AND t.is_deleted = FALSE
+WHERE w.is_deleted = FALSE
+  AND w.project_id =
+"#,
+    );
+    query.push_bind(project_id);
+    push_accessible_project_scope(&mut query, auth_user, "w.project_id");
+    push_project_worker_export_filters(&mut query, params);
+    query.push(" ORDER BY w.entry_time ASC NULLS LAST, w.created_at ASC");
+
+    let rows = query.build().fetch_all(pool).await.map_err(db_error)?;
+    rows.into_iter()
+        .map(|row| {
+            let gender: i16 = row.try_get("gender").map_err(db_error)?;
+            let work_status: i16 = row.try_get("work_status").map_err(db_error)?;
+            let work_type: Option<i32> = row.try_get("work_type").map_err(db_error)?;
+            let worker_type: Option<i32> = row.try_get("worker_type").map_err(db_error)?;
+            let settlement_type: Option<i16> = row.try_get("settlement_type").map_err(db_error)?;
+
+            Ok(ProjectExportWorker {
+                id: row.try_get("id").map_err(db_error)?,
+                project_name: row.try_get("project_name").map_err(db_error)?,
+                unit_name: row.try_get("unit_name").map_err(db_error)?,
+                team_name: row.try_get("team_name").map_err(db_error)?,
+                name: row.try_get("name").map_err(db_error)?,
+                gender: gender_label(gender).to_owned(),
+                id_card: row.try_get("id_card").map_err(db_error)?,
+                phone: row.try_get("phone").map_err(db_error)?,
+                work_type: work_type_label(work_type),
+                worker_type: worker_type_label(worker_type),
+                work_status: worker_status_label(work_status).to_owned(),
+                entry_time: row.try_get("entry_time").map_err(db_error)?,
+                exit_time: row.try_get("exit_time").map_err(db_error)?,
+                address: row.try_get("address").map_err(db_error)?,
+                current_address: row.try_get("current_address").map_err(db_error)?,
+                settlement_type: settlement_type_label(settlement_type),
+                unit_price: row.try_get("unit_price").map_err(db_error)?,
+                salary_bank_card: row.try_get("salary_bank_card").map_err(db_error)?,
+                salary_bank: row.try_get("salary_bank").map_err(db_error)?,
+            })
+        })
+        .collect()
+}
+
+fn push_project_worker_export_filters(
+    query: &mut QueryBuilder<'_, Postgres>,
+    params: &ProjectAdvancedExportParams,
+) {
+    if !params.keyword.is_empty() {
+        let pattern = format!("%{}%", params.keyword);
+        query
+            .push(" AND (w.name ILIKE ")
+            .push_bind(pattern.clone())
+            .push(" OR w.id_card ILIKE ")
+            .push_bind(pattern.clone())
+            .push(" OR w.phone ILIKE ")
+            .push_bind(pattern.clone())
+            .push(" OR u.company_name ILIKE ")
+            .push_bind(pattern.clone())
+            .push(" OR t.name ILIKE ")
+            .push_bind(pattern)
+            .push(")");
+    }
+    if !params.unit_ids.is_empty() {
+        push_uuid_list_filter(query, "w.unit_id", &params.unit_ids);
+    } else if let Some(unit_id) = params.unit_id {
+        query.push(" AND w.unit_id = ").push_bind(unit_id);
+    }
+    if !params.team_ids.is_empty() {
+        push_uuid_list_filter(query, "w.team_id", &params.team_ids);
+    } else if let Some(team_id) = params.team_id {
+        query.push(" AND w.team_id = ").push_bind(team_id);
+    }
+    if let Some(work_type) = params.work_type {
+        query.push(" AND w.work_type = ").push_bind(work_type);
+    }
+    if let Some(work_status) = params.work_status {
+        query.push(" AND w.work_status = ").push_bind(work_status);
+    }
+    push_uuid_list_filter(query, "w.id", &params.worker_ids);
+}
+
+async fn fetch_project_export_attendance_records(
+    pool: &sqlx::PgPool,
+    auth_user: &AuthUser,
+    project_id: Uuid,
+    worker_ids: &[String],
+    params: &ProjectAdvancedExportParams,
+) -> Result<Vec<ProjectExportAttendanceRecord>, ApiError> {
+    if worker_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let worker_uuids = worker_ids
+        .iter()
+        .map(|id| Uuid::parse_str(id).map_err(|_| invalid_column_value("worker_ids", "uuid[]")))
+        .collect::<Result<Vec<_>, _>>()?;
+    let next_month = next_month(params.attendance_month)?;
+    let mut query = QueryBuilder::<Postgres>::new(
+        r#"
+SELECT
+    r.id::text AS id,
+    w.id::text AS worker_id,
+    COALESCE(p.name, '未命名项目') AS project_name,
+    COALESCE(w.name, '') AS worker_name,
+    COALESCE(w.id_card, '') AS id_card,
+    COALESCE(w.phone, '') AS phone,
+    COALESCE(u.company_name, '') AS unit_name,
+    COALESCE(t.name, '') AS team_name,
+    COALESCE(r.direction, 0)::smallint AS direction_value,
+    to_char(r.trigger_time AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') AS trigger_time,
+    to_char(r.trigger_time AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD') AS attendance_date,
+    to_char(r.trigger_time AT TIME ZONE 'Asia/Shanghai', 'HH24:MI:SS') AS attendance_time,
+    COALESCE(r.equipment_id, '') AS equipment_id,
+    COALESCE(r.serial_number, '') AS serial_number,
+    COALESCE(r.photo_path, '') AS photo_path,
+    COALESCE(r.overall_photo, overall_photo.photo_data, '') AS overall_photo,
+    COALESCE(r.closeup_photo, closeup_photo.photo_data, '') AS closeup_photo
+FROM construction_attendance_records r
+JOIN construction_projects p ON p.id = r.project_id AND p.is_deleted = FALSE
+JOIN construction_workers w ON w.id = r.worker_id AND w.is_deleted = FALSE
+LEFT JOIN construction_units u ON u.id = w.unit_id AND u.is_deleted = FALSE
+LEFT JOIN construction_teams t ON t.id = w.team_id AND t.is_deleted = FALSE
+LEFT JOIN LATERAL (
+    SELECT photo_data
+    FROM construction_attendance_record_photos photo
+    WHERE photo.attendance_record_id = r.id
+      AND photo.photo_kind = 'overall'
+    ORDER BY photo.created_at DESC, photo.id DESC
+    LIMIT 1
+) overall_photo ON TRUE
+LEFT JOIN LATERAL (
+    SELECT photo_data
+    FROM construction_attendance_record_photos photo
+    WHERE photo.attendance_record_id = r.id
+      AND photo.photo_kind = 'closeup'
+    ORDER BY photo.created_at DESC, photo.id DESC
+    LIMIT 1
+) closeup_photo ON TRUE
+WHERE r.is_deleted = FALSE
+  AND r.project_id =
+"#,
+    );
+    query.push_bind(project_id);
+    push_accessible_project_scope(&mut query, auth_user, "r.project_id");
+    push_uuid_list_filter(&mut query, "r.worker_id", &worker_uuids);
+    if let Some(attendance_date) = params.attendance_date {
+        query
+            .push(" AND (r.trigger_time AT TIME ZONE 'Asia/Shanghai')::date = ")
+            .push_bind(attendance_date);
+    } else {
+        query
+            .push(" AND (r.trigger_time AT TIME ZONE 'Asia/Shanghai')::date >= ")
+            .push_bind(params.attendance_month)
+            .push(" AND (r.trigger_time AT TIME ZONE 'Asia/Shanghai')::date < ")
+            .push_bind(next_month);
+    }
+    if let Some(direction) = params.direction {
+        query.push(" AND r.direction = ").push_bind(direction);
+    }
+    query.push(" ORDER BY r.trigger_time ASC");
+
+    let rows = query.build().fetch_all(pool).await.map_err(db_error)?;
+    rows.into_iter()
+        .map(|row| {
+            let direction_value: i16 = row.try_get("direction_value").map_err(db_error)?;
+            Ok(ProjectExportAttendanceRecord {
+                id: row.try_get("id").map_err(db_error)?,
+                worker_id: row.try_get("worker_id").map_err(db_error)?,
+                project_name: row.try_get("project_name").map_err(db_error)?,
+                worker_name: row.try_get("worker_name").map_err(db_error)?,
+                id_card: row.try_get("id_card").map_err(db_error)?,
+                phone: row.try_get("phone").map_err(db_error)?,
+                unit_name: row.try_get("unit_name").map_err(db_error)?,
+                team_name: row.try_get("team_name").map_err(db_error)?,
+                direction: direction_label(direction_value).to_owned(),
+                direction_value,
+                trigger_time: row.try_get("trigger_time").map_err(db_error)?,
+                attendance_date: row.try_get("attendance_date").map_err(db_error)?,
+                attendance_time: row.try_get("attendance_time").map_err(db_error)?,
+                equipment_id: row.try_get("equipment_id").map_err(db_error)?,
+                serial_number: row.try_get("serial_number").map_err(db_error)?,
+                photo_path: row.try_get("photo_path").map_err(db_error)?,
+                overall_photo: row.try_get("overall_photo").map_err(db_error)?,
+                closeup_photo: row.try_get("closeup_photo").map_err(db_error)?,
+            })
+        })
+        .collect()
+}
+
+fn push_uuid_list_filter(
+    query: &mut QueryBuilder<'_, Postgres>,
+    expression: &'static str,
+    values: &[Uuid],
+) {
+    if values.is_empty() {
+        return;
+    }
+    query.push(" AND ").push(expression).push(" IN (");
+    let mut separated = query.separated(", ");
+    for value in values {
+        separated.push_bind(*value);
+    }
+    separated.push_unseparated(")");
+}
+
+fn build_worker_full_csv(workers: &[ProjectExportWorker]) -> String {
+    build_csv(
+        &[
+            "项目",
+            "参建单位",
+            "班组",
+            "姓名",
+            "性别",
+            "身份证号",
+            "手机号",
+            "工种",
+            "工人类型",
+            "状态",
+            "进场日期",
+            "退场日期",
+            "户籍地址",
+            "现住址",
+            "结算方式",
+            "单价",
+            "工资银行卡",
+            "工资银行",
+        ],
+        &workers
+            .iter()
+            .map(|worker| {
+                vec![
+                    CsvCell::plain(&worker.project_name),
+                    CsvCell::plain(&worker.unit_name),
+                    CsvCell::plain(&worker.team_name),
+                    CsvCell::plain(&worker.name),
+                    CsvCell::plain(&worker.gender),
+                    CsvCell::text(&worker.id_card),
+                    CsvCell::text(&worker.phone),
+                    CsvCell::plain(&worker.work_type),
+                    CsvCell::plain(&worker.worker_type),
+                    CsvCell::plain(&worker.work_status),
+                    CsvCell::plain(&worker.entry_time),
+                    CsvCell::plain(&worker.exit_time),
+                    CsvCell::plain(&worker.address),
+                    CsvCell::plain(&worker.current_address),
+                    CsvCell::plain(&worker.settlement_type),
+                    CsvCell::plain(&worker.unit_price),
+                    CsvCell::text(&worker.salary_bank_card),
+                    CsvCell::plain(&worker.salary_bank),
+                ]
+            })
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn build_attendance_records_csv(
+    records: &[ProjectExportAttendanceRecord],
+    workers: &[ProjectExportWorker],
+) -> String {
+    let workers_by_id = workers
+        .iter()
+        .map(|worker| (worker.id.as_str(), worker))
+        .collect::<HashMap<_, _>>();
+    let aggregates = attendance_aggregates_by_worker(records);
+    build_csv(
+        &[
+            "项目",
+            "参建单位",
+            "班组名称",
+            "工种",
+            "工人类型",
+            "姓名",
+            "身份证号",
+            "手机号",
+            "考勤天数",
+            "工时",
+            "记工",
+            "进出方向",
+            "考勤时间",
+            "设备 ID",
+            "设备序列号",
+            "照片路径",
+            "全景照片",
+            "近景照片",
+        ],
+        &records
+            .iter()
+            .map(|record| {
+                let worker = workers_by_id.get(record.worker_id.as_str());
+                let aggregate = aggregates
+                    .get(record.worker_id.as_str())
+                    .cloned()
+                    .unwrap_or_default();
+                vec![
+                    CsvCell::plain(&record.project_name),
+                    CsvCell::plain(&record.unit_name),
+                    CsvCell::plain(&record.team_name),
+                    CsvCell::plain(
+                        worker
+                            .map(|item| item.work_type.as_str())
+                            .unwrap_or_default(),
+                    ),
+                    CsvCell::plain(
+                        worker
+                            .map(|item| item.worker_type.as_str())
+                            .unwrap_or_default(),
+                    ),
+                    CsvCell::plain(&record.worker_name),
+                    CsvCell::text(&record.id_card),
+                    CsvCell::text(&record.phone),
+                    CsvCell::plain(aggregate.attendance_days.to_string()),
+                    CsvCell::plain(format_export_number(aggregate.hours)),
+                    CsvCell::plain(format_export_number(aggregate.work_record)),
+                    CsvCell::plain(&record.direction),
+                    CsvCell::plain(&record.trigger_time),
+                    CsvCell::plain(&record.equipment_id),
+                    CsvCell::plain(&record.serial_number),
+                    CsvCell::plain(&record.photo_path),
+                    CsvCell::plain(&record.overall_photo),
+                    CsvCell::plain(&record.closeup_photo),
+                ]
+            })
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn build_attendance_matrix_csv(
+    format: &str,
+    workers: &[ProjectExportWorker],
+    records: &[ProjectExportAttendanceRecord],
+    month: chrono::NaiveDate,
+) -> Result<String, ApiError> {
+    let day_count = days_in_month(month)?;
+    let mut grouped: HashMap<(&str, u32), Vec<&ProjectExportAttendanceRecord>> = HashMap::new();
+    for record in records {
+        if let Some(day) = record
+            .attendance_date
+            .split('-')
+            .next_back()
+            .and_then(|value| value.parse::<u32>().ok())
+        {
+            grouped
+                .entry((record.worker_id.as_str(), day))
+                .or_default()
+                .push(record);
+        }
+    }
+
+    let mut headers = vec![
+        "项目".to_owned(),
+        "参建单位".to_owned(),
+        "班组".to_owned(),
+        "姓名".to_owned(),
+        "身份证号".to_owned(),
+        "手机号".to_owned(),
+        "考勤天数".to_owned(),
+        "工时合计".to_owned(),
+        "记工合计".to_owned(),
+    ];
+    headers.extend((1..=day_count).map(|day| format!("{day}日")));
+
+    let rows = workers
+        .iter()
+        .map(|worker| {
+            let mut attendance_days = 0_i32;
+            let mut total_hours = 0_f64;
+            let mut total_work_record = 0_f64;
+            let mut daily_cells = Vec::with_capacity(day_count as usize);
+            for day in 1..=day_count {
+                let day_records = grouped
+                    .get(&(worker.id.as_str(), day))
+                    .cloned()
+                    .unwrap_or_default();
+                let summary = summarize_day_attendance(&day_records);
+                if summary.has_attendance {
+                    attendance_days += 1;
+                }
+                total_hours += summary.hours;
+                total_work_record += summary.work_record;
+                daily_cells.push(CsvCell::plain(day_attendance_cell(format, &summary)));
+            }
+
+            let mut row = vec![
+                CsvCell::plain(&worker.project_name),
+                CsvCell::plain(&worker.unit_name),
+                CsvCell::plain(&worker.team_name),
+                CsvCell::plain(&worker.name),
+                CsvCell::text(&worker.id_card),
+                CsvCell::text(&worker.phone),
+                CsvCell::plain(attendance_days.to_string()),
+                CsvCell::plain(format_export_number(total_hours)),
+                CsvCell::plain(format_export_number(total_work_record)),
+            ];
+            row.extend(daily_cells);
+            row
+        })
+        .collect::<Vec<_>>();
+
+    let header_refs = headers.iter().map(String::as_str).collect::<Vec<_>>();
+    Ok(build_csv(&header_refs, &rows))
+}
+
+#[derive(Default)]
+struct DayAttendanceSummary {
+    has_attendance: bool,
+    in_time: String,
+    out_time: String,
+    hours: f64,
+    work_record: f64,
+}
+
+#[derive(Clone, Copy, Default)]
+struct WorkerAttendanceAggregate {
+    attendance_days: i32,
+    hours: f64,
+    work_record: f64,
+}
+
+fn attendance_aggregates_by_worker(
+    records: &[ProjectExportAttendanceRecord],
+) -> HashMap<&str, WorkerAttendanceAggregate> {
+    let mut grouped: HashMap<(&str, &str), Vec<&ProjectExportAttendanceRecord>> = HashMap::new();
+    for record in records {
+        grouped
+            .entry((record.worker_id.as_str(), record.attendance_date.as_str()))
+            .or_default()
+            .push(record);
+    }
+
+    let mut aggregates = HashMap::new();
+    for ((worker_id, _), day_records) in grouped {
+        let summary = summarize_day_attendance(&day_records);
+        let aggregate = aggregates
+            .entry(worker_id)
+            .or_insert_with(WorkerAttendanceAggregate::default);
+        if summary.has_attendance {
+            aggregate.attendance_days += 1;
+        }
+        aggregate.hours += summary.hours;
+        aggregate.work_record += summary.work_record;
+    }
+    aggregates
+}
+
+fn summarize_day_attendance(records: &[&ProjectExportAttendanceRecord]) -> DayAttendanceSummary {
+    if records.is_empty() {
+        return DayAttendanceSummary::default();
+    }
+
+    let in_time = records
+        .iter()
+        .filter(|record| record.direction_value == 0)
+        .map(|record| record.attendance_time.as_str())
+        .min()
+        .unwrap_or_default()
+        .to_owned();
+    let out_time = records
+        .iter()
+        .filter(|record| record.direction_value == 1)
+        .map(|record| record.attendance_time.as_str())
+        .max()
+        .unwrap_or_default()
+        .to_owned();
+    let hours = work_hours_between(&in_time, &out_time).unwrap_or(0.0);
+    let work_record = if hours >= 8.0 {
+        1.0
+    } else if hours >= 4.0 || !records.is_empty() {
+        0.5
+    } else {
+        0.0
+    };
+
+    DayAttendanceSummary {
+        has_attendance: true,
+        in_time,
+        out_time,
+        hours,
+        work_record,
+    }
+}
+
+fn day_attendance_cell(format: &str, summary: &DayAttendanceSummary) -> String {
+    if !summary.has_attendance {
+        return String::new();
+    }
+    match format {
+        "attendance_time" => match (summary.in_time.is_empty(), summary.out_time.is_empty()) {
+            (false, false) => format!(
+                "进 {} 出 {}",
+                short_time(&summary.in_time),
+                short_time(&summary.out_time)
+            ),
+            (false, true) => format!("进 {}", short_time(&summary.in_time)),
+            (true, false) => format!("出 {}", short_time(&summary.out_time)),
+            (true, true) => "有记录".to_owned(),
+        },
+        "work_hours" => {
+            if summary.hours > 0.0 {
+                format_export_number(summary.hours)
+            } else {
+                String::new()
+            }
+        }
+        "work_record" => {
+            if summary.work_record > 0.0 {
+                format_export_number(summary.work_record)
+            } else {
+                String::new()
+            }
+        }
+        _ => "✓".to_owned(),
+    }
+}
+
+fn work_hours_between(in_time: &str, out_time: &str) -> Option<f64> {
+    if in_time.is_empty() || out_time.is_empty() {
+        return None;
+    }
+    let start = NaiveTime::parse_from_str(in_time, "%H:%M:%S").ok()?;
+    let end = NaiveTime::parse_from_str(out_time, "%H:%M:%S").ok()?;
+    let mut seconds =
+        end.num_seconds_from_midnight() as i64 - start.num_seconds_from_midnight() as i64;
+    if seconds < 0 {
+        seconds += 24 * 60 * 60;
+    }
+    Some((seconds as f64 / 3600.0 * 100.0).round() / 100.0)
+}
+
+fn short_time(value: &str) -> &str {
+    value.get(0..5).unwrap_or(value)
+}
+
+fn format_export_number(value: f64) -> String {
+    if (value - value.round()).abs() < f64::EPSILON {
+        format!("{}", value.round() as i64)
+    } else {
+        format!("{value:.2}")
+    }
+}
+
+fn filter_attendance_workers(
+    workers: &[ProjectExportWorker],
+    records: &[ProjectExportAttendanceRecord],
+    attendance_filter: &str,
+) -> Vec<ProjectExportWorker> {
+    let worker_ids_with_attendance = records
+        .iter()
+        .map(|record| record.worker_id.as_str())
+        .collect::<HashSet<_>>();
+    workers
+        .iter()
+        .filter(|worker| match attendance_filter {
+            "has_attendance" => worker_ids_with_attendance.contains(worker.id.as_str()),
+            "no_attendance" => !worker_ids_with_attendance.contains(worker.id.as_str()),
+            _ => true,
+        })
+        .cloned()
+        .collect()
+}
+
+fn sort_attendance_workers(
+    workers: &mut [ProjectExportWorker],
+    records: &[ProjectExportAttendanceRecord],
+    sort_by: &str,
+) {
+    let mut days_by_worker: HashMap<&str, HashSet<&str>> = HashMap::new();
+    for record in records {
+        days_by_worker
+            .entry(record.worker_id.as_str())
+            .or_default()
+            .insert(record.attendance_date.as_str());
+    }
+
+    workers.sort_by(|left, right| match sort_by {
+        "name_asc" => left.name.cmp(&right.name),
+        "team_asc" => left
+            .team_name
+            .cmp(&right.team_name)
+            .then_with(|| left.name.cmp(&right.name)),
+        "entry_time_desc" => right.entry_time.cmp(&left.entry_time),
+        "entry_time_asc" => left.entry_time.cmp(&right.entry_time),
+        "work_type_asc" => left
+            .work_type
+            .cmp(&right.work_type)
+            .then_with(|| left.name.cmp(&right.name)),
+        _ => {
+            let left_days = days_by_worker
+                .get(left.id.as_str())
+                .map(HashSet::len)
+                .unwrap_or(0);
+            let right_days = days_by_worker
+                .get(right.id.as_str())
+                .map(HashSet::len)
+                .unwrap_or(0);
+            right_days
+                .cmp(&left_days)
+                .then_with(|| left.name.cmp(&right.name))
+        }
+    });
+}
+
+fn filter_records_by_workers(
+    records: &[ProjectExportAttendanceRecord],
+    workers: &[ProjectExportWorker],
+) -> Vec<ProjectExportAttendanceRecord> {
+    let worker_ids = workers
+        .iter()
+        .map(|worker| worker.id.as_str())
+        .collect::<HashSet<_>>();
+    records
+        .iter()
+        .filter(|record| worker_ids.contains(record.worker_id.as_str()))
+        .cloned()
+        .collect()
+}
+
+fn days_in_month(month: chrono::NaiveDate) -> Result<u32, ApiError> {
+    Ok((next_month(month)? - month).num_days() as u32)
+}
+
+fn next_month(month: chrono::NaiveDate) -> Result<chrono::NaiveDate, ApiError> {
+    if month.month() == 12 {
+        chrono::NaiveDate::from_ymd_opt(month.year() + 1, 1, 1)
+    } else {
+        chrono::NaiveDate::from_ymd_opt(month.year(), month.month() + 1, 1)
+    }
+    .ok_or_else(|| invalid_column_value("attendance_month", "YYYY-MM"))
+}
+
+fn gender_label(value: i16) -> &'static str {
+    if value == 0 { "女" } else { "男" }
+}
+
+fn direction_label(value: i16) -> &'static str {
+    if value == 1 { "出场" } else { "进场" }
+}
+
+fn worker_status_label(value: i16) -> &'static str {
+    if value == 2 { "离场" } else { "在场" }
+}
+
+fn work_type_label(value: Option<i32>) -> String {
+    match value {
+        Some(1) => "钢筋工",
+        Some(2) => "木工",
+        Some(3) => "安装工",
+        Some(4) => "架子工",
+        Some(5) => "混凝土工",
+        Some(6) => "瓦工",
+        Some(7) => "电工",
+        Some(8) => "焊工",
+        Some(9) => "水工",
+        Some(10) => "测量工",
+        Some(11) => "抹灰工",
+        Some(12) => "油漆工",
+        Some(13) => "防水工",
+        Some(14) => "机械司机",
+        Some(900) => "其他",
+        Some(value) => return value.to_string(),
+        None => "",
+    }
+    .to_owned()
+}
+
+fn worker_type_label(value: Option<i32>) -> String {
+    match value {
+        Some(1) => "建筑工人",
+        Some(1001) => "管理人员",
+        Some(9) => "其他",
+        Some(value) => return value.to_string(),
+        None => "",
+    }
+    .to_owned()
+}
+
+fn settlement_type_label(value: Option<i16>) -> String {
+    match value {
+        Some(0) => "按上级配置",
+        Some(1) => "按日",
+        Some(2) => "按月",
+        Some(3) => "按周",
+        Some(4) => "劳务派遣合同",
+        Some(5) => "按小时",
+        Some(6) => "计件",
+        Some(7) => "按量",
+        Some(9) => "其他",
+        Some(value) => return value.to_string(),
+        None => "",
+    }
+    .to_owned()
+}
+
+fn csv_download_response(filename: String, csv: String) -> Response {
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "text/csv; charset=utf-8".to_owned()),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{filename}\""),
+            ),
+        ],
+        csv,
+    )
+        .into_response()
+}
+
 fn required_payroll_month(value: Option<&Value>) -> Result<chrono::NaiveDate, ApiError> {
     let value = value.ok_or_else(|| invalid_column_value("payroll_month", "YYYY-MM"))?;
     match value {
@@ -1404,14 +2636,41 @@ fn cents_to_yuan(cents: i64) -> String {
 
 pub async fn get_project(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(project_id): Path<Uuid>,
 ) -> ApiResult<Value> {
-    get_row(
-        state.db.pool(),
-        "construction_projects",
-        &[("id", project_id)],
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+    let project = sqlx::query_scalar::<_, Value>(
+        r#"
+        SELECT to_jsonb(row)
+        FROM (
+            SELECT
+                p.*,
+                COALESCE((
+                    SELECT jsonb_agg(
+                        jsonb_build_object(
+                            'platform_name', pc.platform_name,
+                            'platform_type', pc.platform_type,
+                            'is_enabled', pc.is_enabled
+                        )
+                        ORDER BY pc.created_at
+                    )
+                    FROM construction_platform_configs pc
+                    WHERE pc.project_id = p.id
+                      AND pc.is_deleted = FALSE
+                ), '[]'::jsonb) AS reporting_platforms
+            FROM construction_projects p
+            WHERE p.id = $1
+              AND p.is_deleted = FALSE
+        ) row
+        "#,
     )
+    .bind(project_id)
+    .fetch_one(state.db.pool())
     .await
+    .map_err(db_error)?;
+
+    Ok(ApiSuccess::default().with_data(project))
 }
 
 pub async fn create_project(
@@ -1431,9 +2690,11 @@ pub async fn create_project(
 
 pub async fn update_project(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(project_id): Path<Uuid>,
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     update_row(
         state.db.pool(),
         "construction_projects",
@@ -1458,9 +2719,11 @@ pub async fn delete_project(
 
 pub async fn create_unit(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(project_id): Path<Uuid>,
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     create_row(
         state.db.pool(),
         "construction_units",
@@ -1474,9 +2737,11 @@ pub async fn create_unit(
 
 pub async fn list_units(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(project_id): Path<Uuid>,
     uri: Uri,
 ) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     let params = resource_list_params(&uri)?;
     list_rows_page(
         state.db.pool(),
@@ -1490,8 +2755,10 @@ pub async fn list_units(
 
 pub async fn get_unit(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path((project_id, unit_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     get_row(
         state.db.pool(),
         "construction_units",
@@ -1502,9 +2769,11 @@ pub async fn get_unit(
 
 pub async fn update_unit(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path((project_id, unit_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     update_row(
         state.db.pool(),
         "construction_units",
@@ -1517,8 +2786,10 @@ pub async fn update_unit(
 
 pub async fn delete_unit(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path((project_id, unit_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<()> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     delete_row(
         state.db.pool(),
         "construction_units",
@@ -1529,9 +2800,11 @@ pub async fn delete_unit(
 
 pub async fn create_team(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(project_id): Path<Uuid>,
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     create_row(
         state.db.pool(),
         "construction_teams",
@@ -1545,9 +2818,11 @@ pub async fn create_team(
 
 pub async fn list_teams(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(project_id): Path<Uuid>,
     uri: Uri,
 ) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     let params = resource_list_params(&uri)?;
     let mut scoped_columns = Vec::new();
     if let Some(unit_id) = params.unit_id {
@@ -1566,8 +2841,10 @@ pub async fn list_teams(
 
 pub async fn get_team(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path((project_id, team_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     get_row(
         state.db.pool(),
         "construction_teams",
@@ -1578,9 +2855,11 @@ pub async fn get_team(
 
 pub async fn update_team(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path((project_id, team_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     update_row(
         state.db.pool(),
         "construction_teams",
@@ -1593,8 +2872,10 @@ pub async fn update_team(
 
 pub async fn delete_team(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path((project_id, team_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<()> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     delete_row(
         state.db.pool(),
         "construction_teams",
@@ -1605,11 +2886,13 @@ pub async fn delete_team(
 
 pub async fn create_worker(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(project_id): Path<Uuid>,
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     let body = normalize_worker_body(body, true)?;
-    create_row(
+    let response = create_row(
         state.db.pool(),
         "construction_workers",
         WORKER_COLUMNS,
@@ -1617,14 +2900,35 @@ pub async fn create_worker(
         &[("project_id", project_id)],
         StatusCode::CREATED,
     )
-    .await
+    .await?;
+
+    if let Some(worker_id) = response
+        .data
+        .as_ref()
+        .and_then(|row| row.get("id"))
+        .and_then(Value::as_str)
+        .and_then(|value| Uuid::parse_str(value).ok())
+    {
+        trigger_worker_device_issue(
+            &state,
+            project_id,
+            worker_id,
+            "create",
+            "人员新增后自动下发",
+        )
+        .await;
+    }
+
+    Ok(response)
 }
 
 pub async fn list_workers(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(project_id): Path<Uuid>,
     uri: Uri,
 ) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     let params = resource_list_params(&uri)?;
     let mut scoped_columns = Vec::new();
     if let Some(unit_id) = params.unit_id {
@@ -1634,9 +2938,8 @@ pub async fn list_workers(
         scoped_columns.push(("team_id", team_id));
     }
 
-    list_rows_page(
+    list_workers_page(
         state.db.pool(),
-        "construction_workers",
         &[("project_id", project_id)],
         &scoped_columns,
         &params,
@@ -1644,10 +2947,152 @@ pub async fn list_workers(
     .await
 }
 
+async fn list_workers_page(
+    pool: &sqlx::PgPool,
+    where_uuid_columns: &[(&'static str, Uuid)],
+    scoped_uuid_columns: &[(&'static str, Uuid)],
+    params: &ResourceListParams,
+) -> ApiResult<Value> {
+    let total = count_rows(
+        pool,
+        "construction_workers",
+        where_uuid_columns,
+        scoped_uuid_columns,
+        params,
+    )
+    .await?;
+    let offset = (params.page - 1) * params.page_size;
+    let mut query = QueryBuilder::<Postgres>::new(
+        r#"
+        SELECT COALESCE(jsonb_agg(to_jsonb(r) ORDER BY r.created_at DESC), '[]'::jsonb)
+        FROM (
+            SELECT
+                r.*,
+                COALESCE(issue_stats.success_device_count, 0)::int AS attendance_issue_success_device_count,
+                COALESCE(device_stats.total_device_count, 0)::int AS attendance_device_total_count
+            FROM construction_workers r
+            LEFT JOIN (
+                SELECT
+                    latest.worker_id,
+                    COUNT(*) FILTER (
+                        WHERE latest.status = 'success'
+                          AND latest.action <> 'delete'
+                    )::int AS success_device_count
+                FROM (
+                    SELECT DISTINCT ON (ir.worker_id, ir.attendance_device_id)
+                        ir.worker_id,
+                        ir.attendance_device_id,
+                        ir.status,
+                        ir.action
+                    FROM construction_attendance_device_issue_reports ir
+                    JOIN construction_attendance_devices d
+                      ON d.id = ir.attendance_device_id
+                     AND d.is_deleted = FALSE
+                    WHERE ir.is_deleted = FALSE
+                      AND ir.worker_id IS NOT NULL
+                      AND ir.attendance_device_id IS NOT NULL
+                    ORDER BY ir.worker_id, ir.attendance_device_id, ir.issued_at DESC, ir.created_at DESC
+                ) latest
+                GROUP BY latest.worker_id
+            ) issue_stats ON issue_stats.worker_id = r.id
+            LEFT JOIN (
+                SELECT
+                    project_id,
+                    COUNT(*)::int AS total_device_count
+                FROM construction_attendance_devices
+                WHERE is_deleted = FALSE
+                  AND COALESCE(NULLIF(BTRIM(serial_number), ''), NULL) IS NOT NULL
+                GROUP BY project_id
+            ) device_stats ON device_stats.project_id = r.project_id
+            WHERE r.is_deleted = FALSE
+        "#,
+    );
+    push_uuid_filters(&mut query, where_uuid_columns);
+    push_uuid_filters(&mut query, scoped_uuid_columns);
+    push_resource_filters(&mut query, "construction_workers", params);
+    query
+        .push(" ORDER BY r.created_at DESC LIMIT ")
+        .push_bind(params.page_size)
+        .push(" OFFSET ")
+        .push_bind(offset)
+        .push(") r");
+
+    let items = query
+        .build_query_scalar::<Value>()
+        .fetch_one(pool)
+        .await
+        .map_err(db_error)?;
+
+    Ok(ApiSuccess::default().with_data(serde_json::json!({
+        "items": items,
+        "total": total,
+        "page": params.page,
+        "page_size": params.page_size,
+    })))
+}
+
+pub async fn list_personnel_workers(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    uri: Uri,
+) -> ApiResult<Value> {
+    let params = resource_list_params(&uri)?;
+    let total = count_personnel_workers(state.db.pool(), &auth_user, &params).await?;
+    let offset = (params.page - 1) * params.page_size;
+    let mut query = QueryBuilder::<Postgres>::new(
+        "SELECT COALESCE(jsonb_agg(to_jsonb(r) ORDER BY r.created_at DESC), '[]'::jsonb) FROM (SELECT w.*, COALESCE(p.name, '未命名项目') AS project_name FROM construction_workers w JOIN construction_projects p ON p.id = w.project_id AND p.is_deleted = FALSE WHERE w.is_deleted = FALSE",
+    );
+    push_accessible_project_scope(&mut query, &auth_user, "w.project_id");
+    push_personnel_worker_filters(&mut query, &params);
+    query
+        .push(" ORDER BY w.created_at DESC LIMIT ")
+        .push_bind(params.page_size)
+        .push(" OFFSET ")
+        .push_bind(offset)
+        .push(") r");
+
+    let items = query
+        .build_query_scalar::<Value>()
+        .fetch_one(state.db.pool())
+        .await
+        .map_err(db_error)?;
+
+    Ok(ApiSuccess::default().with_data(serde_json::json!({
+        "items": items,
+        "total": total,
+        "page": params.page,
+        "page_size": params.page_size,
+    })))
+}
+
+pub async fn get_personnel_worker(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Path(worker_id): Path<Uuid>,
+) -> ApiResult<Value> {
+    let mut query = QueryBuilder::<Postgres>::new(
+        "SELECT to_jsonb(r) FROM (SELECT w.*, COALESCE(p.name, '未命名项目') AS project_name, u.company_name AS unit_name, t.name AS team_name FROM construction_workers w JOIN construction_projects p ON p.id = w.project_id AND p.is_deleted = FALSE LEFT JOIN construction_units u ON u.id = w.unit_id AND u.is_deleted = FALSE LEFT JOIN construction_teams t ON t.id = w.team_id AND t.is_deleted = FALSE WHERE w.is_deleted = FALSE AND w.id = ",
+    );
+    query.push_bind(worker_id);
+    push_accessible_project_scope(&mut query, &auth_user, "w.project_id");
+    query.push(") r");
+
+    let item = query
+        .build_query_scalar::<Value>()
+        .fetch_optional(state.db.pool())
+        .await
+        .map_err(db_error)?
+        .ok_or_else(not_found)?;
+
+    Ok(ApiSuccess::default().with_data(item))
+}
+
 pub async fn get_worker(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path((project_id, worker_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     get_row(
         state.db.pool(),
         "construction_workers",
@@ -1658,24 +3103,223 @@ pub async fn get_worker(
 
 pub async fn update_worker(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path((project_id, worker_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+    let before_issue_fields =
+        fetch_worker_issue_fields(state.db.pool(), project_id, worker_id).await?;
     let body = normalize_worker_body(body, false)?;
-    update_row(
+    let response = update_row(
         state.db.pool(),
         "construction_workers",
         WORKER_COLUMNS,
         &body,
         &[("project_id", project_id), ("id", worker_id)],
     )
+    .await?;
+
+    let after_issue_fields =
+        fetch_worker_issue_fields(state.db.pool(), project_id, worker_id).await?;
+    if let (Some(before), Some(after)) = (before_issue_fields, after_issue_fields) {
+        trigger_worker_reissue_after_change(&state, project_id, worker_id, &before, &after).await;
+    }
+
+    Ok(response)
+}
+
+#[derive(Debug, Clone)]
+struct WorkerIssueFields {
+    name: Option<String>,
+    id_card: Option<String>,
+    phone: Option<String>,
+    avatar: Option<String>,
+    work_status: Option<i16>,
+}
+
+impl WorkerIssueFields {
+    fn device_payload_changed(&self, other: &Self) -> bool {
+        normalized_issue_text(&self.name) != normalized_issue_text(&other.name)
+            || normalized_issue_text(&self.id_card) != normalized_issue_text(&other.id_card)
+            || normalized_issue_text(&self.phone) != normalized_issue_text(&other.phone)
+            || normalized_issue_text(&self.avatar) != normalized_issue_text(&other.avatar)
+    }
+
+    fn active_on_device(&self) -> bool {
+        self.work_status.unwrap_or(1) != 2
+    }
+
+    fn issue_action_after_change(&self, other: &Self) -> Option<&'static str> {
+        if !other.active_on_device() {
+            return None;
+        }
+
+        if !self.active_on_device() || self.device_payload_changed(other) {
+            return Some("update");
+        }
+
+        None
+    }
+}
+
+async fn fetch_worker_issue_fields(
+    pool: &sqlx::PgPool,
+    project_id: Uuid,
+    worker_id: Uuid,
+) -> Result<Option<WorkerIssueFields>, ApiError> {
+    sqlx::query_as::<
+        _,
+        (
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<i16>,
+        ),
+    >(
+        r#"
+        SELECT name, id_card, phone, avatar, work_status
+        FROM construction_workers
+        WHERE is_deleted = FALSE
+          AND project_id = $1
+          AND id = $2
+        "#,
+    )
+    .bind(project_id)
+    .bind(worker_id)
+    .fetch_optional(pool)
     .await
+    .map_err(db_error)
+    .map(|row| {
+        row.map(
+            |(name, id_card, phone, avatar, work_status)| WorkerIssueFields {
+                name,
+                id_card,
+                phone,
+                avatar,
+                work_status,
+            },
+        )
+    })
+}
+
+async fn trigger_worker_reissue_after_change(
+    state: &AppState,
+    project_id: Uuid,
+    worker_id: Uuid,
+    before: &WorkerIssueFields,
+    after: &WorkerIssueFields,
+) {
+    let Some(action) = before.issue_action_after_change(after) else {
+        return;
+    };
+
+    trigger_worker_device_issue(
+        state,
+        project_id,
+        worker_id,
+        action,
+        if action == "delete" {
+            "人员退场后自动从考勤机删除"
+        } else {
+            "人员资料修改后自动下发"
+        },
+    )
+    .await;
+}
+
+async fn trigger_worker_device_issue(
+    state: &AppState,
+    project_id: Uuid,
+    worker_id: Uuid,
+    action: &str,
+    remark: &str,
+) {
+    let Some(broker_url) = state.config.mqtt_broker_url.clone() else {
+        tracing::warn!(
+            %project_id,
+            %worker_id,
+            %action,
+            "MQTT_BROKER_URL 未配置，跳过考勤机人员同步"
+        );
+        return;
+    };
+
+    let device_ids = match list_project_attendance_device_ids(state.db.pool(), project_id).await {
+        Ok(device_ids) => device_ids,
+        Err(error) => {
+            tracing::warn!(
+                %project_id,
+                %worker_id,
+                %action,
+                error = ?error,
+                "查询项目考勤机失败，跳过人员同步"
+            );
+            return;
+        }
+    };
+
+    for device_id in device_ids {
+        if let Err(error) = issue_single_worker_via_broker(
+            state.db.pool(),
+            &broker_url,
+            project_id,
+            worker_id,
+            device_id,
+            action,
+            None,
+            Some(remark),
+        )
+        .await
+        {
+            tracing::warn!(
+                %project_id,
+                %worker_id,
+                %device_id,
+                %action,
+                error = %error,
+                "考勤机人员同步失败"
+            );
+        }
+    }
+}
+
+async fn list_project_attendance_device_ids(
+    pool: &sqlx::PgPool,
+    project_id: Uuid,
+) -> Result<Vec<Uuid>, ApiError> {
+    sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT id
+        FROM construction_attendance_devices
+        WHERE is_deleted = FALSE
+          AND project_id = $1
+          AND serial_number IS NOT NULL
+          AND BTRIM(serial_number) <> ''
+        ORDER BY created_at ASC
+        "#,
+    )
+    .bind(project_id)
+    .fetch_all(pool)
+    .await
+    .map_err(db_error)
+}
+
+fn normalized_issue_text(value: &Option<String>) -> Option<String> {
+    value
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 pub async fn delete_worker(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path((project_id, worker_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<()> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     delete_row(
         state.db.pool(),
         "construction_workers",
@@ -1686,23 +3330,86 @@ pub async fn delete_worker(
 
 pub async fn list_attendance(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(project_id): Path<Uuid>,
     uri: Uri,
 ) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     let params = resource_list_params(&uri)?;
 
     if params.view == ResourceListView::Calendar {
         return list_attendance_calendar(state.db.pool(), project_id, &params).await;
     }
 
-    list_rows_page(
-        state.db.pool(),
+    list_attendance_rows_page(state.db.pool(), project_id, &params).await
+}
+
+async fn list_attendance_rows_page(
+    pool: &sqlx::PgPool,
+    project_id: Uuid,
+    params: &ResourceListParams,
+) -> ApiResult<Value> {
+    let total = count_rows(
+        pool,
         "construction_attendance_records",
         &[("project_id", project_id)],
         &[],
-        &params,
+        params,
     )
-    .await
+    .await?;
+    let offset = (params.page - 1) * params.page_size;
+    let mut query = QueryBuilder::<Postgres>::new(
+        r#"
+SELECT COALESCE(jsonb_agg(row_json ORDER BY created_at DESC), '[]'::jsonb)
+FROM (
+    SELECT
+        to_jsonb(r) || jsonb_build_object(
+            'overall_photo', COALESCE(r.overall_photo, overall_photo.photo_data),
+            'closeup_photo', COALESCE(r.closeup_photo, closeup_photo.photo_data)
+        ) AS row_json,
+        r.created_at
+    FROM construction_attendance_records r
+    LEFT JOIN LATERAL (
+        SELECT photo_data
+        FROM construction_attendance_record_photos photo
+        WHERE photo.attendance_record_id = r.id
+          AND photo.photo_kind = 'overall'
+        ORDER BY photo.created_at DESC, photo.id DESC
+        LIMIT 1
+    ) overall_photo ON TRUE
+    LEFT JOIN LATERAL (
+        SELECT photo_data
+        FROM construction_attendance_record_photos photo
+        WHERE photo.attendance_record_id = r.id
+          AND photo.photo_kind = 'closeup'
+        ORDER BY photo.created_at DESC, photo.id DESC
+        LIMIT 1
+    ) closeup_photo ON TRUE
+    WHERE r.is_deleted = FALSE
+      AND r.project_id =
+"#,
+    );
+    query.push_bind(project_id);
+    push_resource_filters(&mut query, "construction_attendance_records", params);
+    query
+        .push(" ORDER BY r.created_at DESC LIMIT ")
+        .push_bind(params.page_size)
+        .push(" OFFSET ")
+        .push_bind(offset)
+        .push(") r");
+
+    let items = query
+        .build_query_scalar::<Value>()
+        .fetch_one(pool)
+        .await
+        .map_err(db_error)?;
+
+    Ok(ApiSuccess::default().with_data(serde_json::json!({
+        "items": items,
+        "total": total,
+        "page": params.page,
+        "page_size": params.page_size,
+    })))
 }
 
 async fn list_attendance_calendar(
@@ -1751,20 +3458,23 @@ WITH base AS (
     query.push(
         r#"
 ),
-work_config AS (
-    SELECT algorithm_type, rules
-    FROM construction_work_hour_configs
-    WHERE is_deleted = FALSE
-      AND is_enabled = TRUE
-      AND project_id =
+	work_config AS (
+	    SELECT algorithm_type, rules
+	    FROM (
+	        SELECT algorithm_type, rules, is_enabled
+	        FROM construction_work_hour_configs
+	        WHERE is_deleted = FALSE
+	          AND project_id =
 "#,
     );
     query.push_bind(project_id);
     query.push(
         r#"
-    ORDER BY updated_at DESC, created_at DESC
-    LIMIT 1
-),
+	        ORDER BY updated_at DESC, created_at DESC
+	        LIMIT 1
+	    ) latest_config
+	    WHERE is_enabled = TRUE
+	),
 config_segments AS (
     SELECT
         COALESCE(NULLIF(segment.value->>'fromHours', '')::numeric, NULLIF(segment.value->>'startHour', '')::numeric, 0) AS from_hours,
@@ -1938,21 +3648,63 @@ FROM worker_days
 
 pub async fn get_attendance(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path((project_id, attendance_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<Value> {
-    get_row(
-        state.db.pool(),
-        "construction_attendance_records",
-        &[("project_id", project_id), ("id", attendance_id)],
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+    get_attendance_row(state.db.pool(), project_id, attendance_id).await
+}
+
+async fn get_attendance_row(
+    pool: &sqlx::PgPool,
+    project_id: Uuid,
+    attendance_id: Uuid,
+) -> ApiResult<Value> {
+    let row = sqlx::query_scalar::<_, Value>(
+        r#"
+        SELECT to_jsonb(r) || jsonb_build_object(
+            'overall_photo', COALESCE(r.overall_photo, overall_photo.photo_data),
+            'closeup_photo', COALESCE(r.closeup_photo, closeup_photo.photo_data)
+        )
+        FROM construction_attendance_records r
+        LEFT JOIN LATERAL (
+            SELECT photo_data
+            FROM construction_attendance_record_photos photo
+            WHERE photo.attendance_record_id = r.id
+              AND photo.photo_kind = 'overall'
+            ORDER BY photo.created_at DESC, photo.id DESC
+            LIMIT 1
+        ) overall_photo ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT photo_data
+            FROM construction_attendance_record_photos photo
+            WHERE photo.attendance_record_id = r.id
+              AND photo.photo_kind = 'closeup'
+            ORDER BY photo.created_at DESC, photo.id DESC
+            LIMIT 1
+        ) closeup_photo ON TRUE
+        WHERE r.is_deleted = FALSE
+          AND r.project_id = $1
+          AND r.id = $2
+        "#,
     )
+    .bind(project_id)
+    .bind(attendance_id)
+    .fetch_optional(pool)
     .await
+    .map_err(db_error)?
+    .ok_or_else(not_found)?;
+
+    Ok(ApiSuccess::default().with_data(row))
 }
 
 pub async fn update_attendance(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path((project_id, attendance_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     update_row(
         state.db.pool(),
         "construction_attendance_records",
@@ -1965,9 +3717,11 @@ pub async fn update_attendance(
 
 pub async fn create_attendance(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(project_id): Path<Uuid>,
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     create_row(
         state.db.pool(),
         "construction_attendance_records",
@@ -1981,8 +3735,10 @@ pub async fn create_attendance(
 
 pub async fn delete_attendance(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path((project_id, attendance_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<()> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     delete_row(
         state.db.pool(),
         "construction_attendance_records",
@@ -1993,9 +3749,11 @@ pub async fn delete_attendance(
 
 pub async fn list_attendance_devices(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(project_id): Path<Uuid>,
     uri: Uri,
 ) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     let params = resource_list_params(&uri)?;
     list_rows_page(
         state.db.pool(),
@@ -2009,8 +3767,10 @@ pub async fn list_attendance_devices(
 
 pub async fn get_attendance_device(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path((project_id, device_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     get_row(
         state.db.pool(),
         "construction_attendance_devices",
@@ -2021,9 +3781,11 @@ pub async fn get_attendance_device(
 
 pub async fn create_attendance_device(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(project_id): Path<Uuid>,
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     create_row(
         state.db.pool(),
         "construction_attendance_devices",
@@ -2037,9 +3799,11 @@ pub async fn create_attendance_device(
 
 pub async fn update_attendance_device(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path((project_id, device_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     update_row(
         state.db.pool(),
         "construction_attendance_devices",
@@ -2052,8 +3816,10 @@ pub async fn update_attendance_device(
 
 pub async fn delete_attendance_device(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path((project_id, device_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<()> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     delete_row(
         state.db.pool(),
         "construction_attendance_devices",
@@ -2064,45 +3830,65 @@ pub async fn delete_attendance_device(
 
 pub async fn list_attendance_device_issue_reports(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     uri: Uri,
 ) -> ApiResult<Value> {
     let params = module_list_params(&uri)?;
-    list_module_rows(
+    list_module_rows_scoped(
         state.db.pool(),
         "construction_attendance_device_issue_reports",
         &params,
+        &auth_user,
     )
     .await
 }
 
 pub async fn get_attendance_device_issue_report(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(report_id): Path<Uuid>,
 ) -> ApiResult<Value> {
+    let project_id = attendance_device_issue_report_project_id(state.db.pool(), report_id).await?;
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     let row = fetch_attendance_device_issue_report(state.db.pool(), report_id).await?;
     Ok(ApiSuccess::default().with_data(row))
 }
 
 pub async fn create_attendance_device_issue_report(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
-    let created = create_row(
+    let broker_url = state
+        .config
+        .mqtt_broker_url
+        .clone()
+        .ok_or_else(|| invalid_input("MQTT_BROKER_URL 未配置，无法下发人员"))?;
+    let project_id = required_uuid_field(&body, "project_id")?;
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+    let worker_id = required_uuid_field(&body, "worker_id")?;
+    let attendance_device_id = required_uuid_field(&body, "attendance_device_id")?;
+    let action = issue_action_from_body(&body, "create")?;
+    let issued_at = body
+        .get("issued_at")
+        .map(|value| value_to_optional_timestamp("issued_at", value))
+        .transpose()?
+        .flatten();
+    let remark = body.get("remark").and_then(value_to_optional_text);
+
+    let report_id = issue_single_worker_via_broker(
         state.db.pool(),
-        "construction_attendance_device_issue_reports",
-        ATTENDANCE_DEVICE_ISSUE_REPORT_COLUMNS,
-        &body,
-        &[],
-        StatusCode::CREATED,
+        &broker_url,
+        project_id,
+        worker_id,
+        attendance_device_id,
+        &action,
+        issued_at,
+        remark.as_deref(),
     )
-    .await?;
-    let report_id = created
-        .data
-        .as_ref()
-        .and_then(|data| data.get("id"))
-        .and_then(Value::as_str)
-        .and_then(|value| Uuid::parse_str(value).ok())
-        .ok_or_else(|| invalid_input("Failed to read created issue report id"))?;
+    .await
+    .map_err(invalid_input)?;
+
     let row = fetch_attendance_device_issue_report(state.db.pool(), report_id).await?;
 
     Ok(ApiSuccess::default()
@@ -2110,11 +3896,68 @@ pub async fn create_attendance_device_issue_report(
         .with_data(row))
 }
 
+pub async fn issue_attendance_device_workers(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Path((project_id, device_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<Value>,
+) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+    let broker_url = state
+        .config
+        .mqtt_broker_url
+        .clone()
+        .ok_or_else(|| invalid_input("MQTT_BROKER_URL 未配置，无法下发人员"))?;
+    let action = issue_action_from_body(&body, "update")?;
+    let remark = body
+        .get("remark")
+        .and_then(value_to_optional_text)
+        .unwrap_or_else(|| "整机批量下发".to_string());
+
+    let summary = issue_device_workers_via_broker(
+        state.db.pool(),
+        &broker_url,
+        project_id,
+        device_id,
+        &action,
+        Some(&remark),
+        true,
+    )
+    .await
+    .map_err(invalid_input)?;
+    let data = serde_json::to_value(summary).map_err(|error| invalid_input(error.to_string()))?;
+
+    Ok(ApiSuccess::default().with_data(data))
+}
+
+fn required_uuid_field(body: &Value, column: &str) -> Result<Uuid, ApiError> {
+    body.get(column)
+        .map(|value| value_to_optional_uuid(column, value))
+        .transpose()?
+        .flatten()
+        .ok_or_else(|| invalid_input(format!("{column} 不能为空")))
+}
+
+fn issue_action_from_body(body: &Value, default_action: &str) -> Result<String, ApiError> {
+    let action = body
+        .get("action")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(default_action);
+    match action {
+        "create" | "update" | "delete" => Ok(action.to_string()),
+        _ => Err(invalid_input("下发动作必须是 create、update 或 delete")),
+    }
+}
+
 pub async fn update_attendance_device_issue_report(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(report_id): Path<Uuid>,
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
+    let project_id = attendance_device_issue_report_project_id(state.db.pool(), report_id).await?;
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     let updated = update_row(
         state.db.pool(),
         "construction_attendance_device_issue_reports",
@@ -2137,8 +3980,11 @@ pub async fn update_attendance_device_issue_report(
 
 pub async fn delete_attendance_device_issue_report(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(report_id): Path<Uuid>,
 ) -> ApiResult<()> {
+    let project_id = attendance_device_issue_report_project_id(state.db.pool(), report_id).await?;
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     delete_row(
         state.db.pool(),
         "construction_attendance_device_issue_reports",
@@ -2147,11 +3993,180 @@ pub async fn delete_attendance_device_issue_report(
     .await
 }
 
+pub async fn create_managed_attendance_photo_group(
+    State(state): State<AppState>,
+    Json(body): Json<Value>,
+) -> ApiResult<Value> {
+    ensure_json_string_array_if_present(&body, "in_photos")?;
+    ensure_json_string_array_if_present(&body, "out_photos")?;
+    create_row(
+        state.db.pool(),
+        "construction_managed_attendance_photo_groups",
+        MANAGED_ATTENDANCE_PHOTO_GROUP_COLUMNS,
+        &body,
+        &[],
+        StatusCode::CREATED,
+    )
+    .await
+}
+
+pub async fn list_managed_attendance_photo_groups(
+    State(state): State<AppState>,
+    uri: Uri,
+) -> ApiResult<Value> {
+    let params = managed_attendance_list_params(&uri)?;
+    list_managed_photo_groups(state.db.pool(), &params).await
+}
+
+pub async fn get_managed_attendance_photo_group(
+    State(state): State<AppState>,
+    Path(photo_group_id): Path<Uuid>,
+) -> ApiResult<Value> {
+    get_row(
+        state.db.pool(),
+        "construction_managed_attendance_photo_groups",
+        &[("id", photo_group_id)],
+    )
+    .await
+}
+
+pub async fn update_managed_attendance_photo_group(
+    State(state): State<AppState>,
+    Path(photo_group_id): Path<Uuid>,
+    Json(body): Json<Value>,
+) -> ApiResult<Value> {
+    ensure_json_string_array_if_present(&body, "in_photos")?;
+    ensure_json_string_array_if_present(&body, "out_photos")?;
+    update_row(
+        state.db.pool(),
+        "construction_managed_attendance_photo_groups",
+        MANAGED_ATTENDANCE_PHOTO_GROUP_COLUMNS,
+        &body,
+        &[("id", photo_group_id)],
+    )
+    .await
+}
+
+pub async fn delete_managed_attendance_photo_group(
+    State(state): State<AppState>,
+    Path(photo_group_id): Path<Uuid>,
+) -> ApiResult<()> {
+    soft_delete_row(
+        state.db.pool(),
+        "construction_managed_attendance_photo_groups",
+        &[("id", photo_group_id)],
+    )
+    .await
+}
+
+pub async fn create_managed_attendance_config(
+    State(state): State<AppState>,
+    Json(body): Json<Value>,
+) -> ApiResult<Value> {
+    validate_managed_attendance_config_body(state.db.pool(), &body).await?;
+    let created = create_row(
+        state.db.pool(),
+        "construction_managed_attendance_configs",
+        MANAGED_ATTENDANCE_CONFIG_COLUMNS,
+        &body,
+        &[],
+        StatusCode::CREATED,
+    )
+    .await?;
+    let config_id = created
+        .data
+        .as_ref()
+        .and_then(|data| data.get("id"))
+        .and_then(Value::as_str)
+        .and_then(|value| Uuid::parse_str(value).ok())
+        .ok_or_else(|| invalid_input("Failed to read managed attendance config id"))?;
+
+    let row = fetch_managed_attendance_config(state.db.pool(), config_id).await?;
+    Ok(ApiSuccess::default()
+        .with_code(StatusCode::CREATED)
+        .with_data(row))
+}
+
+pub async fn list_managed_attendance_configs(
+    State(state): State<AppState>,
+    uri: Uri,
+) -> ApiResult<Value> {
+    let params = managed_attendance_list_params(&uri)?;
+    list_managed_configs(state.db.pool(), &params).await
+}
+
+pub async fn get_managed_attendance_config(
+    State(state): State<AppState>,
+    Path(config_id): Path<Uuid>,
+) -> ApiResult<Value> {
+    let row = fetch_managed_attendance_config(state.db.pool(), config_id).await?;
+    Ok(ApiSuccess::default().with_data(row))
+}
+
+pub async fn update_managed_attendance_config(
+    State(state): State<AppState>,
+    Path(config_id): Path<Uuid>,
+    Json(body): Json<Value>,
+) -> ApiResult<Value> {
+    validate_managed_attendance_config_patch(state.db.pool(), config_id, &body).await?;
+    update_row(
+        state.db.pool(),
+        "construction_managed_attendance_configs",
+        MANAGED_ATTENDANCE_CONFIG_COLUMNS,
+        &body,
+        &[("id", config_id)],
+    )
+    .await?;
+    let row = fetch_managed_attendance_config(state.db.pool(), config_id).await?;
+    Ok(ApiSuccess::default().with_data(row))
+}
+
+pub async fn delete_managed_attendance_config(
+    State(state): State<AppState>,
+    Path(config_id): Path<Uuid>,
+) -> ApiResult<()> {
+    soft_delete_row(
+        state.db.pool(),
+        "construction_managed_attendance_configs",
+        &[("id", config_id)],
+    )
+    .await
+}
+
+pub async fn generate_managed_attendance_records(
+    State(state): State<AppState>,
+    Path(config_id): Path<Uuid>,
+    Json(body): Json<Value>,
+) -> ApiResult<Value> {
+    let month = body
+        .get("month")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(parse_payroll_month)
+        .transpose()?
+        .unwrap_or_else(|| {
+            let today = chrono::Local::now().date_naive();
+            chrono::NaiveDate::from_ymd_opt(today.year(), today.month(), 1).unwrap_or(today)
+        });
+    let result = generate_managed_records_for_month(state.db.pool(), config_id, month).await?;
+    Ok(ApiSuccess::default().with_data(result))
+}
+
+pub async fn list_managed_attendance_records(
+    State(state): State<AppState>,
+    uri: Uri,
+) -> ApiResult<Value> {
+    let params = managed_attendance_list_params(&uri)?;
+    list_managed_records(state.db.pool(), &params).await
+}
+
 pub async fn list_wage_batches(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(project_id): Path<Uuid>,
     uri: Uri,
 ) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     let params = wage_list_params(&uri)?;
     let items = fetch_wage_batch_items(state.db.pool(), project_id, &params).await?;
     let total = fetch_wage_batch_total(state.db.pool(), project_id, &params).await?;
@@ -2226,6 +4241,7 @@ pub async fn create_wage_batch(
     Path(project_id): Path<Uuid>,
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     let payload = wage_batch_payload(&body)?;
     let mut tx = state.db.pool().begin().await.map_err(db_error)?;
     let row = sqlx::query_scalar::<_, Value>(
@@ -2279,6 +4295,7 @@ pub async fn update_wage_batch(
     Path((project_id, batch_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     let payload = wage_batch_patch_payload(&body)?;
     let mut employee_count = payload.employee_count;
     let mut payable_amount_cents = payload.payable_amount_cents;
@@ -2357,8 +4374,10 @@ pub async fn update_wage_batch(
 
 pub async fn delete_wage_batch(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path((project_id, batch_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<()> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     let mut tx = state.db.pool().begin().await.map_err(db_error)?;
 
     sqlx::query(
@@ -2401,6 +4420,7 @@ pub async fn import_wage_batch(
     Path(project_id): Path<Uuid>,
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     let payload = wage_import_payload(&body)?;
     let employee_count =
         i32::try_from(payload.rows.len()).map_err(|_| invalid_input("Too many wage rows"))?;
@@ -2468,9 +4488,11 @@ pub async fn import_wage_batch(
 
 pub async fn export_wage_batches(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(project_id): Path<Uuid>,
     uri: Uri,
 ) -> Result<Response, ApiError> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     let params = wage_list_params(&uri)?;
     let rows = fetch_wage_export_rows(state.db.pool(), project_id, &params).await?;
     let csv = build_wage_export_csv(rows);
@@ -2491,6 +4513,96 @@ pub async fn export_wage_batches(
         csv,
     )
         .into_response())
+}
+
+pub async fn export_project_workers_advanced(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Path(project_id): Path<Uuid>,
+    Json(body): Json<Value>,
+) -> Result<Response, ApiError> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+    let params = project_export_params(
+        &body,
+        WORKER_ADVANCED_EXPORT_FORMATS,
+        &["worker_basic", "worker_bank", "worker_photos"],
+    )?;
+    let workers =
+        fetch_project_export_workers(state.db.pool(), &auth_user, project_id, &params).await?;
+    if workers.is_empty() {
+        return Err(invalid_input("暂无可导出的工人数据"));
+    }
+
+    Ok(csv_download_response(
+        format!(
+            "project-workers-{}.csv",
+            chrono::Utc::now().format("%Y%m%d%H%M%S")
+        ),
+        build_worker_full_csv(&workers),
+    ))
+}
+
+pub async fn export_project_attendance_advanced(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Path(project_id): Path<Uuid>,
+    Json(body): Json<Value>,
+) -> Result<Response, ApiError> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+    let params = project_export_params(
+        &body,
+        ATTENDANCE_ADVANCED_EXPORT_FORMATS,
+        &["attendance_time"],
+    )?;
+    let workers =
+        fetch_project_export_workers(state.db.pool(), &auth_user, project_id, &params).await?;
+    if workers.is_empty() {
+        return Err(invalid_input("暂无可导出的工人数据"));
+    }
+
+    let worker_ids = workers
+        .iter()
+        .map(|worker| worker.id.clone())
+        .collect::<Vec<_>>();
+    let records = fetch_project_export_attendance_records(
+        state.db.pool(),
+        &auth_user,
+        project_id,
+        &worker_ids,
+        &params,
+    )
+    .await?;
+    let mut visible_workers =
+        filter_attendance_workers(&workers, &records, &params.attendance_filter);
+    sort_attendance_workers(&mut visible_workers, &records, &params.sort_by);
+    let visible_records = filter_records_by_workers(&records, &visible_workers);
+
+    let format = params
+        .formats
+        .first()
+        .map(String::as_str)
+        .unwrap_or("attendance_time");
+    let csv = match format {
+        "attendance_time" | "attendance_status" | "work_hours" | "work_record" => {
+            build_attendance_matrix_csv(
+                format,
+                &visible_workers,
+                &visible_records,
+                params.attendance_month,
+            )?
+        }
+        "attendance_records" => build_attendance_records_csv(&visible_records, &visible_workers),
+        _ => return Err(invalid_column_value("formats", "attendance export format")),
+    };
+
+    Ok(csv_download_response(
+        format!(
+            "project-attendance-{}-{}.csv",
+            format,
+            chrono::Utc::now().format("%Y%m%d%H%M%S")
+        ),
+        csv,
+    ))
 }
 
 pub async fn create_contract_template(
@@ -2620,8 +4732,10 @@ pub async fn upsert_project_contract_template_config(
 
 pub async fn download_worker_contract(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path((project_id, worker_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Response, ApiError> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     let data = sqlx::query_scalar::<_, Value>(
         r#"
         SELECT jsonb_build_object(
@@ -2847,7 +4961,8 @@ pub async fn create_platform_log(
 pub async fn list_platform_logs(State(state): State<AppState>, uri: Uri) -> ApiResult<Value> {
     let params = module_list_params(&uri)?;
     let mut data =
-        list_module_rows_value(state.db.pool(), "construction_platform_logs", &params).await?;
+        list_module_rows_value(state.db.pool(), "construction_platform_logs", &params, None)
+            .await?;
     let summary = platform_log_summary(state.db.pool(), &params).await?;
     if let Some(object) = data.as_object_mut() {
         object.insert("summary".to_owned(), summary);
@@ -3053,7 +5168,17 @@ async fn list_module_rows(
     table: &'static str,
     params: &ModuleListParams,
 ) -> ApiResult<Value> {
-    let data = list_module_rows_value(pool, table, params).await?;
+    let data = list_module_rows_value(pool, table, params, None).await?;
+    Ok(ApiSuccess::default().with_data(data))
+}
+
+async fn list_module_rows_scoped(
+    pool: &sqlx::PgPool,
+    table: &'static str,
+    params: &ModuleListParams,
+    auth_user: &AuthUser,
+) -> ApiResult<Value> {
+    let data = list_module_rows_value(pool, table, params, Some(auth_user)).await?;
     Ok(ApiSuccess::default().with_data(data))
 }
 
@@ -3061,8 +5186,9 @@ async fn list_module_rows_value(
     pool: &sqlx::PgPool,
     table: &'static str,
     params: &ModuleListParams,
+    auth_user: Option<&AuthUser>,
 ) -> Result<Value, ApiError> {
-    let total = count_module_rows(pool, table, params).await?;
+    let total = count_module_rows(pool, table, params, auth_user).await?;
     let offset = (params.page - 1) * params.page_size;
     let mut query = QueryBuilder::<Postgres>::new(
         "SELECT COALESCE(jsonb_agg(to_jsonb(r) ORDER BY r.created_at DESC), '[]'::jsonb) FROM (SELECT ",
@@ -3071,6 +5197,9 @@ async fn list_module_rows_value(
     query.push(" FROM ").push(table).push(" r");
     push_module_joins(&mut query, table);
     query.push(" WHERE r.is_deleted = FALSE");
+    if let Some(auth_user) = auth_user {
+        push_accessible_project_scope(&mut query, auth_user, "r.project_id");
+    }
     push_module_filters(&mut query, table, params);
     query
         .push(" ORDER BY r.created_at DESC LIMIT ")
@@ -3132,11 +5261,15 @@ async fn count_module_rows(
     pool: &sqlx::PgPool,
     table: &'static str,
     params: &ModuleListParams,
+    auth_user: Option<&AuthUser>,
 ) -> Result<i64, ApiError> {
     let mut query = QueryBuilder::<Postgres>::new("SELECT COUNT(*)::bigint FROM ");
     query.push(table).push(" r");
     push_module_joins(&mut query, table);
     query.push(" WHERE r.is_deleted = FALSE");
+    if let Some(auth_user) = auth_user {
+        push_accessible_project_scope(&mut query, auth_user, "r.project_id");
+    }
     push_module_filters(&mut query, table, params);
 
     query
@@ -3206,6 +5339,16 @@ fn push_module_filters(
     if let Some(project_id) = params.project_id {
         query.push(" AND r.project_id = ").push_bind(project_id);
     }
+    if table == "construction_attendance_device_issue_reports" {
+        if let Some(worker_id) = params.worker_id {
+            query.push(" AND r.worker_id = ").push_bind(worker_id);
+        }
+        if let Some(attendance_device_id) = params.attendance_device_id {
+            query
+                .push(" AND r.attendance_device_id = ")
+                .push_bind(attendance_device_id);
+        }
+    }
     if let Some(status) = &params.status {
         query.push(" AND r.status = ").push_bind(status.clone());
     }
@@ -3216,6 +5359,10 @@ fn push_module_filters(
     }
     if let Some(action) = &params.action {
         query.push(" AND r.action = ").push_bind(action.clone());
+    } else if table == "construction_attendance_device_issue_reports"
+        && !params.include_delete_actions
+    {
+        query.push(" AND r.action <> 'delete'");
     }
     if params.keyword.is_empty() {
         return;
@@ -3372,6 +5519,27 @@ fn ensure_json_object_if_present(body: &Value, column: &str) -> Result<(), ApiEr
             .map(|_| ())
             .ok_or_else(|| invalid_column_value(column, "JSON object")),
         _ => Err(invalid_column_value(column, "JSON object")),
+    }
+}
+
+fn ensure_json_string_array_if_present(body: &Value, column: &str) -> Result<(), ApiError> {
+    let Some(value) = body.get(column) else {
+        return Ok(());
+    };
+    let parsed = match value {
+        Value::Null => return Ok(()),
+        Value::Array(items) => items.clone(),
+        Value::String(value) if value.trim().is_empty() => return Ok(()),
+        Value::String(value) => serde_json::from_str::<Value>(value)
+            .ok()
+            .and_then(|parsed| parsed.as_array().cloned())
+            .ok_or_else(|| invalid_column_value(column, "JSON string array"))?,
+        _ => return Err(invalid_column_value(column, "JSON string array")),
+    };
+    if parsed.iter().all(Value::is_string) {
+        Ok(())
+    } else {
+        Err(invalid_column_value(column, "JSON string array"))
     }
 }
 
@@ -4264,6 +6432,881 @@ async fn platform_log_summary(
         .map_err(db_error)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ManagedAttendanceListParams {
+    page: i64,
+    page_size: i64,
+    keyword: String,
+    project_id: Option<Uuid>,
+    status: Option<String>,
+    month: Option<chrono::NaiveDate>,
+}
+
+fn managed_attendance_list_params(uri: &Uri) -> Result<ManagedAttendanceListParams, ApiError> {
+    let mut page = 1_i64;
+    let mut page_size = 10_i64;
+    let mut keyword = String::new();
+    let mut project_id = None;
+    let mut status = None;
+    let mut month = None;
+
+    if let Some(query) = uri.query() {
+        for pair in query.split('&') {
+            let mut parts = pair.splitn(2, '=');
+            let key = parts.next().unwrap_or_default();
+            let value = decode_query_value(parts.next().unwrap_or_default());
+            let trimmed = value.trim();
+
+            match key {
+                "page" => page = trimmed.parse::<i64>().unwrap_or(1).max(1),
+                "page_size" => page_size = trimmed.parse::<i64>().unwrap_or(10).clamp(1, 100),
+                "keyword" | "q" => keyword = trimmed.to_owned(),
+                "project_id" if !trimmed.is_empty() => {
+                    project_id = Some(
+                        Uuid::parse_str(trimmed)
+                            .map_err(|_| invalid_column_value("project_id", "uuid"))?,
+                    );
+                }
+                "status" if !trimmed.is_empty() && trimmed != "all" => {
+                    status = Some(trimmed.to_owned());
+                }
+                "month" if !trimmed.is_empty() => {
+                    month = Some(parse_payroll_month(trimmed)?);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    Ok(ManagedAttendanceListParams {
+        page,
+        page_size,
+        keyword: keyword.trim().to_owned(),
+        project_id,
+        status,
+        month,
+    })
+}
+
+async fn list_managed_photo_groups(
+    pool: &sqlx::PgPool,
+    params: &ManagedAttendanceListParams,
+) -> ApiResult<Value> {
+    let total = count_managed_photo_groups(pool, params).await?;
+    let offset = (params.page - 1) * params.page_size;
+    let mut query = QueryBuilder::<Postgres>::new(
+        r#"
+        SELECT COALESCE(jsonb_agg(to_jsonb(r) ORDER BY r.created_at DESC), '[]'::jsonb)
+        FROM (
+            SELECT g.*, p.name AS project_name
+            FROM construction_managed_attendance_photo_groups g
+            LEFT JOIN construction_projects p ON p.id = g.project_id AND p.is_deleted = FALSE
+            WHERE g.is_deleted = FALSE
+        "#,
+    );
+    push_managed_photo_group_filters(&mut query, params);
+    query
+        .push(" ORDER BY g.created_at DESC LIMIT ")
+        .push_bind(params.page_size)
+        .push(" OFFSET ")
+        .push_bind(offset)
+        .push(") r");
+    let items = query
+        .build_query_scalar::<Value>()
+        .fetch_one(pool)
+        .await
+        .map_err(db_error)?;
+
+    Ok(ApiSuccess::default().with_data(serde_json::json!({
+        "items": items,
+        "total": total,
+        "page": params.page,
+        "page_size": params.page_size,
+    })))
+}
+
+async fn count_managed_photo_groups(
+    pool: &sqlx::PgPool,
+    params: &ManagedAttendanceListParams,
+) -> Result<i64, ApiError> {
+    let mut query = QueryBuilder::<Postgres>::new(
+        r#"
+        SELECT COUNT(*)::bigint
+        FROM construction_managed_attendance_photo_groups g
+        LEFT JOIN construction_projects p ON p.id = g.project_id AND p.is_deleted = FALSE
+        WHERE g.is_deleted = FALSE
+        "#,
+    );
+    push_managed_photo_group_filters(&mut query, params);
+    query
+        .build_query_scalar::<i64>()
+        .fetch_one(pool)
+        .await
+        .map_err(db_error)
+}
+
+fn push_managed_photo_group_filters(
+    query: &mut QueryBuilder<'_, Postgres>,
+    params: &ManagedAttendanceListParams,
+) {
+    if let Some(project_id) = params.project_id {
+        query.push(" AND g.project_id = ").push_bind(project_id);
+    }
+    if let Some(status) = &params.status {
+        query
+            .push(" AND g.generation_status = ")
+            .push_bind(status.clone());
+    }
+    if !params.keyword.is_empty() {
+        let pattern = format!("%{}%", params.keyword);
+        query
+            .push(" AND (g.name ILIKE ")
+            .push_bind(pattern.clone())
+            .push(" OR g.remark ILIKE ")
+            .push_bind(pattern.clone())
+            .push(" OR p.name ILIKE ")
+            .push_bind(pattern)
+            .push(")");
+    }
+}
+
+async fn list_managed_configs(
+    pool: &sqlx::PgPool,
+    params: &ManagedAttendanceListParams,
+) -> ApiResult<Value> {
+    let total = count_managed_configs(pool, params).await?;
+    let offset = (params.page - 1) * params.page_size;
+    let mut query = QueryBuilder::<Postgres>::new(
+        r#"
+        SELECT COALESCE(jsonb_agg(to_jsonb(r) ORDER BY r.created_at DESC), '[]'::jsonb)
+        FROM (
+            SELECT
+                c.*,
+                p.name AS project_name,
+                w.name AS worker_name,
+                w.id_card AS worker_id_card,
+                g.name AS photo_group_name
+            FROM construction_managed_attendance_configs c
+            JOIN construction_projects p ON p.id = c.project_id AND p.is_deleted = FALSE
+            JOIN construction_workers w ON w.id = c.worker_id AND w.is_deleted = FALSE
+            LEFT JOIN construction_managed_attendance_photo_groups g
+                ON g.id = c.photo_group_id AND g.is_deleted = FALSE
+            WHERE c.is_deleted = FALSE
+        "#,
+    );
+    push_managed_config_filters(&mut query, params);
+    query
+        .push(" ORDER BY c.created_at DESC LIMIT ")
+        .push_bind(params.page_size)
+        .push(" OFFSET ")
+        .push_bind(offset)
+        .push(") r");
+    let items = query
+        .build_query_scalar::<Value>()
+        .fetch_one(pool)
+        .await
+        .map_err(db_error)?;
+
+    Ok(ApiSuccess::default().with_data(serde_json::json!({
+        "items": items,
+        "total": total,
+        "page": params.page,
+        "page_size": params.page_size,
+    })))
+}
+
+async fn count_managed_configs(
+    pool: &sqlx::PgPool,
+    params: &ManagedAttendanceListParams,
+) -> Result<i64, ApiError> {
+    let mut query = QueryBuilder::<Postgres>::new(
+        r#"
+        SELECT COUNT(*)::bigint
+        FROM construction_managed_attendance_configs c
+        JOIN construction_projects p ON p.id = c.project_id AND p.is_deleted = FALSE
+        JOIN construction_workers w ON w.id = c.worker_id AND w.is_deleted = FALSE
+        LEFT JOIN construction_managed_attendance_photo_groups g
+            ON g.id = c.photo_group_id AND g.is_deleted = FALSE
+        WHERE c.is_deleted = FALSE
+        "#,
+    );
+    push_managed_config_filters(&mut query, params);
+    query
+        .build_query_scalar::<i64>()
+        .fetch_one(pool)
+        .await
+        .map_err(db_error)
+}
+
+fn push_managed_config_filters(
+    query: &mut QueryBuilder<'_, Postgres>,
+    params: &ManagedAttendanceListParams,
+) {
+    if let Some(project_id) = params.project_id {
+        query.push(" AND c.project_id = ").push_bind(project_id);
+    }
+    if let Some(status) = &params.status {
+        if status == "enabled" {
+            query.push(" AND c.is_enabled = TRUE");
+        } else if status == "disabled" {
+            query.push(" AND c.is_enabled = FALSE");
+        }
+    }
+    if !params.keyword.is_empty() {
+        let pattern = format!("%{}%", params.keyword);
+        query
+            .push(" AND (w.name ILIKE ")
+            .push_bind(pattern.clone())
+            .push(" OR w.id_card ILIKE ")
+            .push_bind(pattern.clone())
+            .push(" OR c.remark ILIKE ")
+            .push_bind(pattern.clone())
+            .push(" OR g.name ILIKE ")
+            .push_bind(pattern.clone())
+            .push(" OR p.name ILIKE ")
+            .push_bind(pattern)
+            .push(")");
+    }
+}
+
+async fn fetch_managed_attendance_config(
+    pool: &sqlx::PgPool,
+    config_id: Uuid,
+) -> Result<Value, ApiError> {
+    sqlx::query_scalar::<_, Value>(
+        r#"
+        SELECT to_jsonb(r)
+        FROM (
+            SELECT
+                c.*,
+                p.name AS project_name,
+                w.name AS worker_name,
+                w.id_card AS worker_id_card,
+                g.name AS photo_group_name
+            FROM construction_managed_attendance_configs c
+            JOIN construction_projects p ON p.id = c.project_id AND p.is_deleted = FALSE
+            JOIN construction_workers w ON w.id = c.worker_id AND w.is_deleted = FALSE
+            LEFT JOIN construction_managed_attendance_photo_groups g
+                ON g.id = c.photo_group_id AND g.is_deleted = FALSE
+            WHERE c.id = $1 AND c.is_deleted = FALSE
+        ) r
+        "#,
+    )
+    .bind(config_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(db_error)?
+    .ok_or_else(not_found)
+}
+
+async fn validate_managed_attendance_config_body(
+    pool: &sqlx::PgPool,
+    body: &Value,
+) -> Result<(), ApiError> {
+    let object = body
+        .as_object()
+        .ok_or_else(|| invalid_input("Request body must be a JSON object"))?;
+    let project_id = required_uuid_from_object(object, "project_id")?;
+    let worker_id = required_uuid_from_object(object, "worker_id")?;
+    let photo_group_id = object
+        .get("photo_group_id")
+        .map(|value| value_to_optional_uuid("photo_group_id", value))
+        .transpose()?
+        .flatten();
+
+    validate_managed_config_values(object)?;
+    ensure_worker_in_project(pool, project_id, worker_id).await?;
+    if let Some(photo_group_id) = photo_group_id {
+        ensure_photo_group_in_project(pool, project_id, photo_group_id).await?;
+    }
+
+    Ok(())
+}
+
+async fn validate_managed_attendance_config_patch(
+    pool: &sqlx::PgPool,
+    config_id: Uuid,
+    body: &Value,
+) -> Result<(), ApiError> {
+    let object = body
+        .as_object()
+        .ok_or_else(|| invalid_input("Request body must be a JSON object"))?;
+    if object.is_empty() {
+        return Err(invalid_input("No writable fields provided"));
+    }
+    validate_managed_config_values(object)?;
+
+    let existing = sqlx::query(
+        r#"
+        SELECT project_id, worker_id, photo_group_id
+        FROM construction_managed_attendance_configs
+        WHERE id = $1 AND is_deleted = FALSE
+        "#,
+    )
+    .bind(config_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(db_error)?
+    .ok_or_else(not_found)?;
+    let project_id = object
+        .get("project_id")
+        .map(|value| value_to_optional_uuid("project_id", value))
+        .transpose()?
+        .flatten()
+        .unwrap_or_else(|| existing.get("project_id"));
+    let worker_id = object
+        .get("worker_id")
+        .map(|value| value_to_optional_uuid("worker_id", value))
+        .transpose()?
+        .flatten()
+        .unwrap_or_else(|| existing.get("worker_id"));
+    let photo_group_id = if object.contains_key("photo_group_id") {
+        object
+            .get("photo_group_id")
+            .map(|value| value_to_optional_uuid("photo_group_id", value))
+            .transpose()?
+            .flatten()
+    } else {
+        existing.try_get("photo_group_id").ok()
+    };
+
+    ensure_worker_in_project(pool, project_id, worker_id).await?;
+    if let Some(photo_group_id) = photo_group_id {
+        ensure_photo_group_in_project(pool, project_id, photo_group_id).await?;
+    }
+
+    Ok(())
+}
+
+fn validate_managed_config_values(object: &serde_json::Map<String, Value>) -> Result<(), ApiError> {
+    if let Some(value) = object.get("monthly_attendance_days") {
+        let days = value_to_optional_i64("monthly_attendance_days", value)?
+            .ok_or_else(|| invalid_column_value("monthly_attendance_days", "1-31"))?;
+        if !(1..=31).contains(&days) {
+            return Err(invalid_column_value("monthly_attendance_days", "1-31"));
+        }
+    }
+    if let Some(shift) = object.get("shift").and_then(Value::as_str) {
+        if !matches!(shift, "day" | "night") {
+            return Err(invalid_column_value("shift", "day or night"));
+        }
+    }
+    if let Some(value) = object.get("check_in_time").and_then(Value::as_str) {
+        parse_managed_time("check_in_time", value)?;
+    }
+    if let Some(value) = object.get("check_out_time").and_then(Value::as_str) {
+        parse_managed_time("check_out_time", value)?;
+    }
+
+    Ok(())
+}
+
+async fn ensure_worker_in_project(
+    pool: &sqlx::PgPool,
+    project_id: Uuid,
+    worker_id: Uuid,
+) -> Result<(), ApiError> {
+    let exists = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS(
+            SELECT 1 FROM construction_workers
+            WHERE id = $1 AND project_id = $2 AND is_deleted = FALSE
+        )
+        "#,
+    )
+    .bind(worker_id)
+    .bind(project_id)
+    .fetch_one(pool)
+    .await
+    .map_err(db_error)?;
+    if exists {
+        Ok(())
+    } else {
+        Err(invalid_input("托管工人不属于所选项目"))
+    }
+}
+
+async fn ensure_photo_group_in_project(
+    pool: &sqlx::PgPool,
+    project_id: Uuid,
+    photo_group_id: Uuid,
+) -> Result<(), ApiError> {
+    let exists = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS(
+            SELECT 1 FROM construction_managed_attendance_photo_groups
+            WHERE id = $1 AND project_id = $2 AND is_deleted = FALSE
+        )
+        "#,
+    )
+    .bind(photo_group_id)
+    .bind(project_id)
+    .fetch_one(pool)
+    .await
+    .map_err(db_error)?;
+    if exists {
+        Ok(())
+    } else {
+        Err(invalid_input("托管照片组不属于所选项目"))
+    }
+}
+
+async fn generate_managed_records_for_month(
+    pool: &sqlx::PgPool,
+    config_id: Uuid,
+    month: chrono::NaiveDate,
+) -> Result<Value, ApiError> {
+    let row = sqlx::query(
+        r#"
+        SELECT
+            c.id,
+            c.project_id,
+            c.worker_id,
+            c.photo_group_id,
+            c.monthly_attendance_days,
+            c.shift,
+            c.check_in_time,
+            c.check_out_time,
+            c.is_enabled,
+            w.name AS worker_name,
+            w.id_card AS worker_id_card,
+            g.in_photos,
+            g.out_photos
+        FROM construction_managed_attendance_configs c
+        JOIN construction_workers w ON w.id = c.worker_id AND w.is_deleted = FALSE
+        LEFT JOIN construction_managed_attendance_photo_groups g
+            ON g.id = c.photo_group_id AND g.is_deleted = FALSE
+        WHERE c.id = $1 AND c.is_deleted = FALSE
+        "#,
+    )
+    .bind(config_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(db_error)?
+    .ok_or_else(not_found)?;
+
+    let is_enabled: bool = row.get("is_enabled");
+    if !is_enabled {
+        return Err(invalid_input("托管配置已停用"));
+    }
+
+    let project_id: Uuid = row.get("project_id");
+    let worker_id: Uuid = row.get("worker_id");
+    let photo_group_id: Option<Uuid> = row.try_get("photo_group_id").ok();
+    let monthly_attendance_days: i16 = row.get("monthly_attendance_days");
+    let shift: String = row.get("shift");
+    let check_in_time: String = row.get("check_in_time");
+    let check_out_time: String = row.get("check_out_time");
+    let worker_name: Option<String> = row.try_get("worker_name").ok();
+    let worker_id_card: Option<String> = row.try_get("worker_id_card").ok();
+    let in_photos: Option<Value> = row.try_get("in_photos").ok();
+    let out_photos: Option<Value> = row.try_get("out_photos").ok();
+    let in_photo_url = first_photo_url(in_photos.as_ref());
+    let out_photo_url = first_photo_url(out_photos.as_ref());
+    let worker_id_card_mask = worker_id_card.as_deref().map(mask_id_card);
+    let in_time = parse_managed_time("check_in_time", &check_in_time)?;
+    let out_time = parse_managed_time("check_out_time", &check_out_time)?;
+    let attendance_days = selected_month_days(month, monthly_attendance_days)?;
+
+    let mut generated_count = 0_i64;
+    let mut tx = pool.begin().await.map_err(db_error)?;
+    for attendance_date in &attendance_days {
+        for direction in [0_i16, 1_i16] {
+            let planned_at =
+                managed_planned_at(*attendance_date, in_time, out_time, &shift, direction)?;
+            let photo_url = if direction == 0 {
+                in_photo_url.clone()
+            } else {
+                out_photo_url.clone()
+            };
+
+            sqlx::query(
+                r#"
+                INSERT INTO construction_managed_attendance_records (
+                    config_id,
+                    project_id,
+                    worker_id,
+                    photo_group_id,
+                    worker_name,
+                    worker_id_card_mask,
+                    attendance_date,
+                    direction,
+                    shift,
+                    planned_at,
+                    photo_url,
+                    status,
+                    error_message,
+                    generated_at,
+                    is_deleted,
+                    deleted_at
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'generated', NULL, NOW(), FALSE, NULL)
+                ON CONFLICT (config_id, attendance_date, direction)
+                    WHERE is_deleted = FALSE
+                DO UPDATE SET
+                    project_id = EXCLUDED.project_id,
+                    worker_id = EXCLUDED.worker_id,
+                    photo_group_id = EXCLUDED.photo_group_id,
+                    worker_name = EXCLUDED.worker_name,
+                    worker_id_card_mask = EXCLUDED.worker_id_card_mask,
+                    shift = EXCLUDED.shift,
+                    planned_at = EXCLUDED.planned_at,
+                    photo_url = EXCLUDED.photo_url,
+                    status = 'generated',
+                    error_message = NULL,
+                    generated_at = NOW(),
+                    updated_at = NOW()
+                "#,
+            )
+            .bind(config_id)
+            .bind(project_id)
+            .bind(worker_id)
+            .bind(photo_group_id)
+            .bind(worker_name.clone())
+            .bind(worker_id_card_mask.clone())
+            .bind(*attendance_date)
+            .bind(direction)
+            .bind(shift.clone())
+            .bind(planned_at)
+            .bind(photo_url)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_error)?;
+            generated_count += 1;
+        }
+    }
+    tx.commit().await.map_err(db_error)?;
+
+    Ok(serde_json::json!({
+        "config_id": config_id,
+        "month": month.format("%Y-%m").to_string(),
+        "attendance_days": attendance_days.len(),
+        "generated_count": generated_count,
+    }))
+}
+
+async fn list_managed_records(
+    pool: &sqlx::PgPool,
+    params: &ManagedAttendanceListParams,
+) -> ApiResult<Value> {
+    let total = count_managed_records(pool, params).await?;
+    let offset = (params.page - 1) * params.page_size;
+    let mut query = QueryBuilder::<Postgres>::new(
+        r#"
+        SELECT COALESCE(jsonb_agg(to_jsonb(r) ORDER BY r.planned_at ASC, r.direction ASC), '[]'::jsonb)
+        FROM (
+            SELECT
+                r.*,
+                p.name AS project_name,
+                g.name AS photo_group_name
+            FROM construction_managed_attendance_records r
+            JOIN construction_projects p ON p.id = r.project_id AND p.is_deleted = FALSE
+            LEFT JOIN construction_managed_attendance_photo_groups g
+                ON g.id = r.photo_group_id AND g.is_deleted = FALSE
+            WHERE r.is_deleted = FALSE
+        "#,
+    );
+    push_managed_record_filters(&mut query, params);
+    query
+        .push(" ORDER BY r.planned_at ASC, r.direction ASC LIMIT ")
+        .push_bind(params.page_size)
+        .push(" OFFSET ")
+        .push_bind(offset)
+        .push(") r");
+    let items = query
+        .build_query_scalar::<Value>()
+        .fetch_one(pool)
+        .await
+        .map_err(db_error)?;
+
+    Ok(ApiSuccess::default().with_data(serde_json::json!({
+        "items": items,
+        "total": total,
+        "page": params.page,
+        "page_size": params.page_size,
+    })))
+}
+
+async fn count_managed_records(
+    pool: &sqlx::PgPool,
+    params: &ManagedAttendanceListParams,
+) -> Result<i64, ApiError> {
+    let mut query = QueryBuilder::<Postgres>::new(
+        r#"
+        SELECT COUNT(*)::bigint
+        FROM construction_managed_attendance_records r
+        JOIN construction_projects p ON p.id = r.project_id AND p.is_deleted = FALSE
+        LEFT JOIN construction_managed_attendance_photo_groups g
+            ON g.id = r.photo_group_id AND g.is_deleted = FALSE
+        WHERE r.is_deleted = FALSE
+        "#,
+    );
+    push_managed_record_filters(&mut query, params);
+    query
+        .build_query_scalar::<i64>()
+        .fetch_one(pool)
+        .await
+        .map_err(db_error)
+}
+
+fn push_managed_record_filters(
+    query: &mut QueryBuilder<'_, Postgres>,
+    params: &ManagedAttendanceListParams,
+) {
+    if let Some(project_id) = params.project_id {
+        query.push(" AND r.project_id = ").push_bind(project_id);
+    }
+    if let Some(status) = &params.status {
+        query.push(" AND r.status = ").push_bind(status.clone());
+    }
+    if let Some(month) = params.month {
+        let next_month = next_month_start(month).unwrap_or(month);
+        query
+            .push(" AND r.attendance_date >= ")
+            .push_bind(month)
+            .push(" AND r.attendance_date < ")
+            .push_bind(next_month);
+    }
+    if !params.keyword.is_empty() {
+        let pattern = format!("%{}%", params.keyword);
+        query
+            .push(" AND (r.worker_name ILIKE ")
+            .push_bind(pattern.clone())
+            .push(" OR r.worker_id_card_mask ILIKE ")
+            .push_bind(pattern.clone())
+            .push(" OR g.name ILIKE ")
+            .push_bind(pattern.clone())
+            .push(" OR p.name ILIKE ")
+            .push_bind(pattern)
+            .push(")");
+    }
+}
+
+fn selected_month_days(
+    month: chrono::NaiveDate,
+    monthly_attendance_days: i16,
+) -> Result<Vec<chrono::NaiveDate>, ApiError> {
+    let next_month =
+        next_month_start(month).ok_or_else(|| invalid_column_value("month", "YYYY-MM"))?;
+    let days_in_month = (next_month - chrono::Duration::days(1)).day();
+    let target_days = u32::try_from(monthly_attendance_days)
+        .map_err(|_| invalid_column_value("monthly_attendance_days", "1-31"))?
+        .min(days_in_month);
+    let mut days = Vec::with_capacity(target_days as usize);
+    for day in 1..=target_days {
+        let Some(date) = chrono::NaiveDate::from_ymd_opt(month.year(), month.month(), day) else {
+            return Err(invalid_column_value("month", "YYYY-MM"));
+        };
+        days.push(date);
+    }
+    Ok(days)
+}
+
+fn next_month_start(month: chrono::NaiveDate) -> Option<chrono::NaiveDate> {
+    if month.month() == 12 {
+        chrono::NaiveDate::from_ymd_opt(month.year() + 1, 1, 1)
+    } else {
+        chrono::NaiveDate::from_ymd_opt(month.year(), month.month() + 1, 1)
+    }
+}
+
+fn managed_planned_at(
+    attendance_date: chrono::NaiveDate,
+    in_time: chrono::NaiveTime,
+    out_time: chrono::NaiveTime,
+    shift: &str,
+    direction: i16,
+) -> Result<chrono::DateTime<chrono::Utc>, ApiError> {
+    let mut date = attendance_date;
+    let time = if direction == 0 { in_time } else { out_time };
+    if direction == 1 && shift == "night" && out_time <= in_time {
+        date = attendance_date
+            .succ_opt()
+            .ok_or_else(|| invalid_column_value("attendance_date", "valid date"))?;
+    }
+    let local = date.and_time(time);
+    let offset = chrono::FixedOffset::east_opt(8 * 3600)
+        .ok_or_else(|| invalid_column_value("timezone", "UTC+8"))?;
+    let planned_at = offset
+        .from_local_datetime(&local)
+        .single()
+        .ok_or_else(|| invalid_column_value("planned_at", "valid local time"))?;
+    Ok(planned_at.with_timezone(&chrono::Utc))
+}
+
+fn parse_managed_time(column: &str, value: &str) -> Result<chrono::NaiveTime, ApiError> {
+    chrono::NaiveTime::parse_from_str(value.trim(), "%H:%M")
+        .or_else(|_| chrono::NaiveTime::parse_from_str(value.trim(), "%H:%M:%S"))
+        .map_err(|_| invalid_column_value(column, "HH:mm"))
+}
+
+fn first_photo_url(value: Option<&Value>) -> Option<String> {
+    value.and_then(Value::as_array).and_then(|items| {
+        items
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .find(|url| !url.is_empty())
+            .map(str::to_owned)
+    })
+}
+
+fn mask_id_card(value: &str) -> String {
+    let chars = value.chars().collect::<Vec<_>>();
+    if chars.len() <= 8 {
+        return value.to_owned();
+    }
+    let prefix = chars.iter().take(3).collect::<String>();
+    let suffix = chars
+        .iter()
+        .skip(chars.len().saturating_sub(4))
+        .collect::<String>();
+    format!("{prefix}***********{suffix}")
+}
+
+fn required_uuid_from_object(
+    object: &serde_json::Map<String, Value>,
+    column: &str,
+) -> Result<Uuid, ApiError> {
+    object
+        .get(column)
+        .ok_or_else(|| invalid_column_value(column, "UUID"))
+        .and_then(|value| value_to_optional_uuid(column, value))?
+        .ok_or_else(|| invalid_column_value(column, "UUID"))
+}
+
+async fn count_personnel_workers(
+    pool: &sqlx::PgPool,
+    auth_user: &AuthUser,
+    params: &ResourceListParams,
+) -> Result<i64, ApiError> {
+    let mut query = QueryBuilder::<Postgres>::new(
+        "SELECT COUNT(*)::bigint FROM construction_workers w JOIN construction_projects p ON p.id = w.project_id AND p.is_deleted = FALSE WHERE w.is_deleted = FALSE",
+    );
+    push_accessible_project_scope(&mut query, auth_user, "w.project_id");
+    push_personnel_worker_filters(&mut query, params);
+
+    query
+        .build_query_scalar::<i64>()
+        .fetch_one(pool)
+        .await
+        .map_err(db_error)
+}
+
+fn push_accessible_project_scope(
+    query: &mut QueryBuilder<'_, Postgres>,
+    auth_user: &AuthUser,
+    project_id_expression: &'static str,
+) {
+    if auth_user.roles.contains(&Role::Admin) {
+        return;
+    }
+
+    query
+        .push(" AND EXISTS (SELECT 1 FROM user_managed_projects ump WHERE ump.user_id = ")
+        .push_bind(auth_user.user_id)
+        .push(" AND ump.project_id = ")
+        .push(project_id_expression)
+        .push(")");
+}
+
+async fn ensure_project_access(
+    pool: &sqlx::PgPool,
+    auth_user: &AuthUser,
+    project_id: Uuid,
+) -> Result<(), ApiError> {
+    let allowed = if auth_user.roles.contains(&Role::Admin) {
+        sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM construction_projects WHERE id = $1 AND is_deleted = FALSE)",
+        )
+        .bind(project_id)
+        .fetch_one(pool)
+        .await
+        .map_err(db_error)?
+    } else {
+        sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS(
+                SELECT 1
+                FROM construction_projects p
+                JOIN user_managed_projects ump ON ump.project_id = p.id
+                WHERE p.id = $1 AND p.is_deleted = FALSE AND ump.user_id = $2
+            )
+            "#,
+        )
+        .bind(project_id)
+        .bind(auth_user.user_id)
+        .fetch_one(pool)
+        .await
+        .map_err(db_error)?
+    };
+
+    if allowed {
+        Ok(())
+    } else {
+        Err(ApiError::default()
+            .with_code(StatusCode::FORBIDDEN)
+            .with_message("No access to this project"))
+    }
+}
+
+async fn attendance_device_issue_report_project_id(
+    pool: &sqlx::PgPool,
+    report_id: Uuid,
+) -> Result<Uuid, ApiError> {
+    sqlx::query_scalar::<_, Uuid>(
+        "SELECT project_id FROM construction_attendance_device_issue_reports WHERE id = $1 AND is_deleted = FALSE",
+    )
+    .bind(report_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(db_error)?
+    .ok_or_else(not_found)
+}
+
+fn push_personnel_worker_filters(
+    query: &mut QueryBuilder<'_, Postgres>,
+    params: &ResourceListParams,
+) {
+    if let Some(project_id) = params.project_id {
+        query.push(" AND w.project_id = ").push_bind(project_id);
+    }
+    if !params.keyword.is_empty() {
+        let pattern = format!("%{}%", params.keyword);
+        query
+            .push(" AND (w.name ILIKE ")
+            .push_bind(pattern.clone())
+            .push(" OR w.id_card ILIKE ")
+            .push_bind(pattern.clone())
+            .push(" OR w.phone ILIKE ")
+            .push_bind(pattern.clone())
+            .push(" OR p.name ILIKE ")
+            .push_bind(pattern)
+            .push(")");
+    }
+    if let Some(unit_id) = params.unit_id {
+        query.push(" AND w.unit_id = ").push_bind(unit_id);
+    }
+    if let Some(team_id) = params.team_id {
+        query.push(" AND w.team_id = ").push_bind(team_id);
+    }
+    if let Some(work_type) = params.work_type {
+        query.push(" AND w.work_type = ").push_bind(work_type);
+    }
+    if let Some(work_status) = params.work_status {
+        query.push(" AND w.work_status = ").push_bind(work_status);
+    }
+    match &params.auth_status {
+        Some(AuthStatusFilter::Exact(auth_status)) => {
+            query.push(" AND w.auth_status = ").push_bind(*auth_status);
+        }
+        Some(AuthStatusFilter::Unverified) => {
+            query.push(" AND COALESCE(w.auth_status, 1) <> 2");
+        }
+        None => {}
+    }
+}
+
 async fn list_rows_page(
     pool: &sqlx::PgPool,
     table: &'static str,
@@ -4413,6 +7456,15 @@ fn push_resource_filters(
             }
             if let Some(work_status) = params.work_status {
                 query.push(" AND r.work_status = ").push_bind(work_status);
+            }
+            match &params.auth_status {
+                Some(AuthStatusFilter::Exact(auth_status)) => {
+                    query.push(" AND r.auth_status = ").push_bind(*auth_status);
+                }
+                Some(AuthStatusFilter::Unverified) => {
+                    query.push(" AND COALESCE(r.auth_status, 1) <> 2");
+                }
+                None => {}
             }
         }
         "construction_attendance_records" => {
@@ -4700,6 +7752,14 @@ fn push_typed_bind_query(
         ColumnKind::BigInt => {
             query.push_bind(value_to_optional_i64(column.name, value)?);
         }
+        ColumnKind::Money => match value_to_optional_money(column.name, value)? {
+            Some(value) => {
+                query.push_bind(value).push("::numeric(16,2)");
+            }
+            None => {
+                query.push("NULL::numeric(16,2)");
+            }
+        },
         ColumnKind::Boolean => {
             query.push_bind(value_to_optional_bool(column.name, value)?);
         }
@@ -4777,6 +7837,46 @@ fn value_to_optional_i64(column: &str, value: &Value) -> Result<Option<i64>, Api
             .map_err(|_| invalid_column_value(column, "integer number")),
         _ => Err(invalid_column_value(column, "integer number")),
     }
+}
+
+fn value_to_optional_money(column: &str, value: &Value) -> Result<Option<String>, ApiError> {
+    match value {
+        Value::Null => Ok(None),
+        Value::String(value) if value.trim().is_empty() => Ok(None),
+        Value::String(value) => parse_money_amount(column, value.trim()).map(Some),
+        Value::Number(value) => parse_money_amount(column, &value.to_string()).map(Some),
+        _ => Err(invalid_column_value(column, "amount")),
+    }
+}
+
+fn parse_money_amount(column: &str, value: &str) -> Result<String, ApiError> {
+    let normalized = value
+        .replace([',', '，', '￥', '¥'], "")
+        .replace([' ', '\t', '\n', '\r'], "")
+        .replace('元', "")
+        .trim()
+        .to_owned();
+    if normalized.is_empty() {
+        return Ok("0.00".to_owned());
+    }
+
+    let (sign, number) = normalized
+        .strip_prefix('-')
+        .map(|value| ("-", value))
+        .unwrap_or(("", normalized.as_str()));
+    let mut parts = number.split('.');
+    let yuan = parts.next().unwrap_or_default();
+    let cents = parts.next().unwrap_or_default();
+    if parts.next().is_some()
+        || yuan.is_empty()
+        || !yuan.chars().all(|ch| ch.is_ascii_digit())
+        || cents.len() > 2
+        || !cents.chars().all(|ch| ch.is_ascii_digit())
+    {
+        return Err(invalid_column_value(column, "amount"));
+    }
+
+    Ok(format!("{sign}{yuan}.{}", format!("{cents:0<2}")))
 }
 
 #[cfg(test)]
@@ -4951,6 +8051,54 @@ mod tests {
     }
 
     #[test]
+    fn module_list_params_accepts_attendance_device_filter() {
+        let device_id = Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap();
+        let uri: Uri = format!(
+            "/api/v1/admin/attendance-device-issue-reports?attendance_device_id={device_id}&include_delete_actions=1"
+        )
+        .parse()
+        .expect("valid uri");
+
+        let params = module_list_params(&uri).expect("valid params");
+
+        assert_eq!(params.attendance_device_id, Some(device_id));
+        assert!(params.include_delete_actions);
+    }
+
+    #[test]
+    fn worker_issue_fields_compare_normalized_device_payload_fields() {
+        let before = WorkerIssueFields {
+            name: Some(" leo ".to_string()),
+            id_card: None,
+            phone: Some(" 15852906247 ".to_string()),
+            avatar: Some(" https://example.test/a.jpg ".to_string()),
+            work_status: Some(1),
+        };
+        let same = WorkerIssueFields {
+            name: Some("leo".to_string()),
+            phone: Some("15852906247".to_string()),
+            avatar: Some("https://example.test/a.jpg".to_string()),
+            ..before.clone()
+        };
+        let changed = WorkerIssueFields {
+            id_card: Some("321183199611224410".to_string()),
+            ..same.clone()
+        };
+        let left_site = WorkerIssueFields {
+            work_status: Some(2),
+            ..same.clone()
+        };
+
+        assert_eq!(before.issue_action_after_change(&same), None);
+        assert_eq!(before.issue_action_after_change(&changed), Some("update"));
+        assert_eq!(before.issue_action_after_change(&left_site), None);
+        assert_eq!(
+            left_site.issue_action_after_change(&changed),
+            Some("update")
+        );
+    }
+
+    #[test]
     fn wage_month_params_normalize_to_month_start() {
         let uri: Uri = "/api/v1/admin/projects/00000000-0000-0000-0000-000000000000/wage-batches?payroll_month=2026-05&status=paid"
             .parse()
@@ -4994,7 +8142,7 @@ mod tests {
 
     #[test]
     fn resource_list_params_clamp_pagination_and_parse_scope() {
-        let uri: Uri = "/api/v1/admin/projects/00000000-0000-0000-0000-000000000000/workers?page=0&page_size=999&keyword=%E5%BC%A0%E4%B8%89&unit_id=11111111-1111-4111-8111-111111111111&team_id=22222222-2222-4222-8222-222222222222&work_type=3&work_status=2&direction=1&attendance_date=2026-06-23&attendance_configured=true"
+        let uri: Uri = "/api/v1/admin/projects/00000000-0000-0000-0000-000000000000/workers?page=0&page_size=999&keyword=%E5%BC%A0%E4%B8%89&unit_id=11111111-1111-4111-8111-111111111111&team_id=22222222-2222-4222-8222-222222222222&work_type=3&work_status=2&auth_status=2&direction=1&attendance_date=2026-06-23&attendance_configured=true"
             .parse()
             .expect("valid uri");
 
@@ -5013,6 +8161,7 @@ mod tests {
         );
         assert_eq!(params.work_type, Some(3));
         assert_eq!(params.work_status, Some(2));
+        assert_eq!(params.auth_status, Some(AuthStatusFilter::Exact(2)));
         assert_eq!(params.direction, Some(1));
         assert_eq!(
             params.attendance_date,
@@ -5051,6 +8200,21 @@ mod tests {
         assert_eq!(
             value_to_optional_cents("amount", &Value::Null).unwrap(),
             None
+        );
+    }
+
+    #[test]
+    fn money_amount_parser_accepts_two_decimal_places() {
+        assert_eq!(
+            value_to_optional_money("contract_amount", &Value::String("1234.56".into())).unwrap(),
+            Some("1234.56".to_owned())
+        );
+        assert_eq!(
+            value_to_optional_money("unit_price", &serde_json::json!(86.5)).unwrap(),
+            Some("86.50".to_owned())
+        );
+        assert!(
+            value_to_optional_money("contract_amount", &Value::String("1.234".into())).is_err()
         );
     }
 

@@ -21,7 +21,6 @@
   height: 100vh;
   opacity: 0.92;
   transform: scale(1.04);
-  animation: bgDrift 8s ease-in-out infinite alternate;
 }
 
 .profile-bg-tint {
@@ -57,7 +56,6 @@
   width: 760rpx;
   height: 520rpx;
   opacity: 0.58;
-  animation: visualFloat 8s ease-in-out infinite alternate;
   transform-origin: center;
 }
 
@@ -71,7 +69,6 @@
 
 .profile-header,
 .account-hero,
-.phone-row,
 .contact-card-content,
 .bottom-nav,
 .nav-item {
@@ -80,13 +77,8 @@
 }
 
 .profile-header,
-.phone-row,
 .contact-card-content {
   justify-content: space-between;
-}
-
-.profile-header {
-  animation: sectionEnter 360ms ease both;
 }
 
 .profile-title {
@@ -112,7 +104,6 @@
   border-radius: 32rpx;
   background: rgba(255, 255, 255, 0.58);
   box-shadow: 0 18rpx 46rpx rgba(15, 107, 93, 0.08);
-  animation: sectionEnter 420ms 60ms ease both;
 }
 
 .account-hero::after {
@@ -140,7 +131,6 @@
   border-radius: 999rpx;
   background: rgba(255, 255, 255, 0.82);
   box-shadow: 0 18rpx 48rpx rgba(15, 107, 93, 0.12);
-  animation: avatarFloat 3.6s ease-in-out infinite;
 }
 
 .avatar-mark {
@@ -183,19 +173,6 @@
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.phone-row {
-  width: 282rpx;
-  margin-top: 18rpx;
-  color: #8a969b;
-  font-size: 23rpx;
-  font-weight: 700;
-}
-
-.phone-number {
-  color: #0a9875;
-  font-weight: 800;
 }
 
 .password-mask {
@@ -293,48 +270,11 @@
   opacity: 0.58;
 }
 
-.info-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 24rpx;
-  margin-top: 30rpx;
-  animation: sectionEnter 430ms 120ms ease both;
-}
-
-.info-card {
-  min-height: 178rpx;
-  padding: 26rpx 22rpx 22rpx;
-  border-radius: 28rpx;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 18rpx 52rpx rgba(32, 48, 51, 0.075);
-}
-
-.info-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 58rpx;
-  height: 58rpx;
-  border-radius: 20rpx;
-}
-
-.info-icon.mint {
-  background: #e8f5f1;
-}
-
-.info-icon.deep {
-  background: #e6efed;
-}
-
 .profile-symbol {
   position: relative;
   width: 42rpx;
   height: 42rpx;
   color: #0a9875;
-}
-
-.info-icon.deep .profile-symbol {
-  color: #0f6b5d;
 }
 
 .tool-icon.danger .profile-symbol {
@@ -348,42 +288,22 @@
   content: "";
 }
 
-.symbol-home::before {
-  top: 5rpx;
-  left: 9rpx;
-  width: 24rpx;
-  height: 24rpx;
-  border-radius: 5rpx;
-  background: currentColor;
-  transform: rotate(45deg);
-}
-
-.symbol-home::after {
-  top: 17rpx;
-  left: 8rpx;
-  width: 26rpx;
-  height: 20rpx;
-  border-radius: 4rpx 4rpx 7rpx 7rpx;
-  background: currentColor;
-}
-
-.symbol-users::before {
+.symbol-scan::before {
   top: 6rpx;
-  left: 8rpx;
-  width: 14rpx;
-  height: 14rpx;
+  left: 6rpx;
+  width: 30rpx;
+  height: 30rpx;
   border: 5rpx solid currentColor;
-  border-radius: 999rpx;
-  box-shadow: 15rpx 0 0 -1rpx currentColor;
+  border-radius: 8rpx;
 }
 
-.symbol-users::after {
-  right: 4rpx;
-  bottom: 5rpx;
-  left: 4rpx;
-  height: 16rpx;
-  border: 5rpx solid currentColor;
-  border-radius: 999rpx 999rpx 8rpx 8rpx;
+.symbol-scan::after {
+  top: 18rpx;
+  left: 3rpx;
+  width: 36rpx;
+  height: 6rpx;
+  border-radius: 999rpx;
+  background: currentColor;
 }
 
 .symbol-lock::before {
@@ -425,32 +345,12 @@
   transform: rotate(45deg);
 }
 
-.info-title {
-  margin-top: 16rpx;
-  color: #8a969b;
-  font-size: 22rpx;
-  font-weight: 700;
-}
-
-.info-value {
-  display: -webkit-box;
-  overflow: hidden;
-  margin-top: 8rpx;
-  color: #253236;
-  font-size: 25rpx;
-  font-weight: 800;
-  line-height: 1.25;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
 .contact-card {
   overflow: hidden;
   margin-top: 34rpx;
   border-radius: 28rpx;
   background: rgba(232, 245, 241, 0.9);
   box-shadow: 0 18rpx 48rpx rgba(15, 107, 93, 0.08);
-  animation: sectionEnter 430ms 180ms ease both;
   transition: transform 160ms ease, opacity 160ms ease;
 }
 
@@ -513,7 +413,6 @@
 
 .tool-section {
   margin-top: 40rpx;
-  animation: sectionEnter 430ms 240ms ease both;
 }
 
 .section-title {
@@ -670,47 +569,4 @@
 .nav-item.active .nav-user::before,
 .nav-item.active .nav-user::after {
   border-color: #0a9875;
-}
-
-@keyframes sectionEnter {
-  from {
-    opacity: 0;
-    transform: translateY(22rpx);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes avatarFloat {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-
-  50% {
-    transform: translateY(-8rpx);
-  }
-}
-
-@keyframes bgDrift {
-  from {
-    transform: scale(1.04) translate3d(0, 0, 0);
-  }
-
-  to {
-    transform: scale(1.06) translate3d(-12rpx, -8rpx, 0);
-  }
-}
-
-@keyframes visualFloat {
-  from {
-    transform: scale(1) translate3d(0, 0, 0);
-  }
-
-  to {
-    transform: scale(1.02) translate3d(-10rpx, -6rpx, 0);
-  }
 }

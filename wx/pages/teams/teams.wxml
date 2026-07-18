@@ -11,7 +11,7 @@
         <view class="hero-subtitle">{{module.subtitle}}</view>
       </view>
       <view class="hero-count">
-        <text>{{records.length}}</text>
+        <text>{{total}}</text>
         <text>条</text>
       </view>
     </view>
@@ -39,9 +39,12 @@
         value="{{keyword}}"
         placeholder="{{module.searchPlaceholder}}"
         placeholder-class="muted-placeholder"
+        confirm-type="search"
         bindinput="onKeywordInput"
+        bindconfirm="submitSearch"
       />
     </view>
+    <view class="toolbar-search-button" bind:tap="submitSearch">搜索</view>
     <view class="toolbar-button" bind:tap="openCreate">新增</view>
   </view>
 
@@ -85,6 +88,8 @@
       <view class="empty-copy">调整筛选条件，或新增一条业务记录。</view>
       <view class="empty-button" bind:tap="openCreate">新增{{module.shortTitle}}</view>
     </view>
+    <view class="load-more-state" wx:if="{{filteredRecords.length && loadingMore}}">加载中...</view>
+    <view class="load-more-state" wx:elif="{{filteredRecords.length && !hasMore}}">没有更多了</view>
   </view>
 
   <view class="form-mask" wx:if="{{formVisible}}" catchtap="closeForm"></view>
@@ -107,7 +112,24 @@
           <block wx:if="{{item.control === 'upload'}}">
             <view class="upload-field" data-key="{{item.key}}" bind:tap="chooseUpload">
               <view class="upload-main">{{item.uploadDisplay}}</view>
-              <view class="upload-action">上传</view>
+              <view class="upload-action">{{item.uploadActionText}}</view>
+            </view>
+            <view class="upload-list" wx:if="{{item.uploadItems.length}}">
+              <view
+                class="upload-item"
+                wx:for="{{item.uploadItems}}"
+                wx:for-item="file"
+                wx:key="url"
+                data-url="{{file.url}}"
+                data-name="{{file.name}}"
+                data-is-image="{{file.isImage}}"
+                bind:tap="previewUpload"
+              >
+                <image wx:if="{{file.isImage}}" class="upload-thumb" src="{{file.url}}" mode="aspectFill" />
+                <view wx:else class="upload-file-icon">文</view>
+                <view class="upload-file-name">{{file.name}}</view>
+                <view class="upload-view-action">查看</view>
+              </view>
             </view>
           </block>
           <block wx:elif="{{item.control === 'select'}}">
@@ -124,6 +146,11 @@
               data-key="{{item.key}}"
               bindinput="onFormInput"
             />
+          </block>
+          <block wx:elif="{{item.valueType === 'date'}}">
+            <picker mode="date" value="{{item.value}}" data-key="{{item.key}}" bindchange="onFormInput">
+              <view class="select-value {{item.value ? '' : 'placeholder'}}">{{item.dateDisplay}}</view>
+            </picker>
           </block>
           <block wx:else>
             <input

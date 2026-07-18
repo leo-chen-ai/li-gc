@@ -79,6 +79,19 @@ import {
   type AdminOverviewTone,
 } from "@/features/projects/lib/admin-overview-metrics";
 import {
+  BUILT_IN_PLATFORM_OPTIONS,
+  NINGBO_HOUSING_DEFAULT_BASE_URL,
+  NINGBO_HOUSING_PLATFORM_NAME,
+  NINGBO_HOUSING_PLATFORM_TYPE,
+  buildNingboHousingConfig,
+  createNingboHousingConfigForm,
+  isNingboHousingConfig,
+  parseNingboHousingConfig,
+  summarizePlatformConfig,
+  validateNingboHousingConfig,
+} from "@/features/projects/lib/platform-configs";
+import {
+  useAllWorkHourConfigsQuery,
   useConstructionOverviewQuery,
   useContractTemplatesQuery,
   useCreateContractTemplateMutation,
@@ -91,11 +104,11 @@ import {
   useDeleteWorkHourConfigMutation,
   usePlatformConfigsQuery,
   usePlatformLogsQuery,
+  useProjectsQuery,
   useUpdateContractTemplateMutation,
   useUpdatePlatformConfigMutation,
   useUpdatePlatformLogMutation,
   useUpdateWorkHourConfigMutation,
-  useWorkHourConfigsQuery,
 } from "@/features/projects/hooks/use-construction-projects";
 import type {
   ConstructionContractTemplate,
@@ -105,6 +118,7 @@ import type {
   ConstructionPlatformConfigPayload,
   ConstructionPlatformLog,
   ConstructionPlatformLogPayload,
+  ConstructionProject,
   ConstructionWorkHourConfig,
   ConstructionWorkHourConfigPayload,
   JsonValue,
@@ -431,12 +445,14 @@ export function ContractTemplateManagementPage() {
 }
 
 export function WorkHourConfigPage() {
-  const [filters, setFilters] = useState<ConstructionModuleListFilters>({ page: 1, page_size: pageSize });
-  const query = useWorkHourConfigsQuery(filters);
+  const [keyword, setKeyword] = useState("");
+  const projectsQuery = useProjectsQuery();
+  const configsQuery = useAllWorkHourConfigsQuery();
   const createConfig = useCreateWorkHourConfigMutation();
   const updateConfig = useUpdateWorkHourConfigMutation();
   const deleteConfig = useDeleteWorkHourConfigMutation();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [selectedProject, setSelectedProject] = useState<ConstructionProject | null>(null);
   const [editing, setEditing] = useState<ConstructionWorkHourConfig | null>(null);
   const [form, setForm] = useState({
     project_id: "",
@@ -446,42 +462,37 @@ export function WorkHourConfigPage() {
     is_enabled: true,
     remark: "",
   });
-  const rows = query.data?.items ?? [];
+  const projects = projectsQuery.data ?? [];
+  const configByProject = latestWorkHourConfigByProject(configsQuery.data ?? []);
+  const rows = projects.filter((project) =>
+    projectMatchesWorkHourKeyword(project, configByProject.get(project.id), keyword)
+  );
+  const configuredCount = projects.filter((project) => configByProject.get(project.id)?.is_enabled).length;
 
-  const openCreate = () => {
-    setEditing(null);
-    setForm({
-      project_id: "",
-      name: "",
-      algorithm_type: "tiered_duration",
-      rules: createDefaultWorkHourRuleForm(),
-      is_enabled: true,
-      remark: "",
-    });
-    setDialogOpen(true);
-  };
-  const openEdit = (config: ConstructionWorkHourConfig) => {
+  const openProjectConfig = (project: ConstructionProject) => {
+    const config = configByProject.get(project.id) ?? null;
+    setSelectedProject(project);
     setEditing(config);
     setForm({
-      project_id: config.project_id,
-      name: config.name,
-      algorithm_type: config.algorithm_type,
-      rules: parseWorkHourRules(config.rules),
-      is_enabled: config.is_enabled,
-      remark: config.remark ?? "",
+      project_id: project.id,
+      name: config?.name || `${project.name || "项目"}工时段配置`,
+      algorithm_type: "tiered_duration",
+      rules: config ? parseWorkHourRules(config.rules) : createDefaultWorkHourRuleForm(),
+      is_enabled: config?.is_enabled ?? true,
+      remark: config?.remark ?? "",
     });
     setDialogOpen(true);
   };
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!form.project_id || !form.name.trim()) {
-      toast.error("请选择项目并填写名称");
+    if (!form.project_id) {
+      toast.error("请选择项目");
       return;
     }
     const payload: ConstructionWorkHourConfigPayload = {
       project_id: form.project_id,
-      name: form.name.trim(),
-      algorithm_type: form.algorithm_type.trim() || "tiered_duration",
+      name: form.name.trim() || `${selectedProject?.name || "项目"}工时段配置`,
+      algorithm_type: "tiered_duration",
       rules: buildWorkHourRules(form.rules),
       is_enabled: form.is_enabled,
       remark: form.remark.trim() || null,
@@ -499,60 +510,82 @@ export function WorkHourConfigPage() {
       toast.error(error instanceof Error ? error.message : "保存工时配置失败");
     }
   };
-  const remove = async (config: ConstructionWorkHourConfig) => {
-    if (!window.confirm(`确认删除工时配置「${config.name}」？`)) return;
+  const resetProjectConfig = async (project: ConstructionProject, config: ConstructionWorkHourConfig | undefined) => {
+    if (!config) return;
+    if (!window.confirm(`确认恢复「${project.name || "未命名项目"}」默认工时规则？`)) return;
     try {
       await deleteConfig.mutateAsync(config.id);
-      toast.success("工时配置已删除");
+      toast.success("项目已恢复默认工时规则");
     } catch {
-      toast.error("删除工时配置失败");
+      toast.error("恢复默认工时规则失败");
     }
   };
 
   return (
     <div className="space-y-4">
-      <PageHeader icon={<Clock3 className="size-4" />} label="工时配置" title="工时配置" description="按累计工时分段配置倍率，支持最多 24 小时。" action={<Button onClick={openCreate} className="bg-[#0f6b5d] text-white hover:bg-[#0b5148]"><Plus className="mr-2 size-4" />新增配置</Button>} />
-      <ModuleFilters filters={filters} setFilters={setFilters} placeholder="搜索项目、算法、备注" />
-      <DataTable loading={query.isLoading} colSpan={7} headers={["配置名称", "项目", "算法", "状态", "规则", "更新时间", "操作"]}>
-        {rows.map((row) => (
-          <TableRow key={row.id}>
-            <TableCell className="font-medium">{row.name}</TableCell>
-            <TableCell className="max-w-[260px] truncate">{row.project_name || row.project_id}</TableCell>
-            <TableCell>{workHourAlgorithmLabel(row.algorithm_type)}</TableCell>
-            <TableCell><EnabledBadge enabled={row.is_enabled} /></TableCell>
-            <TableCell className="max-w-[420px] truncate text-xs text-muted-foreground">{summarizeWorkHourRules(row.rules)}</TableCell>
-            <TableCell>{formatDateTime(row.updated_at)}</TableCell>
-            <TableCell className="text-right"><RowActions onEdit={() => openEdit(row)} onDelete={() => void remove(row)} /></TableCell>
+      <PageHeader
+        icon={<Clock3 className="size-4" />}
+        label="工时配置"
+        title="项目工时配置"
+        description="打开即显示所有项目；每个项目单独配置工时段，保存后影响该项目考勤月历的记工计算。"
+      />
+      <div className="grid gap-3 rounded-lg border bg-[#f8faf9] p-3 lg:grid-cols-[minmax(260px,1fr)_auto_auto] lg:items-center">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索项目名称、总承包单位、建设单位" className="pl-9" />
+        </div>
+        <MetricPill label="项目" value={projects.length} />
+        <MetricPill label="已配置" value={configuredCount} />
+      </div>
+      <DataTable loading={projectsQuery.isLoading || configsQuery.isLoading} colSpan={7} headers={["项目名称", "总承包单位", "建设单位", "配置状态", "工时段规则", "更新时间", "操作"]}>
+        {rows.map((project) => {
+          const config = configByProject.get(project.id);
+          return (
+          <TableRow key={project.id}>
+            <TableCell className="max-w-[300px] truncate font-medium">{project.name || "未命名项目"}</TableCell>
+            <TableCell className="max-w-[220px] truncate text-sm text-muted-foreground">{project.contractor || "-"}</TableCell>
+            <TableCell className="max-w-[220px] truncate text-sm text-muted-foreground">{project.build_unit || "-"}</TableCell>
+            <TableCell><WorkHourConfigStatusBadge config={config} /></TableCell>
+            <TableCell className="max-w-[460px] truncate text-xs text-muted-foreground">{workHourConfigRuleSummary(config)}</TableCell>
+            <TableCell>{config ? formatDateTime(config.updated_at) : "-"}</TableCell>
+            <TableCell className="text-right">
+              <div className="inline-flex items-center gap-1">
+                <Button variant="ghost" size="sm" onClick={() => openProjectConfig(project)} className="text-[#0f6b5d]">
+                  <Pencil className="mr-1 size-3.5" />工时配置
+                </Button>
+                {config ? (
+                  <Button variant="ghost" size="sm" onClick={() => void resetProjectConfig(project, config)} className="text-red-600">
+                    <Trash2 className="mr-1 size-3.5" />恢复默认
+                  </Button>
+                ) : null}
+              </div>
+            </TableCell>
           </TableRow>
-        ))}
+          );
+        })}
       </DataTable>
-      <Pager total={query.data?.total ?? 0} page={filters.page ?? 1} onPageChange={(page) => setFilters((current) => ({ ...current, page }))} />
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-4xl">
+        <DialogContent className="sm:max-w-5xl">
           <form onSubmit={submit}>
-            <DialogHeader><DialogTitle>{editing ? "编辑工时配置" : "新增工时配置"}</DialogTitle><DialogDescription>用表单维护项目工时算法，不需要手写配置。</DialogDescription></DialogHeader>
+            <DialogHeader>
+              <DialogTitle>{editing ? "编辑项目工时段配置" : "配置项目工时段"}</DialogTitle>
+              <DialogDescription>
+                {selectedProject?.name || "当前项目"}：默认不配置时 2-4 小时算 0.5，4-20 小时算 1，20 小时以上算 1.5。
+              </DialogDescription>
+            </DialogHeader>
             <div className="mt-4 grid gap-4 md:grid-cols-2">
-              <div className="space-y-2"><Label>项目</Label><ProjectSearchSelect value={form.project_id} onValueChange={(project_id) => setForm((current) => ({ ...current, project_id }))} /></div>
-              <TextField label="配置名称" value={form.name} onChange={(name) => setForm((current) => ({ ...current, name }))} required />
-              <SelectField
-                label="算法类型"
-                value={form.algorithm_type}
-                onChange={(algorithm_type) => setForm((current) => ({ ...current, algorithm_type }))}
-                options={[
-                  { value: "tiered_duration", label: "分段工时" },
-                  { value: "attendance_based", label: "按考勤时长" },
-                  { value: "piecework", label: "计件/计量" },
-                  { value: "custom", label: "自定义规则" },
-                ]}
-              />
-              <CheckboxField label="启用配置" checked={form.is_enabled} onChange={(is_enabled) => setForm((current) => ({ ...current, is_enabled }))} />
+              <div className="space-y-2">
+                <Label>项目</Label>
+                <div className="flex h-10 items-center rounded-md border bg-[#f8faf9] px-3 text-sm">{selectedProject?.name || "-"}</div>
+              </div>
+              <CheckboxField label="启用该项目工时配置" checked={form.is_enabled} onChange={(is_enabled) => setForm((current) => ({ ...current, is_enabled }))} />
               <WorkHourRuleFields
                 value={form.rules}
                 onChange={(rules) => setForm((current) => ({ ...current, rules }))}
               />
               <TextareaField className="md:col-span-2" label="备注" value={form.remark} onChange={(remark) => setForm((current) => ({ ...current, remark }))} rows={3} />
             </div>
-            <DialogFooter className="mt-5"><Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>取消</Button><Button type="submit" className="bg-[#0f6b5d] text-white hover:bg-[#0b5148]">保存</Button></DialogFooter>
+            <DialogFooter className="mt-5"><Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>取消</Button><Button type="submit" disabled={createConfig.isPending || updateConfig.isPending} className="bg-[#0f6b5d] text-white hover:bg-[#0b5148]">{createConfig.isPending || updateConfig.isPending ? "保存中" : "保存"}</Button></DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
@@ -592,18 +625,44 @@ function PlatformConfigPanel({ filters, setFilters, tabControls }: { filters: Co
   const deleteConfig = useDeletePlatformConfigMutation();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<ConstructionPlatformConfig | null>(null);
-  const [form, setForm] = useState({ project_id: "", platform_name: "", platform_type: "real_name", config: JSON.stringify({ endpoint: "https://example.test/api", appKey: "demo-key" }, null, 2), is_enabled: true, remark: "" });
+  const [form, setForm] = useState(createNingboHousingConfigForm);
   const rows = query.data?.items ?? [];
-  const openCreate = () => { setEditing(null); setForm({ project_id: "", platform_name: "", platform_type: "real_name", config: JSON.stringify({ endpoint: "https://example.test/api", appKey: "demo-key" }, null, 2), is_enabled: true, remark: "" }); setDialogOpen(true); };
-  const openEdit = (config: ConstructionPlatformConfig) => { setEditing(config); setForm({ project_id: config.project_id, platform_name: config.platform_name, platform_type: config.platform_type, config: JSON.stringify(config.config ?? {}, null, 2), is_enabled: config.is_enabled, remark: config.remark ?? "" }); setDialogOpen(true); };
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    const config = parseJsonObject(form.config);
-    if (!form.project_id || !form.platform_name.trim() || !config.ok) {
-      toast.error(!config.ok ? "配置信息必须是 JSON 对象" : "请选择项目并填写平台名称");
+  const selectedPlatform = BUILT_IN_PLATFORM_OPTIONS.find((option) => option.value === form.platform_type);
+  const openCreate = () => { setEditing(null); setForm(createNingboHousingConfigForm()); setDialogOpen(true); };
+  const openEdit = (config: ConstructionPlatformConfig) => {
+    if (!isNingboHousingConfig(config)) {
+      toast.error("当前表单仅支持宁波市住建配置");
       return;
     }
-    const payload: ConstructionPlatformConfigPayload = { project_id: form.project_id, platform_name: form.platform_name.trim(), platform_type: form.platform_type.trim() || "custom", config: config.value, is_enabled: form.is_enabled, remark: form.remark.trim() || null };
+    setEditing(config);
+    setForm(parseNingboHousingConfig(config));
+    setDialogOpen(true);
+  };
+  const selectPlatform = (platform_type: string) => {
+    setForm((current) => ({
+      ...createNingboHousingConfigForm(),
+      project_id: current.project_id,
+      platform_type,
+      base_url: platform_type === NINGBO_HOUSING_PLATFORM_TYPE ? NINGBO_HOUSING_DEFAULT_BASE_URL : "",
+      is_enabled: current.is_enabled,
+      remark: current.remark,
+    }));
+  };
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    const validationError = validateNingboHousingConfig(form);
+    if (validationError) {
+      toast.error(validationError);
+      return;
+    }
+    const payload: ConstructionPlatformConfigPayload = {
+      project_id: form.project_id,
+      platform_name: NINGBO_HOUSING_PLATFORM_NAME,
+      platform_type: NINGBO_HOUSING_PLATFORM_TYPE,
+      config: buildNingboHousingConfig(form),
+      is_enabled: form.is_enabled,
+      remark: form.remark.trim() || null,
+    };
     try {
       if (editing) { await updateConfig.mutateAsync({ configId: editing.id, payload }); toast.success("平台配置已修改"); }
       else { await createConfig.mutateAsync(payload); toast.success("平台配置已新增"); }
@@ -628,7 +687,7 @@ function PlatformConfigPanel({ filters, setFilters, tabControls }: { filters: Co
             <TableCell className="max-w-[260px] truncate">{row.project_name || row.project_id}</TableCell>
             <TableCell>{platformTypeLabel(row.platform_type)}</TableCell>
             <TableCell><EnabledBadge enabled={row.is_enabled} /></TableCell>
-            <TableCell className="max-w-[320px] truncate font-mono text-xs">{JSON.stringify(row.config)}</TableCell>
+            <TableCell className="max-w-[320px] truncate text-xs text-slate-500">{summarizePlatformConfig(row)}</TableCell>
             <TableCell>{formatDateTime(row.updated_at)}</TableCell>
             <TableCell className="text-right"><RowActions onEdit={() => openEdit(row)} onDelete={() => void remove(row)} /></TableCell>
           </TableRow>
@@ -636,9 +695,78 @@ function PlatformConfigPanel({ filters, setFilters, tabControls }: { filters: Co
       </DataTable>
       <Pager total={query.data?.total ?? 0} page={filters.page ?? 1} onPageChange={(page) => setFilters((current) => ({ ...current, page }))} />
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-4xl"><form onSubmit={submit}><DialogHeader><DialogTitle>{editing ? "编辑平台配置" : "新增平台配置"}</DialogTitle><DialogDescription>配置信息以 JSON 对象保存。</DialogDescription></DialogHeader>
-          <div className="mt-4 grid gap-4 md:grid-cols-2"><div className="space-y-2"><Label>项目</Label><ProjectSearchSelect value={form.project_id} onValueChange={(project_id) => setForm((current) => ({ ...current, project_id }))} /></div><TextField label="平台名称" value={form.platform_name} onChange={(platform_name) => setForm((current) => ({ ...current, platform_name }))} required /><TextField label="平台类型" value={form.platform_type} onChange={(platform_type) => setForm((current) => ({ ...current, platform_type }))} /><CheckboxField label="启用配置" checked={form.is_enabled} onChange={(is_enabled) => setForm((current) => ({ ...current, is_enabled }))} /><TextareaField className="md:col-span-2" label="配置信息 JSON" value={form.config} onChange={(config) => setForm((current) => ({ ...current, config }))} rows={8} /><TextareaField className="md:col-span-2" label="备注" value={form.remark} onChange={(remark) => setForm((current) => ({ ...current, remark }))} rows={3} /></div>
-          <DialogFooter className="mt-5"><Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>取消</Button><Button type="submit" className="bg-[#0f6b5d] text-white hover:bg-[#0b5148]">保存</Button></DialogFooter></form></DialogContent>
+        <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-4xl">
+          <form onSubmit={submit}>
+            <DialogHeader>
+              <DialogTitle>{editing ? "编辑平台配置" : "新增平台配置"}</DialogTitle>
+              <DialogDescription>先选择项目和对接平台，再填写该平台需要的配置。</DialogDescription>
+            </DialogHeader>
+
+            <div className="mt-4 space-y-4">
+              <section className="rounded-lg border p-4">
+                <div className="mb-4">
+                  <div className="text-sm font-semibold text-slate-900">基础关联</div>
+                  <div className="mt-1 text-xs text-slate-500">一个项目可以添加多个不同的对接平台。</div>
+                </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2"><Label>山淮筑项目 <span className="text-red-500">*</span></Label><ProjectSearchSelect value={form.project_id} onValueChange={(project_id) => setForm((current) => ({ ...current, project_id }))} /></div>
+                  <div className="space-y-2">
+                    <Label>对接平台 <span className="text-red-500">*</span></Label>
+                    <select
+                      className="h-10 w-full rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-[#0f6b5d]/20"
+                      value={form.platform_type}
+                      disabled={Boolean(editing)}
+                      onChange={(event) => selectPlatform(event.target.value)}
+                    >
+                      <option value="">请选择对接平台</option>
+                      {BUILT_IN_PLATFORM_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
+                  </div>
+                  <div className="md:col-span-2"><CheckboxField label="启用该平台配置" checked={form.is_enabled} onChange={(is_enabled) => setForm((current) => ({ ...current, is_enabled }))} /></div>
+                </div>
+              </section>
+
+              {selectedPlatform ? <div className="flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
+                <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-[#0f6b5d] text-white"><Landmark className="size-5" /></span>
+                <div className="min-w-0">
+                  <div className="font-semibold text-slate-950">{selectedPlatform.label}</div>
+                  <div className="mt-0.5 text-xs text-slate-600">实名制平台第三方数据直连接口</div>
+                </div>
+                <Badge variant="outline" className="ml-auto border-emerald-200 bg-white text-emerald-700">已内置</Badge>
+              </div> : null}
+
+              {form.platform_type === NINGBO_HOUSING_PLATFORM_TYPE ? <>
+                <section className="rounded-lg border p-4">
+                <div className="mb-4">
+                  <div className="text-sm font-semibold text-slate-900">接口凭证</div>
+                  <div className="mt-1 text-xs text-slate-500">AppKey 和 AppSecret 由宁波市住建平台提供，系统会自动生成请求签名。</div>
+                </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <PlatformCredentialField className="md:col-span-2" label="接口地址" value={form.base_url} onChange={(base_url) => setForm((current) => ({ ...current, base_url }))} placeholder="http://183.136.157.18:7334" />
+                  <PlatformCredentialField label="AppKey" value={form.app_key} onChange={(app_key) => setForm((current) => ({ ...current, app_key }))} autoComplete="off" />
+                  <PlatformCredentialField label="AppSecret" value={form.app_secret} onChange={(app_secret) => setForm((current) => ({ ...current, app_secret }))} type="password" autoComplete="new-password" />
+                </div>
+                </section>
+
+                <section className="rounded-lg border p-4">
+                <div className="mb-4">
+                  <div className="text-sm font-semibold text-slate-900">宁波项目参数</div>
+                  <div className="mt-1 text-xs text-slate-500">以下信息可在宁波平台项目详情中查看。</div>
+                </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <PlatformCredentialField label="项目 GUID" value={form.project_guid} onChange={(project_guid) => setForm((current) => ({ ...current, project_guid }))} />
+                  <PlatformCredentialField label="宁波平台项目 ID" value={form.external_project_id} onChange={(external_project_id) => setForm((current) => ({ ...current, external_project_id }))} inputMode="numeric" />
+                  <PlatformCredentialField label="统一社会信用代码" value={form.corp_code} onChange={(corp_code) => setForm((current) => ({ ...current, corp_code }))} />
+                  <PlatformCredentialField label="发改立项编号" value={form.approval_number} onChange={(approval_number) => setForm((current) => ({ ...current, approval_number }))} />
+                </div>
+                </section>
+              </> : null}
+
+              <TextareaField label="备注" value={form.remark} onChange={(remark) => setForm((current) => ({ ...current, remark }))} rows={3} />
+            </div>
+            <DialogFooter className="mt-5"><Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>取消</Button><Button type="submit" disabled={createConfig.isPending || updateConfig.isPending} className="bg-[#0f6b5d] text-white hover:bg-[#0b5148]">{createConfig.isPending || updateConfig.isPending ? "保存中" : "保存配置"}</Button></DialogFooter>
+          </form>
+        </DialogContent>
       </Dialog>
     </>
   );
@@ -867,6 +995,40 @@ function TextField({ label, value, onChange, required }: { label: string; value:
   return <div className="space-y-2"><Label>{label}{required ? <span className="text-red-500"> *</span> : null}</Label><Input value={value} onChange={(event) => onChange(event.target.value)} /></div>;
 }
 
+function PlatformCredentialField({
+  label,
+  value,
+  onChange,
+  type = "text",
+  placeholder,
+  autoComplete,
+  inputMode,
+  className = "",
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: "text" | "password";
+  placeholder?: string;
+  autoComplete?: string;
+  inputMode?: "numeric";
+  className?: string;
+}) {
+  return (
+    <div className={`space-y-2 ${className}`}>
+      <Label>{label} <span className="text-red-500">*</span></Label>
+      <Input
+        type={type}
+        value={value}
+        placeholder={placeholder}
+        autoComplete={autoComplete}
+        inputMode={inputMode}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </div>
+  );
+}
+
 function ContractTemplateUploadField({
   fileName,
   isUploaded,
@@ -931,21 +1093,6 @@ function ContractTemplateUploadField({
   );
 }
 
-function NumberField({ label, value, onChange, min, max, step = "1" }: { label: string; value: string; onChange: (value: string) => void; min?: string; max?: string; step?: string }) {
-  return <div className="space-y-2"><Label>{label}</Label><Input type="number" min={min} max={max} step={step} value={value} onChange={(event) => onChange(event.target.value)} /></div>;
-}
-
-function SelectField({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: Array<{ value: string; label: string }> }) {
-  return (
-    <div className="space-y-2">
-      <Label>{label}</Label>
-      <select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={value} onChange={(event) => onChange(event.target.value)}>
-        {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-      </select>
-    </div>
-  );
-}
-
 function WorkHourRuleFields({ value, onChange }: { value: WorkHourRuleForm; onChange: (value: WorkHourRuleForm) => void }) {
   const updateSegment = (index: number, patch: Partial<WorkHourSegmentForm>) => {
     onChange({
@@ -985,26 +1132,72 @@ function WorkHourRuleFields({ value, onChange }: { value: WorkHourRuleForm; onCh
       <div>
         <div className="flex items-center justify-between gap-3">
           <div>
-            <div className="text-sm font-semibold text-slate-900">工时分段</div>
-            <div className="mt-1 text-xs text-slate-500">按累计实际工时折算，结束小时最大 24。</div>
+            <div className="text-sm font-semibold text-slate-900">工时段配置</div>
+            <div className="mt-1 text-xs text-slate-500">不配置时默认：2-4 小时算 0.5，4-20 小时算 1，20 小时以上算 1.5。</div>
           </div>
           <Button type="button" variant="outline" size="sm" onClick={addSegment}>
             <Plus className="mr-1 size-3.5" />新增分段
           </Button>
         </div>
-        <div className="mt-3 space-y-2">
-          {value.segments.map((segment, index) => (
-            <div key={segment.id} className="grid items-end gap-3 rounded-md border bg-white p-3 md:grid-cols-[1fr_1fr_1fr_auto]">
-              <NumberField label="开始小时" value={segment.startHour} min="0" max="24" step="0.5" onChange={(next) => updateSegment(index, { startHour: next })} />
-              <NumberField label="结束小时" value={segment.endHour} min="0" max="24" step="0.5" onChange={(next) => updateSegment(index, { endHour: next })} />
-              <NumberField label="倍率" value={segment.rate} min="0" step="0.1" onChange={(next) => updateSegment(index, { rate: next })} />
-              <Button type="button" variant="ghost" size="sm" className="text-red-600" disabled={value.segments.length <= 1} onClick={() => removeSegment(index)}>
-                <Trash2 className="mr-1 size-3.5" />删除
-              </Button>
-            </div>
-          ))}
+        <div className="mt-3 overflow-hidden rounded-lg border bg-white">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-[#f8faf9]">
+                <TableHead className="w-20 text-center">序号</TableHead>
+                <TableHead>开始小时</TableHead>
+                <TableHead>结束小时</TableHead>
+                <TableHead>工时</TableHead>
+                <TableHead className="w-32">操作</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {value.segments.map((segment, index) => (
+                <TableRow key={segment.id}>
+                  <TableCell className="text-center text-sm text-muted-foreground">{index + 1}</TableCell>
+                  <TableCell>
+                    <HourStepField value={segment.startHour} min={0} max={24} step={0.5} onChange={(next) => updateSegment(index, { startHour: next })} />
+                  </TableCell>
+                  <TableCell>
+                    <HourStepField value={segment.endHour} min={0} max={24} step={0.5} onChange={(next) => updateSegment(index, { endHour: next })} />
+                  </TableCell>
+                  <TableCell>
+                    <HourStepField value={segment.rate} min={0} max={24} step={0.5} onChange={(next) => updateSegment(index, { rate: next })} />
+                  </TableCell>
+                  <TableCell>
+                    <Button type="button" variant="ghost" size="sm" className="text-red-600" disabled={value.segments.length <= 1} onClick={() => removeSegment(index)}>
+                      <Trash2 className="mr-1 size-3.5" />删除
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </div>
       </div>
+    </div>
+  );
+}
+
+function HourStepField({ value, onChange, min, max, step }: { value: string; onChange: (value: string) => void; min: number; max: number; step: number }) {
+  const update = (delta: number) => {
+    const current = Number(value);
+    const next = Math.min(max, Math.max(min, (Number.isFinite(current) ? current : 0) + delta));
+    onChange(formatStepNumber(next));
+  };
+
+  return (
+    <div className="grid h-9 max-w-[220px] grid-cols-[36px_minmax(60px,1fr)_36px] overflow-hidden rounded-md border bg-white">
+      <button type="button" className="border-r text-lg text-slate-500 hover:bg-slate-50" onClick={() => update(-step)}>-</button>
+      <input
+        type="number"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="min-w-0 bg-white px-2 text-center text-sm outline-none"
+      />
+      <button type="button" className="border-l text-lg text-slate-500 hover:bg-slate-50" onClick={() => update(step)}>+</button>
     </div>
   );
 }
@@ -1019,6 +1212,62 @@ function CheckboxField({ label, checked, onChange }: { label: string; checked: b
 
 function EnabledBadge({ enabled }: { enabled: boolean }) {
   return enabled ? <Badge className="bg-emerald-50 text-emerald-700 hover:bg-emerald-50">启用</Badge> : <Badge variant="outline">停用</Badge>;
+}
+
+function MetricPill({ label, value }: { label: string; value: number }) {
+  return <div className="rounded-lg border bg-white px-4 py-2 text-sm"><span className="text-muted-foreground">{label}</span><span className="ml-2 font-semibold text-[#0f6b5d]">{value}</span></div>;
+}
+
+function latestWorkHourConfigByProject(configs: ConstructionWorkHourConfig[]) {
+  const map = new Map<string, ConstructionWorkHourConfig>();
+  for (const config of configs) {
+    const current = map.get(config.project_id);
+    if (!current || new Date(config.updated_at).getTime() >= new Date(current.updated_at).getTime()) {
+      map.set(config.project_id, config);
+    }
+  }
+  return map;
+}
+
+function projectMatchesWorkHourKeyword(
+  project: ConstructionProject,
+  config: ConstructionWorkHourConfig | undefined,
+  keyword: string
+) {
+  const normalized = keyword.trim().toLowerCase();
+  if (!normalized) return true;
+  return [
+    project.name,
+    project.contractor,
+    project.build_unit,
+    project.work_permit,
+    config?.name,
+    config?.remark,
+    workHourConfigRuleSummary(config),
+  ]
+    .filter(Boolean)
+    .some((value) => String(value).toLowerCase().includes(normalized));
+}
+
+function WorkHourConfigStatusBadge({ config }: { config: ConstructionWorkHourConfig | undefined }) {
+  if (!config) {
+    return <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-600">默认规则</Badge>;
+  }
+  if (!config.is_enabled) {
+    return <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">已停用</Badge>;
+  }
+  return <Badge className="bg-emerald-50 text-emerald-700 hover:bg-emerald-50">已配置</Badge>;
+}
+
+function workHourConfigRuleSummary(config: ConstructionWorkHourConfig | undefined) {
+  if (!config || !config.is_enabled) {
+    return `默认规则：${summarizeWorkHourRules(buildWorkHourRules(createDefaultWorkHourRuleForm()))}`;
+  }
+  return summarizeWorkHourRules(config.rules);
+}
+
+function formatStepNumber(value: number) {
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(2)));
 }
 
 function PlatformStatusBadge({ status }: { status: string }) {
@@ -1114,17 +1363,6 @@ function platformStatusLabel(status: string) {
 }
 
 function platformTypeLabel(type: string) {
-  const map: Record<string, string> = { real_name: "实名制", wage: "工资监管", attendance: "考勤平台" };
-  return map[type] ?? type;
-}
-
-function workHourAlgorithmLabel(type: string) {
-  const map: Record<string, string> = {
-    tiered_duration: "分段工时",
-    standard: "标准工时",
-    attendance_based: "按考勤时长",
-    piecework: "计件/计量",
-    custom: "自定义规则",
-  };
+  const map: Record<string, string> = { ningbo_housing: "宁波市住建", real_name: "实名制", wage: "工资监管", attendance: "考勤平台" };
   return map[type] ?? type;
 }

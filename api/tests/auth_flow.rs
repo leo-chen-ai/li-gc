@@ -57,6 +57,28 @@ async fn test_register_invalid_email() {
     assert_eq!(body["success"], false);
 }
 
+#[tokio::test]
+async fn test_create_registration_lead_includes_username() {
+    let (app, _c) = build_test_app().await;
+
+    let (status, body) = post_json(
+        app,
+        "/api/v1/auth/registration-leads",
+        &json!({
+            "username": "lead_user",
+            "name": "注册用户",
+            "phone": "13800000000"
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(body["success"], true);
+    assert_eq!(body["data"]["username"], "lead_user");
+    assert_eq!(body["data"]["name"], "注册用户");
+    assert_eq!(body["data"]["phone"], "13800000000");
+}
+
 // ─── Login ───────────────────────────────────────────────────────────────────
 
 #[tokio::test]
@@ -252,6 +274,90 @@ async fn test_refresh_without_cookie() {
 
     let (status, _) = post_json(app, "/api/v1/auth/refresh", &json!({})).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+// ─── Scan login ──────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_scan_login_confirmed_session_returns_web_auth_response() {
+    let (app, _c) = build_test_app().await;
+
+    let (_, reg_body) = post_json(
+        app.clone(),
+        "/api/v1/auth/register",
+        &json!({ "email": "scan-login@example.com", "name": "Scan User", "password": "pass1234" }),
+    )
+    .await;
+    let mobile_token = reg_body["data"]["token"]["access_token"].as_str().unwrap();
+
+    let (status, session_body) =
+        post_json(app.clone(), "/api/v1/auth/scan-login/sessions", &json!({})).await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(session_body["data"]["status"], "pending");
+    assert!(session_body["data"]["scan_token"].is_string());
+    assert!(session_body["data"]["qr_payload"].is_string());
+
+    let scan_token = session_body["data"]["scan_token"].as_str().unwrap();
+    let confirm_req = Request::builder()
+        .method("POST")
+        .uri(format!(
+            "/api/v1/auth/scan-login/sessions/{scan_token}/confirm"
+        ))
+        .header(header::AUTHORIZATION, format!("Bearer {mobile_token}"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({}).to_string()))
+        .unwrap();
+    let (status, _, confirm_body) = raw_request(app.clone(), confirm_req).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(confirm_body["data"]["status"], "confirmed");
+
+    let poll_uri = format!("/api/v1/auth/scan-login/sessions/{scan_token}");
+    let poll_req = Request::builder()
+        .method("GET")
+        .uri(&poll_uri)
+        .body(Body::empty())
+        .unwrap();
+    let (status, headers, auth_body) = raw_request(app.clone(), poll_req).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(auth_body["data"]["user"]["email"], "scan-login@example.com");
+    assert!(auth_body["data"]["token"]["access_token"].is_string());
+    assert!(
+        extract_set_cookie(&headers, "refresh_token").is_some(),
+        "confirmed scan login must set the normal web refresh cookie"
+    );
+
+    let web_token = auth_body["data"]["token"]["access_token"].as_str().unwrap();
+    let (status, me_body) = get_authed(app, "/api/v1/auth/me", web_token).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(me_body["data"]["email"], "scan-login@example.com");
+}
+
+#[tokio::test]
+async fn test_scan_login_qr_endpoint_returns_svg() {
+    let (app, _c) = build_test_app().await;
+
+    let (status, session_body) =
+        post_json(app.clone(), "/api/v1/auth/scan-login/sessions", &json!({})).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let scan_token = session_body["data"]["scan_token"].as_str().unwrap();
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!(
+            "/api/v1/auth/scan-login/sessions/{scan_token}/qr.svg"
+        ))
+        .body(Body::empty())
+        .unwrap();
+    let (status, headers, body) = raw_request(app, req).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        headers
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok()),
+        Some("image/svg+xml")
+    );
+    assert!(body["raw"].as_str().unwrap_or_default().contains("<svg"));
 }
 
 // ─── Full auth flow ───────────────────────────────────────────────────────────

@@ -1,0 +1,169 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: shanhuai-alloy
+  namespace: shanhuai-observability
+  labels:
+    app.kubernetes.io/name: shanhuai-alloy
+    app.kubernetes.io/part-of: shanhuai-observability
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: shanhuai-alloy
+  labels:
+    app.kubernetes.io/name: shanhuai-alloy
+    app.kubernetes.io/part-of: shanhuai-observability
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces", "pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: shanhuai-alloy
+  labels:
+    app.kubernetes.io/name: shanhuai-alloy
+    app.kubernetes.io/part-of: shanhuai-observability
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: shanhuai-alloy
+subjects:
+  - kind: ServiceAccount
+    name: shanhuai-alloy
+    namespace: shanhuai-observability
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shanhuai-alloy-config
+  namespace: shanhuai-observability
+  labels:
+    app.kubernetes.io/name: shanhuai-alloy
+    app.kubernetes.io/part-of: shanhuai-observability
+data:
+  config.alloy: |
+    logging {
+      level  = "info"
+      format = "logfmt"
+    }
+
+    discovery.kubernetes "pods" {
+      role = "pod"
+
+      selectors {
+        role  = "pod"
+        field = "spec.nodeName=" + sys.env("HOSTNAME")
+      }
+    }
+
+    discovery.relabel "pod_logs" {
+      targets = discovery.kubernetes.pods.targets
+
+      rule {
+        source_labels = ["__meta_kubernetes_namespace"]
+        target_label  = "namespace"
+      }
+
+      rule {
+        source_labels = ["__meta_kubernetes_pod_name"]
+        target_label  = "pod"
+      }
+
+      rule {
+        source_labels = ["__meta_kubernetes_pod_container_name"]
+        target_label  = "container"
+      }
+
+      rule {
+        source_labels = ["__meta_kubernetes_pod_node_name"]
+        target_label  = "node"
+      }
+
+      rule {
+        source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+        target_label  = "app"
+      }
+    }
+
+    loki.source.kubernetes "pod_logs" {
+      targets    = discovery.relabel.pod_logs.output
+      forward_to = [loki.process.pod_logs.receiver]
+    }
+
+    loki.process "pod_logs" {
+      stage.cri {}
+
+      stage.static_labels {
+        values = {
+          cluster = "shanhuai-k3s",
+        }
+      }
+
+      forward_to = [loki.write.default.receiver]
+    }
+
+    loki.write "default" {
+      endpoint {
+        url = "http://shanhuai-loki-gateway.shanhuai-observability.svc.cluster.local/loki/api/v1/push"
+      }
+    }
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: shanhuai-alloy
+  namespace: shanhuai-observability
+  labels:
+    app.kubernetes.io/name: shanhuai-alloy
+    app.kubernetes.io/part-of: shanhuai-observability
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: shanhuai-alloy
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: shanhuai-alloy
+        app.kubernetes.io/part-of: shanhuai-observability
+    spec:
+      serviceAccountName: shanhuai-alloy
+      containers:
+        - name: alloy
+          image: docker.io/grafana/alloy:v1.17.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - /etc/alloy/config.alloy
+            - --server.http.listen-addr=0.0.0.0:12345
+          env:
+            - name: HOSTNAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          ports:
+            - name: http-metrics
+              containerPort: 12345
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: http-metrics
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alloy
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: shanhuai-alloy-config

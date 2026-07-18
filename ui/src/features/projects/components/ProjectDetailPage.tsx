@@ -1,24 +1,23 @@
 import { Link } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   Building2,
   CalendarDays,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Download,
   FileDown,
-  FileCheck2,
   Layers3,
   List,
+  LogIn,
   LogOut,
   MoreHorizontal,
   Pencil,
   RotateCcw,
   Search,
-  ShieldAlert,
   SlidersHorizontal,
-  TimerReset,
   Upload,
   Users,
 } from "lucide-react";
@@ -26,9 +25,12 @@ import type { LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { toast } from "sonner";
 
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { updateAdminWindowTitle } from "@/components/layout/admin-window-storage";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -58,6 +60,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { getApiUrl } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
   attendanceFormFields,
@@ -67,6 +70,7 @@ import {
   dateInputToday,
   datetimeLocalNow,
   getFieldOptionLabel,
+  projectFormFields,
   teamFormFields,
   unitFormFields,
   workerFormFields,
@@ -80,7 +84,9 @@ import {
   type Worker,
 } from "../data/mock-projects";
 import {
+  constructionProjectKeys,
   useCreateAttendanceMutation,
+  useCreateAttendanceDeviceIssueReportMutation,
   useCreateTeamMutation,
   useCreateUnitMutation,
   useCreateWageBatchMutation,
@@ -91,10 +97,12 @@ import {
   useDeleteWageBatchMutation,
   useDeleteWorkerMutation,
   useImportWageBatchMutation,
+  useAttendanceDeviceIssueReportsQuery,
   useProjectAllTeamsQuery,
   useProjectAllUnitsQuery,
   useProjectAllWorkersQuery,
   useProjectAttendanceCalendarQuery,
+  useProjectAttendanceDevicesQuery,
   useProjectAttendanceQuery,
   useProjectQuery,
   useProjectTeamsQuery,
@@ -102,6 +110,7 @@ import {
   useProjectWageBatchesQuery,
   useProjectWorkersQuery,
   useUpdateAttendanceMutation,
+  useUpdateProjectMutation,
   useUpdateTeamMutation,
   useUpdateUnitMutation,
   useUpdateWageBatchMutation,
@@ -110,7 +119,11 @@ import {
 import type {
   ConstructionAttendancePayload,
   ConstructionAttendanceRecord,
+  ConstructionAttendanceDeviceIssueAction,
+  ConstructionAttendanceDeviceIssueReport,
+  ConstructionAttendanceDeviceIssueStatus,
   ConstructionProject,
+  ConstructionProjectPayload,
   ConstructionTeam,
   ConstructionTeamPayload,
   ConstructionUnit as ApiConstructionUnit,
@@ -157,6 +170,7 @@ import { constructionProjectService } from "../services/construction-project-ser
 import { MetricCell } from "./MetricCell";
 import { ConstructionRecordForm } from "./ConstructionRecordForm";
 import { ProjectStatusBadge } from "./ProjectStatusBadge";
+import { ProjectReportingPlatforms } from "./ProjectReportingPlatforms";
 
 const tabs = ["项目基本信息", "建设单位", "班组信息", "项目工人", "考勤记录", "工资统计"] as const;
 type DetailTab = (typeof tabs)[number];
@@ -190,6 +204,20 @@ type AttendanceLedgerFilters = {
   attendanceDate: string;
   direction: string;
 };
+type AdvancedExportTarget = "workers" | "attendance";
+type AdvancedExportScopeFilters = {
+  keyword: string;
+  unitIds: string[];
+  teamIds: string[];
+  workerIds: string[];
+  workStatus: string;
+  workType: string;
+};
+type AdvancedExportFormatOption = {
+  value: string;
+  label: string;
+  description: string;
+};
 type WorkerTreeSelection =
   | { kind: "all" }
   | { kind: "unit"; unitName: string }
@@ -205,6 +233,16 @@ type WorkerTreeUnitNode = {
   workerCount: number;
   teamCount: number;
   teams: WorkerTreeTeamNode[];
+};
+type FaceIssueSummary = {
+  deviceCount: number;
+  onlineDeviceCount: number;
+  activeWorkerCount: number;
+  missingAvatarWorkerCount: number;
+  fullyIssuedWorkerCount: number;
+  incompleteWorkerCount: number;
+  successTargetCount: number;
+  totalTargetCount: number;
 };
 type TablePaginationConfig = {
   page: number;
@@ -235,6 +273,22 @@ const DEFAULT_ATTENDANCE_FILTERS: AttendanceLedgerFilters = {
   attendanceDate: "",
   direction: "all",
 };
+const DEFAULT_ADVANCED_EXPORT_SCOPE: AdvancedExportScopeFilters = {
+  keyword: "",
+  unitIds: ["all"],
+  teamIds: ["all"],
+  workerIds: ["all"],
+  workStatus: "all",
+  workType: "all",
+};
+
+const ATTENDANCE_ADVANCED_EXPORT_OPTIONS: AdvancedExportFormatOption[] = [
+  { value: "attendance_time", label: "按考勤时间", description: "月历格式显示每日进场/出场时间" },
+  { value: "work_record", label: "按记工", description: "按工时折算 0.5/1 个工" },
+  { value: "attendance_status", label: "按是否考勤", description: "有考勤显示勾选标记，空白表示无记录" },
+  { value: "work_hours", label: "按工时", description: "按每日最早进场和最晚出场估算工时" },
+  { value: "attendance_records", label: "逐条考勤记录", description: "每条打卡记录一行，含设备和照片路径" },
+];
 
 const PROJECT_STATUS_LABEL: Record<number, Project["status"]> = {
   1: "在建",
@@ -312,6 +366,7 @@ const wageFormFields: ConstructionFormField[] = [
 ];
 
 export function ProjectDetailPage({ projectId }: { projectId: string }) {
+  const queryClient = useQueryClient();
   const [unitPage, setUnitPage] = useState(1);
   const [teamPage, setTeamPage] = useState(1);
   const [workerPage, setWorkerPage] = useState(1);
@@ -319,6 +374,8 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const [attendanceViewMode, setAttendanceViewMode] = useState<AttendanceViewMode>("calendar");
   const [attendanceCalendarMonth, setAttendanceCalendarMonth] = useState(currentPayrollMonth());
   const [workerTreeSelection, setWorkerTreeSelection] = useState<WorkerTreeSelection>({ kind: "all" });
+  const [reissuingWorkerId, setReissuingWorkerId] = useState<string | null>(null);
+  const [issueDetailWorker, setIssueDetailWorker] = useState<Worker | null>(null);
   const [unitFilters, setUnitFilters] = useState<UnitLedgerFilters>(DEFAULT_UNIT_FILTERS);
   const [appliedUnitFilters, setAppliedUnitFilters] = useState<UnitLedgerFilters>(DEFAULT_UNIT_FILTERS);
   const [teamFilters, setTeamFilters] = useState<TeamLedgerFilters>(DEFAULT_TEAM_FILTERS);
@@ -396,11 +453,45 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       }),
     [appliedAttendanceFilters.attendanceDate, appliedAttendanceFilters.direction, appliedAttendanceFilters.keyword, attendancePage]
   );
+  const attendanceCalendarFilters = useMemo(
+    () =>
+      buildProjectResourceListParams({
+        page: 1,
+        keyword: appliedAttendanceFilters.keyword,
+        attendanceDate: appliedAttendanceFilters.attendanceDate || null,
+        direction: normalizeSelectFilter(appliedAttendanceFilters.direction),
+      }),
+    [appliedAttendanceFilters.attendanceDate, appliedAttendanceFilters.direction, appliedAttendanceFilters.keyword]
+  );
+  const attendanceDeviceListFilters = useMemo(
+    () => buildProjectResourceListParams({ page: 1, pageSize: 100 }),
+    []
+  );
+  const issueDetailFilters = useMemo(
+    () => ({
+      page: 1,
+      page_size: 100,
+      project_id: projectId,
+      worker_id: issueDetailWorker?.id,
+    }),
+    [issueDetailWorker?.id, projectId]
+  );
   const unitQuery = useProjectUnitsQuery(projectId, unitListFilters);
   const teamQuery = useProjectTeamsQuery(projectId, teamListFilters);
   const workerQuery = useProjectWorkersQuery(projectId, workerListFilters);
   const attendanceQuery = useProjectAttendanceQuery(projectId, attendanceListFilters);
-  const attendanceCalendarQuery = useProjectAttendanceCalendarQuery(projectId, attendanceCalendarMonth);
+  const attendanceDevicesQuery = useProjectAttendanceDevicesQuery(projectId, attendanceDeviceListFilters);
+  const workerIssueReportsQuery = useAttendanceDeviceIssueReportsQuery(
+    issueDetailFilters,
+    Boolean(issueDetailWorker)
+  );
+  const attendanceCalendarQuery = useProjectAttendanceCalendarQuery(
+    projectId,
+    appliedAttendanceFilters.attendanceDate
+      ? appliedAttendanceFilters.attendanceDate.slice(0, 7)
+      : attendanceCalendarMonth,
+    attendanceCalendarFilters
+  );
   const [wageFilters, setWageFilters] = useState<WageFilters>({
     payrollMonth: "",
     status: "all",
@@ -429,18 +520,27 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const createAttendance = useCreateAttendanceMutation(projectId);
   const updateAttendance = useUpdateAttendanceMutation(projectId);
   const deleteAttendance = useDeleteAttendanceMutation(projectId);
+  const createAttendanceDeviceIssueReport = useCreateAttendanceDeviceIssueReportMutation();
   const createWageBatch = useCreateWageBatchMutation(projectId);
   const updateWageBatch = useUpdateWageBatchMutation(projectId);
   const deleteWageBatch = useDeleteWageBatchMutation(projectId);
   const importWageBatch = useImportWageBatchMutation(projectId);
+  const updateProject = useUpdateProjectMutation(projectId);
   const project = useMemo(
     () => (projectQuery.data ? apiProjectToDetail(projectQuery.data) : null),
     [projectQuery.data]
   );
+
+  useEffect(() => {
+    const projectName = projectQuery.data?.name?.trim();
+    if (!projectName) return;
+    updateAdminWindowTitle(`/app/admin/projects/${projectId}`, projectName);
+  }, [projectId, projectQuery.data?.name]);
   const tableRawUnits = useMemo(() => unitQuery.data?.items ?? [], [unitQuery.data]);
   const tableRawTeams = useMemo(() => teamQuery.data?.items ?? [], [teamQuery.data]);
   const tableRawWorkers = useMemo(() => workerQuery.data?.items ?? [], [workerQuery.data]);
   const tableRawAttendance = useMemo(() => attendanceQuery.data?.items ?? [], [attendanceQuery.data]);
+  const attendanceDevices = useMemo(() => attendanceDevicesQuery.data?.items ?? [], [attendanceDevicesQuery.data]);
   const workerCountByUnitId = useMemo(
     () => countActiveWorkersByUnitId(rawWorkers),
     [rawWorkers]
@@ -473,13 +573,41 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     () => tableRawWorkers.map((worker) => apiWorkerToDetail(worker, rawTeams, rawUnits)),
     [rawTeams, rawUnits, tableRawWorkers]
   );
-  const tableAttendance = useMemo(
+  const baseTableAttendance = useMemo(
     () => tableRawAttendance.map((record) => apiAttendanceToDetail(record, rawWorkers, rawTeams)),
     [rawTeams, rawWorkers, tableRawAttendance]
   );
-  const attendanceCalendarRows = useMemo(
-    () => buildAttendanceCalendarRowsFromSummary(attendanceCalendarQuery.data?.items ?? []),
-    [attendanceCalendarQuery.data]
+  const attendanceCalendarRows = useMemo(() => {
+    const workerById = new Map(projectWorkers.map((worker) => [worker.id, worker]));
+    return buildAttendanceCalendarRowsFromSummary(attendanceCalendarQuery.data?.items ?? []).map((row) => {
+      const worker = row.workerId ? workerById.get(row.workerId) : undefined;
+      return {
+        ...row,
+        workType: worker?.workType ?? row.workType,
+        workerType: worker?.workerType ?? row.workerType,
+        attendanceDays: Object.values(row.days).filter((day) => day.records.length > 0 || day.workingHours > 0 || day.workPoint > 0).length,
+      };
+    });
+  }, [attendanceCalendarQuery.data, projectWorkers]);
+  const attendanceSummaryByWorker = useMemo(() => {
+    const summaries = new Map<string, Pick<AttendanceRecord, "attendanceDays" | "workingHours" | "workPoint">>();
+    for (const row of attendanceCalendarRows) {
+      const key = row.workerId ?? `${row.worker}::${row.team}`;
+      summaries.set(key, {
+        attendanceDays: Object.values(row.days).filter((day) => day.records.length > 0 || day.workingHours > 0 || day.workPoint > 0).length,
+        workingHours: row.monthlyWorkingHours,
+        workPoint: row.monthlyWorkPoint,
+      });
+    }
+    return summaries;
+  }, [attendanceCalendarRows]);
+  const tableAttendance = useMemo(
+    () =>
+      baseTableAttendance.map((record) => ({
+        ...record,
+        ...(attendanceSummaryByWorker.get(record.workerId ?? `${record.worker}::${record.team}`) ?? {}),
+      })),
+    [attendanceSummaryByWorker, baseTableAttendance]
   );
   const projectMetrics = useMemo(() => {
     if (!project) return null;
@@ -509,11 +637,51 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       attendance: tableAttendance,
     });
   }, [projectMetrics, projectTeams, projectWorkers, tableAttendance, units]);
+  const faceIssueSummary = useMemo<FaceIssueSummary>(() => {
+    const deviceCount = attendanceDevicesQuery.data?.total ?? attendanceDevices.length;
+    const onlineDeviceCount = attendanceDevices.filter((device) => device.online_status === "online").length;
+    const activeWorkers = projectWorkers.filter((worker) => worker.status === "在场");
+    const totalTargetCount = deviceCount * activeWorkers.length;
+    const successTargetCount = activeWorkers.reduce(
+      (sum, worker) => sum + Math.min(worker.issuedDeviceSuccessCount ?? 0, deviceCount),
+      0
+    );
+    const fullyIssuedWorkerCount =
+      deviceCount > 0
+        ? activeWorkers.filter((worker) => Boolean(worker.avatar) && (worker.issuedDeviceSuccessCount ?? 0) >= deviceCount).length
+        : 0;
+
+    return {
+      deviceCount,
+      onlineDeviceCount,
+      activeWorkerCount: activeWorkers.length,
+      missingAvatarWorkerCount: activeWorkers.filter((worker) => !worker.avatar).length,
+      fullyIssuedWorkerCount,
+      incompleteWorkerCount:
+        deviceCount > 0
+          ? activeWorkers.filter((worker) => !worker.avatar || (worker.issuedDeviceSuccessCount ?? 0) < deviceCount).length
+          : 0,
+      successTargetCount,
+      totalTargetCount,
+    };
+  }, [attendanceDevices, attendanceDevicesQuery.data?.total, projectWorkers]);
   const [activeTab, setActiveTab] = useState<DetailTab>("项目基本信息");
   const [dialogMode, setDialogMode] = useState<DetailDialogMode>("create");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formState, setFormState] = useState<DetailFormState>({});
   const [formOpen, setFormOpen] = useState(false);
+  const [projectFormState, setProjectFormState] = useState<DetailFormState>({});
+  const [projectFormOpen, setProjectFormOpen] = useState(false);
+  const [advancedExportOpen, setAdvancedExportOpen] = useState(false);
+  const [advancedExportTarget, setAdvancedExportTarget] = useState<AdvancedExportTarget>("workers");
+  const [advancedExportFormats, setAdvancedExportFormats] = useState<string[]>([]);
+  const [advancedExportScope, setAdvancedExportScope] = useState<AdvancedExportScopeFilters>(
+    DEFAULT_ADVANCED_EXPORT_SCOPE
+  );
+  const [advancedExportMonth, setAdvancedExportMonth] = useState(attendanceCalendarMonth);
+  const [advancedExportAttendanceFilter, setAdvancedExportAttendanceFilter] = useState("all");
+  const [advancedExportSortBy, setAdvancedExportSortBy] = useState("attendance_days_desc");
+  const [advancedExporting, setAdvancedExporting] = useState(false);
   const isMutating =
     createUnit.isPending ||
     updateUnit.isPending ||
@@ -527,6 +695,10 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     updateWageBatch.isPending ||
     importWageBatch.isPending;
 
+  useEffect(() => {
+    if (activeTab === "考勤记录") setAttendanceViewMode("calendar");
+  }, [activeTab]);
+
   const handleWorkerTreeSelectionChange = (selection: WorkerTreeSelection) => {
     setWorkerTreeSelection(selection);
     setWorkerPage(1);
@@ -536,18 +708,33 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     if (activeTab === "建设单位") {
       setAppliedUnitFilters(unitFilters);
       setUnitPage(1);
+      void queryClient.invalidateQueries({
+        queryKey: constructionProjectKeys.unitsRoot(projectId),
+      });
     }
     if (activeTab === "班组信息") {
       setAppliedTeamFilters(teamFilters);
       setTeamPage(1);
+      void queryClient.invalidateQueries({
+        queryKey: constructionProjectKeys.teamsRoot(projectId),
+      });
     }
     if (activeTab === "项目工人") {
       setAppliedWorkerFilters(workerFilters);
       setWorkerPage(1);
+      void queryClient.invalidateQueries({
+        queryKey: constructionProjectKeys.workersRoot(projectId),
+      });
     }
     if (activeTab === "考勤记录") {
       setAppliedAttendanceFilters(attendanceFilters);
+      if (attendanceFilters.attendanceDate) {
+        setAttendanceCalendarMonth(attendanceFilters.attendanceDate.slice(0, 7));
+      }
       setAttendancePage(1);
+      void queryClient.invalidateQueries({
+        queryKey: constructionProjectKeys.attendanceRoot(projectId),
+      });
     }
   };
 
@@ -570,6 +757,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     if (activeTab === "考勤记录") {
       setAttendanceFilters(DEFAULT_ATTENDANCE_FILTERS);
       setAppliedAttendanceFilters(DEFAULT_ATTENDANCE_FILTERS);
+      setAttendanceCalendarMonth(currentPayrollMonth());
       setAttendancePage(1);
     }
   };
@@ -584,6 +772,40 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     setFormState(defaultFormForTab(activeTab, rawUnits, rawTeams, rawWorkers, workerTreeSelection));
     if (activeTab === "工资统计") setWageRows([]);
     setFormOpen(true);
+  };
+
+  const openProjectEditDialog = () => {
+    if (!projectQuery.data) {
+      toast.info("项目数据尚未加载，暂不能编辑。");
+      return;
+    }
+    setProjectFormState(
+      buildFormStateFromRecord(
+        projectFormFields,
+        projectQuery.data as unknown as Record<string, unknown>
+      )
+    );
+    setProjectFormOpen(true);
+  };
+
+  const handleSubmitProject = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!projectFormState.name?.trim()) {
+      toast.error("请填写项目名称");
+      return;
+    }
+
+    try {
+      const payload = buildPayloadFromForm(
+        projectFormFields,
+        projectFormState
+      ) as ConstructionProjectPayload;
+      await updateProject.mutateAsync(payload);
+      setProjectFormOpen(false);
+      toast.success("项目已修改");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "项目修改失败");
+    }
   };
 
   const openEditDialog = (id: string) => {
@@ -622,6 +844,60 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       toast.success("记录已删除");
     } catch {
       toast.error("删除失败");
+    }
+  };
+
+  const handleReissueWorker = async (worker: Worker) => {
+    if (!project) {
+      toast.info("项目数据尚未加载，暂不能补发考勤机。");
+      return;
+    }
+    if (worker.status !== "在场") {
+      toast.info("离场人员禁止下发考勤机。");
+      return;
+    }
+
+    const loadedDevices = attendanceDevices.length > 0
+      ? attendanceDevices
+      : (await attendanceDevicesQuery.refetch()).data?.items ?? [];
+    const devices = loadedDevices.filter((device) => (device.serial_number ?? "").trim());
+    if (devices.length === 0) {
+      toast.info("当前项目暂无可补发的考勤机。");
+      return;
+    }
+
+    setReissuingWorkerId(worker.id);
+    let successCount = 0;
+    let lastError = "";
+    try {
+      for (const device of devices) {
+        try {
+          await createAttendanceDeviceIssueReport.mutateAsync({
+            project_id: projectId,
+            worker_id: worker.id,
+            attendance_device_id: device.id,
+            action: "update",
+            issued_at: new Date().toISOString(),
+            remark: "项目工人列表手动补发",
+          });
+          successCount += 1;
+        } catch (error) {
+          lastError = error instanceof Error ? error.message : "考勤机补发失败";
+        }
+      }
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: constructionProjectKeys.workersRoot(projectId) }),
+        queryClient.invalidateQueries({ queryKey: constructionProjectKeys.attendanceDeviceIssueReportsRoot() }),
+      ]);
+
+      if (successCount === devices.length) {
+        toast.success(`已补发 ${successCount}/${devices.length} 台考勤机`);
+      } else {
+        toast.error(`补发完成 ${successCount}/${devices.length} 台，${lastError || "部分设备失败"}`);
+      }
+    } finally {
+      setReissuingWorkerId(null);
     }
   };
 
@@ -710,6 +986,71 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     }
   };
 
+  const openAdvancedExportDialog = (target: AdvancedExportTarget) => {
+    const scopedUnitId = workerScopeFilter.unitId ?? "";
+    const scopedTeamId = workerScopeFilter.teamId ?? "";
+    const selectedTeamId = normalizeSelectFilter(appliedWorkerFilters.teamId) || scopedTeamId;
+    setAdvancedExportTarget(target);
+    setAdvancedExportFormats(target === "workers" ? [] : ["attendance_time"]);
+    setAdvancedExportScope(
+      target === "workers"
+        ? {
+            keyword: "",
+            unitIds: scopedUnitId ? [scopedUnitId] : ["all"],
+            teamIds: selectedTeamId ? [selectedTeamId] : ["all"],
+            workerIds: ["all"],
+            workStatus: appliedWorkerFilters.workStatus,
+            workType: "all",
+          }
+        : {
+            ...DEFAULT_ADVANCED_EXPORT_SCOPE,
+          }
+    );
+    setAdvancedExportMonth(attendanceCalendarMonth || currentPayrollMonth());
+    setAdvancedExportAttendanceFilter("all");
+    setAdvancedExportSortBy("attendance_days_desc");
+    setAdvancedExportOpen(true);
+  };
+
+  const handleAdvancedExportSubmit = async () => {
+    if (!project) {
+      toast.info("项目数据尚未加载，暂不能导出。");
+      return;
+    }
+    if (advancedExportTarget === "attendance" && advancedExportFormats.length === 0) {
+      toast.info("请选择至少一种导出格式。");
+      return;
+    }
+
+    const scopeFilters = buildAdvancedExportScopePayload(advancedExportScope, advancedExportTarget);
+    const payload =
+      advancedExportTarget === "workers"
+        ? scopeFilters
+        : {
+            ...scopeFilters,
+            formats: advancedExportFormats,
+            attendance_month: advancedExportMonth,
+            attendance_filter: advancedExportAttendanceFilter,
+            sort_by: advancedExportSortBy,
+          };
+
+    setAdvancedExporting(true);
+    try {
+      const blob =
+        advancedExportTarget === "workers"
+          ? await constructionProjectService.exportWorkersAdvanced(projectId, payload)
+          : await constructionProjectService.exportAttendanceAdvanced(projectId, payload);
+      const suffix = advancedExportTarget === "workers" ? "项目工人高级导出" : "高级考勤导出";
+      downloadBlob(`${safeFilename(project.name)}-${suffix}.csv`, blob);
+      toast.success("导出文件已生成");
+      setAdvancedExportOpen(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "导出失败");
+    } finally {
+      setAdvancedExporting(false);
+    }
+  };
+
   const handleExportActiveTab = async () => {
     if (!project) {
       toast.info("项目数据尚未加载，暂不能导出台账。");
@@ -726,15 +1067,11 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
         return;
       }
       if (activeTab === "项目工人") {
-        exportWorkersCsv(project.name, projectWorkers);
+        openAdvancedExportDialog("workers");
         return;
       }
       if (activeTab === "考勤记录") {
-        const records = await constructionProjectService.listAllAttendance(projectId);
-        exportAttendanceCsv(
-          project.name,
-          records.map((record) => apiAttendanceToDetail(record, rawWorkers, rawTeams))
-        );
+        openAdvancedExportDialog("attendance");
         return;
       }
       if (activeTab === "工资统计") {
@@ -795,7 +1132,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                 className="h-8 gap-2 bg-[#0f6b5d] text-white hover:bg-[#0b5148]"
                 onClick={() => {
                   if (activeTab === "项目基本信息") {
-                    toast.info("项目基础信息可在项目列表点击编辑维护。");
+                    openProjectEditDialog();
                     return;
                   }
                   openCreateDialog();
@@ -824,10 +1161,6 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
             ))}
         </div>
       </div>
-
-      {activeTab === "项目基本信息" && overviewAudit && (
-        <ProjectOverviewReport project={projectMetrics} attendance={tableAttendance} audit={overviewAudit} />
-      )}
 
       <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-border dark:bg-card">
         {activeTab !== "项目基本信息" && (
@@ -866,6 +1199,8 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
               teamCount={projectMetrics.teamCount}
               workerCount={projectMetrics.workerCount}
               audit={overviewAudit}
+              faceIssueSummary={faceIssueSummary}
+              reportingPlatforms={projectQuery.data?.reporting_platforms}
             />
           )}
           {activeTab === "建设单位" && (
@@ -912,6 +1247,9 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                 onPageChange: setWorkerPage,
               }}
               onRetireWorker={updateWorker.mutateAsync}
+              onReissueWorker={handleReissueWorker}
+              onViewIssueDetails={setIssueDetailWorker}
+              reissuingWorkerId={reissuingWorkerId}
               onEdit={openEditDialog}
               onDelete={handleDeleteRecord}
               editable
@@ -942,10 +1280,77 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
               onDelete={handleDeleteRecord}
               onImportFile={handleWageImportFile}
               onPageChange={(page) => setWageFilters((current) => ({ ...current, page }))}
+              editable
             />
           )}
         </div>
       </section>
+
+      <AdvancedExportDialog
+        open={advancedExportOpen}
+        target={advancedExportTarget}
+        formats={advancedExportFormats}
+        scope={advancedExportScope}
+        units={units}
+        teams={projectTeams}
+        workers={projectWorkers}
+        attendanceFilter={advancedExportAttendanceFilter}
+        sortBy={advancedExportSortBy}
+        isSubmitting={advancedExporting}
+        onOpenChange={setAdvancedExportOpen}
+        onFormatsChange={setAdvancedExportFormats}
+        onScopeChange={(patch) => setAdvancedExportScope((current) => ({ ...current, ...patch }))}
+        onAttendanceFilterChange={setAdvancedExportAttendanceFilter}
+        onSortByChange={setAdvancedExportSortBy}
+        onSubmit={handleAdvancedExportSubmit}
+      />
+
+      <WorkerIssueDetailsDialog
+        open={Boolean(issueDetailWorker)}
+        worker={issueDetailWorker}
+        reports={workerIssueReportsQuery.data?.items ?? []}
+        total={workerIssueReportsQuery.data?.total ?? 0}
+        isLoading={workerIssueReportsQuery.isLoading || workerIssueReportsQuery.isFetching}
+        isError={workerIssueReportsQuery.isError}
+        onOpenChange={(open) => {
+          if (!open) setIssueDetailWorker(null);
+        }}
+      />
+
+      <Dialog open={projectFormOpen} onOpenChange={setProjectFormOpen}>
+        <DialogContent className="sm:max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>编辑项目</DialogTitle>
+            <DialogDescription>修改当前项目的基本信息。</DialogDescription>
+          </DialogHeader>
+          <form className="grid gap-4" onSubmit={handleSubmitProject}>
+            <ConstructionRecordForm
+              fields={projectFormFields}
+              state={projectFormState}
+              onChange={(key, value) =>
+                setProjectFormState((current) => ({ ...current, [key]: value }))
+              }
+              onBulkChange={(values) =>
+                setProjectFormState((current) => ({ ...current, ...values }))
+              }
+              uploadContext={{ bizType: "project", bizId: projectId }}
+              maxHeightClassName="max-h-[68vh]"
+            />
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setProjectFormOpen(false)}>
+                取消
+              </Button>
+              <Button
+                type="submit"
+                disabled={updateProject.isPending}
+                className="bg-[#0f6b5d] text-white hover:bg-[#0b5148]"
+              >
+                {updateProject.isPending ? "保存中..." : "保存"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
         <DialogContent
@@ -1006,6 +1411,378 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       </Dialog>
     </div>
   );
+}
+
+function AdvancedExportDialog({
+  open,
+  target,
+  formats,
+  scope,
+  units,
+  teams,
+  workers,
+  attendanceFilter,
+  sortBy,
+  isSubmitting,
+  onOpenChange,
+  onFormatsChange,
+  onScopeChange,
+  onAttendanceFilterChange,
+  onSortByChange,
+  onSubmit,
+}: {
+  open: boolean;
+  target: AdvancedExportTarget;
+  formats: string[];
+  scope: AdvancedExportScopeFilters;
+  units: ConstructionUnit[];
+  teams: Team[];
+  workers: Worker[];
+  attendanceFilter: string;
+  sortBy: string;
+  isSubmitting: boolean;
+  onOpenChange: (open: boolean) => void;
+  onFormatsChange: (formats: string[]) => void;
+  onScopeChange: (patch: Partial<AdvancedExportScopeFilters>) => void;
+  onAttendanceFilterChange: (value: string) => void;
+  onSortByChange: (value: string) => void;
+  onSubmit: () => void;
+}) {
+  const title = target === "workers" ? "项目人员导出" : "高级考勤导出";
+  const selectedAttendanceFormat = formats[0] ?? "attendance_time";
+  const unitOptions = units.map((unit) => ({ value: unit.id, label: unit.name }));
+  const unitNameById = new Map(units.map((unit) => [unit.id, unit.name]));
+  const selectedUnitNames = isAllExportSelection(scope.unitIds)
+    ? []
+    : scope.unitIds.map((unitId) => unitNameById.get(unitId)).filter(Boolean);
+  const filteredTeams = selectedUnitNames.length === 0
+    ? teams
+    : teams.filter((team) => selectedUnitNames.includes(team.unitName));
+  const teamOptions = filteredTeams.map((team) => ({
+    value: team.id,
+    label: `${team.unitName} / ${team.name}`,
+  }));
+  const teamNameById = new Map(teams.map((team) => [team.id, team.name]));
+  const selectedTeamNames = isAllExportSelection(scope.teamIds)
+    ? []
+    : scope.teamIds.map((teamId) => teamNameById.get(teamId)).filter(Boolean);
+  const workerOptions = workers
+    .filter((worker) => selectedUnitNames.length === 0 || selectedUnitNames.includes(worker.unit))
+    .filter((worker) => selectedTeamNames.length === 0 || selectedTeamNames.includes(worker.team))
+    .filter((worker) => {
+      if (scope.workStatus === "1") return worker.status === "在场";
+      if (scope.workStatus === "2") return worker.status === "离场";
+      return true;
+    })
+    .map((worker) => ({
+      value: worker.id,
+      label: worker.name,
+      description: worker.idCard || worker.phone || worker.team,
+    }));
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className={target === "workers" ? "sm:max-w-5xl" : "sm:max-w-2xl"}>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          {target === "attendance" ? (
+            <DialogDescription>按筛选范围生成组合导出包。</DialogDescription>
+          ) : null}
+        </DialogHeader>
+
+        {target === "workers" ? (
+          <div className="space-y-5 py-2">
+            <AdvancedExportField label="参建单位">
+              <AdvancedExportMultiSelect
+                value={scope.unitIds}
+                options={unitOptions}
+                allLabel="全部单位"
+                onChange={(unitIds) => onScopeChange({ unitIds, teamIds: ["all"], workerIds: ["all"] })}
+              />
+            </AdvancedExportField>
+            <AdvancedExportField label="班组">
+              <AdvancedExportMultiSelect
+                value={scope.teamIds}
+                options={teamOptions}
+                allLabel="全部班组"
+                onChange={(teamIds) => onScopeChange({ teamIds, workerIds: ["all"] })}
+              />
+            </AdvancedExportField>
+            <AdvancedExportField label="人员">
+              <AdvancedExportMultiSelect
+                value={scope.workerIds}
+                options={workerOptions}
+                allLabel="全部人员"
+                onChange={(workerIds) => onScopeChange({ workerIds })}
+              />
+            </AdvancedExportField>
+            <AdvancedExportField label="人员筛选">
+              <div className="flex flex-wrap gap-7">
+                {[
+                  { label: "全部", value: "all" },
+                  { label: "在职", value: "1" },
+                  { label: "离职", value: "2" },
+                ].map((option) => {
+                  const active = scope.workStatus === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={cn(
+                        "flex items-center gap-2 text-sm font-medium",
+                        active ? "text-[#0f6b5d]" : "text-slate-600 hover:text-[#0f6b5d] dark:text-muted-foreground"
+                      )}
+                      onClick={() => onScopeChange({ workStatus: option.value, workerIds: ["all"] })}
+                    >
+                      <span
+                        className={cn(
+                          "flex size-4 items-center justify-center rounded-full border",
+                          active ? "border-[#0f6b5d]" : "border-slate-300"
+                        )}
+                      >
+                        {active ? <span className="size-2 rounded-full bg-[#0f6b5d]" /> : null}
+                      </span>
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </AdvancedExportField>
+          </div>
+        ) : (
+          <div className="space-y-5 py-2">
+            <AdvancedExportField label="导出方式">
+              <div className="space-y-2">
+                <div className="flex flex-wrap gap-x-6 gap-y-3">
+                  {ATTENDANCE_ADVANCED_EXPORT_OPTIONS.map((option) => {
+                    const active = selectedAttendanceFormat === option.value;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={cn(
+                          "flex items-center gap-2 text-sm font-medium",
+                          active ? "text-[#0f6b5d]" : "text-slate-600 hover:text-[#0f6b5d] dark:text-muted-foreground"
+                        )}
+                        onClick={() => onFormatsChange([option.value])}
+                      >
+                        <span
+                          className={cn(
+                            "flex size-4 items-center justify-center rounded-full border",
+                            active ? "border-[#0f6b5d]" : "border-slate-300"
+                          )}
+                        >
+                          {active ? <span className="size-2 rounded-full bg-[#0f6b5d]" /> : null}
+                        </span>
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="text-xs text-slate-500 dark:text-muted-foreground">
+                  {ATTENDANCE_ADVANCED_EXPORT_OPTIONS.find((option) => option.value === selectedAttendanceFormat)?.description}
+                </div>
+              </div>
+            </AdvancedExportField>
+            <AdvancedExportField label="参建单位">
+              <AdvancedExportMultiSelect
+                value={scope.unitIds}
+                options={unitOptions}
+                allLabel="全部单位"
+                onChange={(unitIds) => onScopeChange({ unitIds, teamIds: ["all"], workerIds: ["all"] })}
+              />
+            </AdvancedExportField>
+            <AdvancedExportField label="班组">
+              <AdvancedExportMultiSelect
+                value={scope.teamIds}
+                options={teamOptions}
+                allLabel="全部班组"
+                onChange={(teamIds) => onScopeChange({ teamIds, workerIds: ["all"] })}
+              />
+            </AdvancedExportField>
+            <AdvancedExportField label="人员">
+              <AdvancedExportMultiSelect
+                value={scope.workerIds}
+                options={workerOptions}
+                allLabel="全部人员"
+                onChange={(workerIds) => onScopeChange({ workerIds })}
+              />
+            </AdvancedExportField>
+            <AdvancedExportField label="人员筛选">
+              <div className="flex flex-wrap gap-7">
+                {[
+                  { label: "全部人员", value: "all" },
+                  { label: "有考勤人员", value: "has_attendance" },
+                  { label: "无考勤人员", value: "no_attendance" },
+                ].map((option) => {
+                  const active = attendanceFilter === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={cn(
+                        "flex items-center gap-2 text-sm font-medium",
+                        active ? "text-[#0f6b5d]" : "text-slate-600 hover:text-[#0f6b5d] dark:text-muted-foreground"
+                      )}
+                      onClick={() => onAttendanceFilterChange(option.value)}
+                    >
+                      <span
+                        className={cn(
+                          "flex size-4 items-center justify-center rounded-full border",
+                          active ? "border-[#0f6b5d]" : "border-slate-300"
+                        )}
+                      >
+                        {active ? <span className="size-2 rounded-full bg-[#0f6b5d]" /> : null}
+                      </span>
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </AdvancedExportField>
+            <AdvancedExportField label="排序方式">
+              <Select value={sortBy} onValueChange={onSortByChange}>
+                <SelectTrigger className="h-10 w-full bg-white dark:bg-background">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="attendance_days_desc">考勤天数从高到低</SelectItem>
+                  <SelectItem value="name_asc">按姓名排序</SelectItem>
+                  <SelectItem value="team_asc">按班组排序</SelectItem>
+                  <SelectItem value="entry_time_desc">进场时间从近到远</SelectItem>
+                  <SelectItem value="entry_time_asc">进场时间从远到近</SelectItem>
+                  <SelectItem value="work_type_asc">按工种排序</SelectItem>
+                </SelectContent>
+              </Select>
+            </AdvancedExportField>
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            取消
+          </Button>
+          <Button type="button" disabled={isSubmitting || (target === "attendance" && formats.length === 0)} className="bg-[#0f6b5d] text-white hover:bg-[#0b5148]" onClick={onSubmit}>
+            {isSubmitting ? "导出中..." : "导出"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AdvancedExportField({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="grid gap-3 sm:grid-cols-[96px_minmax(0,1fr)] sm:items-start">
+      <div className="pt-2 text-sm font-medium text-slate-600 dark:text-muted-foreground">{label}</div>
+      <div className="min-w-0">{children}</div>
+    </div>
+  );
+}
+
+function AdvancedExportMultiSelect({
+  value,
+  options,
+  allLabel,
+  onChange,
+  compact = false,
+}: {
+  value: string[];
+  options: Array<{ value: string; label: string; description?: string }>;
+  allLabel: string;
+  onChange: (value: string[]) => void;
+  compact?: boolean;
+}) {
+  const selectedAll = isAllExportSelection(value);
+  const selectedOptions = selectedAll ? [] : options.filter((option) => value.includes(option.value));
+
+  const setAll = () => onChange(["all"]);
+  const toggleOption = (optionValue: string, checked: boolean) => {
+    const current = selectedAll ? [] : value.filter((item) => item !== "all");
+    const next = checked
+      ? [...current, optionValue]
+      : current.filter((item) => item !== optionValue);
+    onChange(next.length > 0 ? Array.from(new Set(next)) : ["all"]);
+  };
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          className={cn(
+            "h-auto min-h-10 w-full shrink justify-between gap-2 whitespace-normal border-slate-200 bg-white px-3 py-1.5 text-left font-normal dark:border-border dark:bg-background",
+            compact && "min-h-8 py-1 text-sm"
+          )}
+        >
+          <span className="flex min-w-0 flex-1 flex-wrap gap-1">
+            {selectedAll ? (
+              <span className="truncate text-slate-600 dark:text-muted-foreground">{allLabel}</span>
+            ) : (
+              <>
+                {selectedOptions.slice(0, 3).map((option) => (
+                  <span
+                    key={option.value}
+                    className="max-w-[220px] truncate rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-muted dark:text-muted-foreground"
+                  >
+                    {option.label}
+                  </span>
+                ))}
+                {selectedOptions.length > 3 ? (
+                  <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-muted dark:text-muted-foreground">
+                    +{selectedOptions.length - 3}
+                  </span>
+                ) : null}
+              </>
+            )}
+          </span>
+          <ChevronDown className="size-4 shrink-0 text-slate-400" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="max-h-72 w-[var(--radix-dropdown-menu-trigger-width)] overflow-y-auto">
+        <DropdownMenuCheckboxItem
+          checked={selectedAll}
+          onSelect={(event) => event.preventDefault()}
+          onCheckedChange={setAll}
+        >
+          {allLabel}
+        </DropdownMenuCheckboxItem>
+        <DropdownMenuSeparator />
+        {options.length === 0 ? (
+          <DropdownMenuItem disabled>暂无可选数据</DropdownMenuItem>
+        ) : (
+          options.map((option) => (
+            <DropdownMenuCheckboxItem
+              key={option.value}
+              checked={!selectedAll && value.includes(option.value)}
+              onSelect={(event) => event.preventDefault()}
+              onCheckedChange={(checked) => toggleOption(option.value, Boolean(checked))}
+            >
+              <span className="min-w-0">
+                <span className="block truncate">{option.label}</span>
+                {option.description ? (
+                  <span className="block truncate text-xs text-slate-500 dark:text-muted-foreground">
+                    {option.description}
+                  </span>
+                ) : null}
+              </span>
+            </DropdownMenuCheckboxItem>
+          ))
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function isAllExportSelection(value: string[]) {
+  return value.length === 0 || value.includes("all");
 }
 
 function ProjectUnavailableState({
@@ -1085,7 +1862,7 @@ function ModuleFilters({
   if (activeTab === "班组信息") {
     return (
       <FilterGrid onSearch={onSearch} onReset={onReset}>
-        <FilterInput label="关键词" placeholder="班组名称、班组长、班组编号" value={teamFilters.keyword} onChange={(event) => onTeamFiltersChange({ keyword: event.target.value })} />
+        <FilterInput label="关键词" placeholder="班组名称、班组长" value={teamFilters.keyword} onChange={(event) => onTeamFiltersChange({ keyword: event.target.value })} />
         <FilterSelect label="参建单位" value={teamFilters.unitId} onValueChange={(unitId) => onTeamFiltersChange({ unitId })} options={[{ label: "全部单位", value: "all" }, ...units.map((unit) => ({ label: unit.name, value: unit.id }))]} />
         <FilterSelect label="工种" value={teamFilters.workType} onValueChange={(workType) => onTeamFiltersChange({ workType })} options={selectOptionsFromField(teamFormFields, "work_type", "全部工种")} />
         <FilterSelect
@@ -1161,11 +1938,11 @@ function WageFiltersBar({
         </Select>
       </label>
       <div className="flex items-end gap-2 sm:col-span-2 xl:col-span-1 xl:justify-end">
-        <Button size="sm" variant="outline" className="h-8 gap-2 border-slate-200 bg-white dark:border-border dark:bg-background" onClick={onReset}>
+        <Button type="button" size="sm" variant="outline" className="h-8 gap-2 border-slate-200 bg-white dark:border-border dark:bg-background" onClick={onReset}>
           <RotateCcw className="size-4" />
           重置
         </Button>
-        <Button size="sm" className="h-8 gap-2 bg-[#0f6b5d] text-white hover:bg-[#0b5148]" onClick={() => onChange({ page: 1 })}>
+        <Button type="button" size="sm" className="h-8 gap-2 bg-[#0f6b5d] text-white hover:bg-[#0b5148]" onClick={() => onChange({ page: 1 })}>
           <Search className="size-4" />
           查询
         </Button>
@@ -1330,13 +2107,13 @@ function WageItemsEditor({
                       <Input className="h-8 w-full min-w-0 px-2" value={row.wage_bank} onChange={(event) => patchRow(rowKey, { wage_bank: event.target.value })} />
                     </TableCell>
                     <TableCell className="px-1">
-                      <Input className="h-8 w-full min-w-0 px-2" type="number" value={row.payable_amount_yuan} onChange={(event) => patchRow(rowKey, { payable_amount_yuan: event.target.value })} />
+                      <Input className="h-8 w-full min-w-0 px-2" type="number" step="0.01" inputMode="decimal" value={row.payable_amount_yuan} onChange={(event) => patchRow(rowKey, { payable_amount_yuan: event.target.value })} />
                     </TableCell>
                     <TableCell className="px-1">
-                      <Input className="h-8 w-full min-w-0 px-2" type="number" value={row.paid_amount_yuan} onChange={(event) => patchRow(rowKey, { paid_amount_yuan: event.target.value })} />
+                      <Input className="h-8 w-full min-w-0 px-2" type="number" step="0.01" inputMode="decimal" value={row.paid_amount_yuan} onChange={(event) => patchRow(rowKey, { paid_amount_yuan: event.target.value })} />
                     </TableCell>
                     <TableCell className="px-1">
-                      <Input className="h-8 w-full min-w-0 px-2" type="number" value={row.unpaid_amount_yuan} onChange={(event) => patchRow(rowKey, { unpaid_amount_yuan: event.target.value })} />
+                      <Input className="h-8 w-full min-w-0 px-2" type="number" step="0.01" inputMode="decimal" value={row.unpaid_amount_yuan} onChange={(event) => patchRow(rowKey, { unpaid_amount_yuan: event.target.value })} />
                     </TableCell>
                     <TableCell className="px-1">
                       <Input className="h-8 w-full min-w-0 px-2" value={row.adjustment_reason} onChange={(event) => patchRow(rowKey, { adjustment_reason: event.target.value })} />
@@ -1371,11 +2148,11 @@ function FilterGrid({
     <div className="grid gap-2 rounded-lg border border-slate-200 bg-white p-2 dark:border-border dark:bg-background sm:grid-cols-2 xl:grid-cols-[minmax(240px,2fr)_repeat(3,minmax(140px,1fr))_auto]">
       {children}
       <div className="flex items-end gap-2 sm:col-span-2 xl:col-span-1 xl:justify-end">
-        <Button size="sm" variant="outline" className="h-8 gap-2 border-slate-200 bg-white dark:border-border dark:bg-background" onClick={onReset}>
+        <Button type="button" size="sm" variant="outline" className="h-8 gap-2 border-slate-200 bg-white dark:border-border dark:bg-background" onClick={onReset}>
           <RotateCcw className="size-4" />
           重置
         </Button>
-        <Button size="sm" className="h-8 gap-2 bg-[#0f6b5d] text-white hover:bg-[#0b5148]" onClick={onSearch}>
+        <Button type="button" size="sm" className="h-8 gap-2 bg-[#0f6b5d] text-white hover:bg-[#0b5148]" onClick={onSearch}>
           <Search className="size-4" />
           查询
         </Button>
@@ -1454,18 +2231,55 @@ function normalizeSelectFilter(value: string) {
   return value && value !== "all" ? value : null;
 }
 
+function normalizeExportSelection(values: string[]) {
+  return values.filter((value) => value && value !== "all");
+}
+
+function buildAdvancedExportScopePayload(
+  scope: AdvancedExportScopeFilters,
+  target: AdvancedExportTarget
+) {
+  const payload: Record<string, unknown> = {};
+  const unitIds = normalizeExportSelection(scope.unitIds);
+  const teamIds = normalizeExportSelection(scope.teamIds);
+  const workerIds = normalizeExportSelection(scope.workerIds);
+  if (target === "attendance" && scope.keyword.trim()) {
+    payload.keyword = scope.keyword.trim();
+  }
+  if (unitIds.length > 0) {
+    payload.unit_ids = unitIds;
+  }
+  if (teamIds.length > 0) {
+    payload.team_ids = teamIds;
+  }
+  if (workerIds.length > 0) {
+    payload.worker_ids = workerIds;
+  }
+  if (normalizeSelectFilter(scope.workStatus)) {
+    payload.work_status = scope.workStatus;
+  }
+  if (target === "attendance" && normalizeSelectFilter(scope.workType)) {
+    payload.work_type = scope.workType;
+  }
+  return payload;
+}
+
 function ProjectInfoTab({
   project,
   unitCount,
   teamCount,
   workerCount,
   audit,
+  faceIssueSummary,
+  reportingPlatforms,
 }: {
   project: Project;
   unitCount: number;
   teamCount: number;
   workerCount: number;
   audit: ProjectOverviewAudit | null;
+  faceIssueSummary: FaceIssueSummary;
+  reportingPlatforms: ConstructionProject["reporting_platforms"];
 }) {
   const items = [
     ["项目名称", formatProjectTitle(project.name), project.name],
@@ -1493,6 +2307,8 @@ function ProjectInfoTab({
         <MetricCell label="实名考勤率" value={`${project.attendanceRate}%`} helper="考勤覆盖" accent="amber" compact />
       </div>
 
+      <FaceIssueSummaryPanel summary={faceIssueSummary} />
+
       <div className="grid gap-3 lg:grid-cols-[1.2fr_0.8fr]">
         <div className="grid gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 dark:border-border dark:bg-border sm:grid-cols-2">
           {items.map(([label, value, fullValue], index) => (
@@ -1512,6 +2328,14 @@ function ProjectInfoTab({
         </div>
         <div className="rounded-lg border border-slate-200 bg-[#fbfcfc] p-3 dark:border-border dark:bg-card">
           <div className="flex items-center gap-2 text-sm font-medium">
+            <Upload className="size-4 text-[#0f6b5d]" />
+            上报列表
+          </div>
+          <div className="mt-2 rounded-md border border-slate-200 bg-white px-3 py-2 dark:border-border dark:bg-background">
+            <ProjectReportingPlatforms platforms={reportingPlatforms} />
+          </div>
+          <div className="my-3 border-t border-slate-200 dark:border-border" />
+          <div className="flex items-center gap-2 text-sm font-medium">
             <Building2 className="size-4 text-[#0f6b5d]" />
             项目核对重点
           </div>
@@ -1527,176 +2351,65 @@ function ProjectInfoTab({
   );
 }
 
-function ProjectOverviewReport({
-  project,
-  attendance,
-  audit,
-}: {
-  project: Project;
-  attendance: AttendanceRecord[];
-  audit: ProjectOverviewAudit;
-}) {
-  const exceptionCount = attendance.filter((record) => record.status !== "有效").length;
-  const missingAttendanceCount = Math.max(project.workerCount - project.attendanceToday, 0);
+function FaceIssueSummaryPanel({ summary }: { summary: FaceIssueSummary }) {
+  const deviceHelper =
+    summary.deviceCount > 0
+      ? `${summary.onlineDeviceCount} 台在线`
+      : "请先绑定考勤机";
+  const incompleteHelper =
+    summary.deviceCount > 0
+      ? `含无头像 ${summary.missingAvatarWorkerCount} 人`
+      : "暂无下发目标";
+  const statusLabel =
+    summary.deviceCount === 0
+      ? "未配置"
+      : summary.incompleteWorkerCount > 0
+        ? "待处理"
+        : "已完成";
 
   return (
-    <div className="grid gap-3 xl:grid-cols-[1fr_0.9fr_0.9fr]">
-      <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-border dark:bg-card">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h3 className="text-base font-semibold tracking-normal">今日现场</h3>
-            <p className="mt-1 text-xs text-slate-500 dark:text-muted-foreground">工人进出与异常考勤概览。</p>
-          </div>
-          <span className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300">
-            实时更新
-          </span>
-        </div>
-        <div className="mt-3 grid gap-2 sm:grid-cols-3">
-          <AttendanceSummary label="已进场" value={project.attendanceToday} max={project.workerCount} />
-          <AttendanceSummary label="未打卡" value={missingAttendanceCount} max={project.workerCount} tone="amber" />
-          <AttendanceSummary label="待处理" value={exceptionCount} max={Math.max(attendance.length, 1)} tone="red" />
-        </div>
-        <div className="mt-3 space-y-2">
-          {attendance.slice(0, 3).map((record) => (
-            <div key={record.id} className="flex items-center justify-between gap-3 border-t border-slate-100 pt-2 text-sm dark:border-border">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-slate-900 dark:text-foreground">{record.worker}</span>
-                  <span className="text-xs text-slate-400 dark:text-muted-foreground">{record.team}</span>
-                </div>
-                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-muted-foreground">
-                  <span>{record.time}</span>
-                  <span>{record.device}</span>
-                </div>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600 dark:border-border dark:bg-background dark:text-muted-foreground">
-                  {record.direction}
-                </span>
-                <ProjectStatusBadge value={record.status} />
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="rounded-lg border border-slate-200 bg-[#fbfcfc] p-3 dark:border-border dark:bg-card">
-        <div className="flex items-center gap-2">
-          <FileCheck2 className="size-4 text-[#0f6b5d]" />
-          <h3 className="text-base font-semibold tracking-normal">项目资料完整度</h3>
-        </div>
-        <div className="mt-3 space-y-3">
-          <ProgressLine label="基础信息" value={audit.completeness.basicInfo} tone={audit.completeness.basicInfo < 80 ? "amber" : "teal"} />
-          <ProgressLine label="单位信息" value={audit.completeness.unitInfo} tone={audit.completeness.unitInfo < 80 ? "amber" : "teal"} />
-          <ProgressLine label="班组信息" value={audit.completeness.teamInfo} tone={audit.completeness.teamInfo < 80 ? "amber" : "teal"} />
-          <ProgressLine label="实名考勤" value={audit.completeness.realNameAttendance} tone={audit.completeness.realNameAttendance < 80 ? "amber" : "teal"} />
-        </div>
-        <div className="mt-3 rounded-lg border border-emerald-100 bg-emerald-50/70 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-300">
-          {audit.recommendation}
-        </div>
-      </div>
-
-      <div className="rounded-lg border border-slate-200 bg-[#fcfdfc] p-3 dark:border-border dark:bg-card">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h3 className="text-base font-semibold tracking-normal">风险与待办</h3>
-            <p className="mt-1 text-xs text-slate-500 dark:text-muted-foreground">进入详情页后优先看的处理队列。</p>
-          </div>
-          <span className="rounded-md bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-300">
-            {audit.pendingRiskCount} 项
-          </span>
-        </div>
-        <div className="mt-3 space-y-2">
-          <RiskLine icon={CheckCircle2} label="施工许可证" value={audit.workPermit.value} done={audit.workPermit.done} />
-          <RiskLine icon={Building2} label="建设单位信息" value={audit.unitMatch.value} done={audit.unitMatch.done} />
-          <RiskLine icon={TimerReset} label="班组考勤时段" value={audit.teamAttendance.value} done={audit.teamAttendance.done} />
-          <RiskLine icon={ShieldAlert} label="今日考勤异常" value={audit.attendanceExceptions.value} done={audit.attendanceExceptions.done} />
-        </div>
-        <div className="mt-3 border-t border-slate-100 pt-3 dark:border-border">
-          <div className="text-xs font-medium text-slate-500 dark:text-muted-foreground">项目负责人</div>
-          <div className="mt-2 grid gap-2 text-sm">
-            <div>
-              <div className="font-semibold text-slate-900 dark:text-foreground">{project.manager}</div>
-              <div className="mt-0.5 text-xs text-slate-500 dark:text-muted-foreground">{project.managerPhone}</div>
-            </div>
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <span className="rounded-md bg-slate-50 px-2 py-1 text-slate-600 dark:bg-muted dark:text-muted-foreground">实名制 {project.realNameManager}</span>
-              <span className="rounded-md bg-slate-50 px-2 py-1 text-slate-600 dark:bg-muted dark:text-muted-foreground">劳资 {project.laborManager}</span>
-            </div>
+    <div className="rounded-lg border border-slate-200 bg-[#fbfcfc] p-3 dark:border-border dark:bg-card">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="text-sm font-semibold text-slate-900 dark:text-foreground">考勤机人脸下发</div>
+          <div className="mt-0.5 text-xs text-slate-500 dark:text-muted-foreground">
+            统计在场工人头像下发到项目考勤机的最新成功情况。
           </div>
         </div>
+        <span
+          className={cn(
+            "rounded-md border px-2 py-1 text-xs font-semibold",
+            summary.deviceCount === 0 || summary.incompleteWorkerCount > 0
+              ? "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300"
+              : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300"
+          )}
+        >
+          {statusLabel}
+        </span>
       </div>
-    </div>
-  );
-}
-
-function AttendanceSummary({
-  label,
-  value,
-  max,
-  tone = "teal",
-}: {
-  label: string;
-  value: number;
-  max: number;
-  tone?: "teal" | "amber" | "red";
-}) {
-  const width = Math.max(4, Math.min(100, Math.round((value / max) * 100)));
-  const barClass = {
-    teal: "bg-[#0f6b5d]",
-    amber: "bg-amber-500",
-    red: "bg-red-500",
-  }[tone];
-
-  return (
-    <div>
-      <div className="flex items-center justify-between text-xs">
-        <span className="font-medium text-slate-500 dark:text-muted-foreground">{label}</span>
-        <span className="font-semibold text-slate-900 dark:text-foreground">{value}</span>
-      </div>
-      <div className="mt-2 h-1.5 rounded-full bg-slate-100 dark:bg-muted">
-        <div className={cn("h-full rounded-full", barClass)} style={{ width: `${width}%` }} />
-      </div>
-    </div>
-  );
-}
-
-function ProgressLine({ label, value, tone = "teal" }: { label: string; value: number; tone?: "teal" | "amber" }) {
-  return (
-    <div>
-      <div className="mb-2 flex items-center justify-between text-sm">
-        <span className="text-slate-600 dark:text-muted-foreground">{label}</span>
-        <span className={cn("font-medium", tone === "amber" ? "text-amber-700 dark:text-amber-300" : "text-[#0f6b5d] dark:text-primary")}>{value}%</span>
-      </div>
-      <div className="h-2 rounded-full bg-slate-100 dark:bg-muted">
-        <div
-          className={cn("h-full rounded-full", tone === "amber" ? "bg-amber-500" : "bg-[#0f6b5d]")}
-          style={{ width: `${value}%` }}
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <MetricCell label="绑定考勤机" value={`${summary.deviceCount} 台`} helper={deviceHelper} compact />
+        <MetricCell
+          label="下发成功"
+          value={`${summary.successTargetCount}/${summary.totalTargetCount}`}
+          helper="成功/应下发"
+          accent="teal"
+          compact
         />
-      </div>
-    </div>
-  );
-}
-
-function RiskLine({
-  icon: Icon,
-  label,
-  value,
-  done = false,
-}: {
-  icon: LucideIcon;
-  label: string;
-  value: string;
-  done?: boolean;
-}) {
-  return (
-    <div className="flex items-start gap-3 rounded-lg border border-slate-200 bg-white p-3 dark:border-border dark:bg-background">
-      <span className={cn("rounded-md p-1.5", done ? "bg-emerald-50 text-[#0f6b5d] dark:bg-emerald-950 dark:text-emerald-300" : "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300")}>
-        <Icon className="size-4" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium text-slate-900 dark:text-foreground">{label}</div>
-        <div className={cn("mt-1 text-xs", done ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300")}>{value}</div>
+        <MetricCell
+          label="未成功人员"
+          value={`${summary.incompleteWorkerCount} 人`}
+          helper={incompleteHelper}
+          accent={summary.incompleteWorkerCount > 0 ? "amber" : "teal"}
+          compact
+        />
+        <MetricCell
+          label="全量完成人员"
+          value={`${summary.fullyIssuedWorkerCount}/${summary.activeWorkerCount}`}
+          helper="在场工人"
+          accent="slate"
+          compact
+        />
       </div>
     </div>
   );
@@ -1787,6 +2500,9 @@ function WorkersTab({
   onSelectionChange,
   pagination,
   onRetireWorker,
+  onReissueWorker,
+  onViewIssueDetails,
+  reissuingWorkerId,
   editable,
   onEdit,
   onDelete,
@@ -1800,6 +2516,9 @@ function WorkersTab({
   onSelectionChange: (selection: WorkerTreeSelection) => void;
   pagination: TablePaginationConfig;
   onRetireWorker: (args: { workerId: string; payload: ConstructionWorkerPayload }) => Promise<unknown>;
+  onReissueWorker: (worker: Worker) => Promise<void>;
+  onViewIssueDetails: (worker: Worker) => void;
+  reissuingWorkerId: string | null;
   editable: boolean;
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
@@ -1811,6 +2530,10 @@ function WorkersTab({
     selection.kind === "team" ? activeUnit?.teams.find((team) => team.name === selection.teamName) : undefined;
   const scopedWorkers = workers;
   const [downloadingWorkerId, setDownloadingWorkerId] = useState<string | null>(null);
+  const [reentryWorker, setReentryWorker] = useState<Worker | null>(null);
+  const [reentryTeamId, setReentryTeamId] = useState("");
+  const [reentryEntryTime, setReentryEntryTime] = useState(dateInputToday());
+  const [reentrySaving, setReentrySaving] = useState(false);
   const scopedTeams =
     selection.kind === "team"
       ? activeTeam
@@ -1832,6 +2555,42 @@ function WorkersTab({
       : selection.kind === "team"
         ? `${selection.unitName} / ${selection.teamName}`
         : selection.unitName;
+
+  const openReentry = (worker: Worker) => {
+    const team = teams.find((item) => item.name === worker.team && item.unitName === worker.unit) ?? teams[0];
+    if (!team) {
+      toast.info("请先维护班组，再办理进场。");
+      return;
+    }
+    setReentryWorker(worker);
+    setReentryTeamId(team.id);
+    setReentryEntryTime(dateInputToday());
+  };
+
+  const submitReentry = async () => {
+    const team = teams.find((item) => item.id === reentryTeamId);
+    if (!reentryWorker || !team || !reentryEntryTime || reentrySaving) return;
+
+    setReentrySaving(true);
+    try {
+      await onRetireWorker({
+        workerId: reentryWorker.id,
+        payload: {
+          ...(team.unitId ? { unit_id: team.unitId } : {}),
+          team_id: team.id,
+          work_status: 1,
+          entry_time: reentryEntryTime,
+          exit_time: null,
+        },
+      });
+      setReentryWorker(null);
+      toast.success("工人已进场");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "进场失败");
+    } finally {
+      setReentrySaving(false);
+    }
+  };
 
   return (
     <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
@@ -1983,26 +2742,307 @@ function WorkersTab({
         </div>
         <DataTable
           empty="暂无工人"
-          headers={editable ? ["姓名", "性别", "身份证", "手机号", "班组", "参建单位", "工种", "状态", "进场日期", "操作"] : ["姓名", "性别", "身份证", "手机号", "班组", "参建单位", "工种", "状态", "进场日期"]}
+          headers={editable ? ["头像", "姓名", "手机号", "班组", "参建单位", "工种", "下发成功", "状态", "进场日期", "操作"] : ["头像", "姓名", "手机号", "班组", "参建单位", "工种", "下发成功", "状态", "进场日期"]}
+          tableClassName={editable ? "min-w-[1120px]" : "min-w-[1000px]"}
+          cellClassNames={["w-16"]}
+          scrollX
           rows={scopedWorkers.map((worker) => [
+            <WorkerAvatar key={`${worker.id}-avatar`} src={worker.avatar} name={worker.name} />,
             worker.name,
-            worker.gender,
-            worker.idCard,
             worker.phone,
             worker.team,
             worker.unit,
             worker.workType,
+            <WorkerIssueCountBadge
+              key={`${worker.id}-issue-count`}
+              count={worker.issuedDeviceSuccessCount ?? 0}
+              total={worker.issuedDeviceTotalCount ?? 0}
+              onClick={() => onViewIssueDetails(worker)}
+            />,
             <ProjectStatusBadge key={worker.id} value={worker.status} />,
             worker.entryDate,
             ...(editable ? [<RowActions key={`${worker.id}-actions`} onEdit={() => onEdit(worker.id)} onDelete={() => onDelete(worker.id)} extraActions={[
-              ...(worker.status === "离场" ? [] : [{ label: "退场", icon: LogOut, onSelect: () => void retireWorker(worker, onRetireWorker) }]),
+              ...(worker.status === "在场"
+                ? [{
+                    label: reissuingWorkerId === worker.id ? "补发中..." : "考勤机补发",
+                    icon: Upload,
+                    disabled: reissuingWorkerId !== null,
+                    onSelect: () => void onReissueWorker(worker),
+                  }]
+                : []),
+              worker.status === "离场"
+                ? { label: "进场", icon: LogIn, onSelect: () => openReentry(worker) }
+                : { label: "退场", icon: LogOut, onSelect: () => void retireWorker(worker, onRetireWorker) },
               { label: "下载合同模板", icon: FileDown, disabled: downloadingWorkerId === worker.id, onSelect: () => void downloadWorkerContract(projectId, worker, setDownloadingWorkerId) },
             ]} />] : []),
           ])}
           pagination={pagination}
         />
       </div>
+      <Dialog open={Boolean(reentryWorker)} onOpenChange={(open) => {
+        if (!open && !reentrySaving) setReentryWorker(null);
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>办理进场</DialogTitle>
+            <DialogDescription>{reentryWorker?.name ?? "工人"}将恢复为在场状态。</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <label className="grid gap-2 text-sm font-medium text-slate-700 dark:text-foreground">
+              所属班组
+              <Select value={reentryTeamId} onValueChange={setReentryTeamId}>
+                <SelectTrigger><SelectValue placeholder="请选择班组" /></SelectTrigger>
+                <SelectContent>
+                  {teams.map((team) => <SelectItem key={team.id} value={team.id}>{team.unitName} / {team.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </label>
+            <label className="grid gap-2 text-sm font-medium text-slate-700 dark:text-foreground">
+              进场日期
+              <Input type="date" value={reentryEntryTime} onChange={(event) => setReentryEntryTime(event.target.value)} />
+            </label>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" disabled={reentrySaving} onClick={() => setReentryWorker(null)}>取消</Button>
+            <Button type="button" disabled={!reentryTeamId || !reentryEntryTime || reentrySaving} className="bg-[#0f6b5d] text-white hover:bg-[#0b5148]" onClick={() => void submitReentry()}>
+              {reentrySaving ? "提交中..." : "确认进场"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
+  );
+}
+
+function WorkerIssueCountBadge({ count, total, onClick }: { count: number; total: number; onClick: () => void }) {
+  const completed = total > 0 && count >= total;
+  const partial = count > 0 && !completed;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "inline-flex min-w-12 items-center justify-center rounded-md border px-2 py-1 text-xs font-semibold transition-colors hover:border-[#0f6b5d] hover:text-[#0f6b5d] focus:outline-none focus:ring-2 focus:ring-[#0f6b5d]/20",
+        completed
+          ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300"
+          : partial
+            ? "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300"
+          : "border-slate-200 bg-slate-50 text-slate-500 dark:border-border dark:bg-muted dark:text-muted-foreground"
+      )}
+      title="查看考勤机下发明细"
+    >
+      {count}/{total}
+    </button>
+  );
+}
+
+function WorkerAvatar({ src, name }: { src?: string | null; name: string }) {
+  const fallback = getWorkerAvatarFallback(name);
+
+  return (
+    <Avatar size="lg" className="border border-slate-200 bg-emerald-50 dark:border-border dark:bg-emerald-950">
+      {src ? <AvatarImage src={src} alt={`${name || "工人"}头像`} className="object-cover" /> : null}
+      <AvatarFallback className="bg-emerald-50 font-semibold text-[#0f6b5d] dark:bg-emerald-950 dark:text-emerald-300">
+        {fallback}
+      </AvatarFallback>
+    </Avatar>
+  );
+}
+
+function getWorkerAvatarFallback(name: string) {
+  return (name || "工").trim().slice(0, 1) || "工";
+}
+
+function WorkerIssueDetailsDialog({
+  open,
+  worker,
+  reports,
+  total,
+  isLoading,
+  isError,
+  onOpenChange,
+}: {
+  open: boolean;
+  worker: Worker | null;
+  reports: ConstructionAttendanceDeviceIssueReport[];
+  total: number;
+  isLoading: boolean;
+  isError: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const successCount = reports.filter((report) => report.status === "success").length;
+  const pendingCount = reports.filter((report) => report.status === "pending").length;
+  const failedCount = reports.filter((report) => report.status === "failed").length;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-4xl">
+        <DialogHeader>
+          <DialogTitle>考勤机下发明细</DialogTitle>
+          <DialogDescription>
+            {worker ? `${worker.name} · ${worker.phone || worker.idCard || "未填写联系方式"}` : "查看工人在各考勤机的下发记录。"}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid gap-2 sm:grid-cols-4">
+          <IssueDetailStat label="记录数" value={total} />
+          <IssueDetailStat label="成功" value={successCount} accent="emerald" />
+          <IssueDetailStat label="下发中" value={pendingCount} accent="amber" />
+          <IssueDetailStat label="失败" value={failedCount} accent="red" />
+        </div>
+
+        <div className="max-h-[58vh] overflow-auto rounded-lg border border-slate-200 dark:border-border">
+          <Table className="min-w-[860px] table-fixed">
+            <TableHeader className="bg-[#f8faf9] dark:bg-muted/30">
+              <TableRow>
+                <TableHead className="w-[24%] px-4 text-slate-500 dark:text-muted-foreground">考勤机</TableHead>
+                <TableHead className="w-[10%] text-slate-500 dark:text-muted-foreground">状态</TableHead>
+                <TableHead className="w-[10%] text-slate-500 dark:text-muted-foreground">动作</TableHead>
+                <TableHead className="w-[17%] text-slate-500 dark:text-muted-foreground">下发时间</TableHead>
+                <TableHead className="w-[39%] text-slate-500 dark:text-muted-foreground">回执/原因</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {isLoading ? (
+                <TableRow>
+                  <TableCell colSpan={5} className="h-24 text-center text-sm text-muted-foreground">
+                    下发明细加载中
+                  </TableCell>
+                </TableRow>
+              ) : isError ? (
+                <TableRow>
+                  <TableCell colSpan={5} className="h-24 text-center text-sm text-red-600 dark:text-red-400">
+                    下发明细加载失败
+                  </TableCell>
+                </TableRow>
+              ) : reports.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={5} className="h-24 text-center text-sm text-muted-foreground">
+                    暂无考勤机下发记录
+                  </TableCell>
+                </TableRow>
+              ) : (
+                reports.map((report) => (
+                  <TableRow key={report.id} className="hover:bg-[#f8faf9]/70 dark:hover:bg-muted/30">
+                    <TableCell className="px-4 py-3">
+                      <div className="min-w-0">
+                        <div className="truncate font-medium text-slate-800 dark:text-foreground" title={report.device_name || ""}>
+                          {report.device_name || "未关联考勤机"}
+                        </div>
+                        <div className="mt-1 truncate font-mono text-xs text-slate-500 dark:text-muted-foreground" title={report.serial_number || ""}>
+                          {report.serial_number || "-"}
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <WorkerIssueStatusBadge status={report.status} />
+                    </TableCell>
+                    <TableCell>
+                      <WorkerIssueActionBadge action={report.action} />
+                    </TableCell>
+                    <TableCell className="text-sm text-slate-600 dark:text-muted-foreground">
+                      {formatBeijingDateTime(report.issued_at) || "-"}
+                    </TableCell>
+                    <TableCell>
+                      <WorkerIssueMessage report={report} />
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function IssueDetailStat({
+  label,
+  value,
+  accent = "slate",
+}: {
+  label: string;
+  value: number;
+  accent?: "slate" | "emerald" | "amber" | "red";
+}) {
+  const accentClass = {
+    slate: "text-slate-900 dark:text-foreground",
+    emerald: "text-emerald-700 dark:text-emerald-300",
+    amber: "text-amber-700 dark:text-amber-300",
+    red: "text-red-700 dark:text-red-300",
+  }[accent];
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-[#fbfcfc] px-3 py-2 dark:border-border dark:bg-card">
+      <div className="text-xs text-slate-500 dark:text-muted-foreground">{label}</div>
+      <div className={cn("mt-1 text-lg font-semibold", accentClass)}>{value}</div>
+    </div>
+  );
+}
+
+function WorkerIssueStatusBadge({ status }: { status: ConstructionAttendanceDeviceIssueStatus }) {
+  const config = {
+    success: "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300",
+    pending: "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300",
+    failed: "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300",
+  }[status];
+  const label = status === "success" ? "成功" : status === "pending" ? "下发中" : "失败";
+
+  return (
+    <span className={cn("inline-flex rounded-md border px-2 py-1 text-xs font-semibold", config)}>
+      {label}
+    </span>
+  );
+}
+
+function WorkerIssueActionBadge({ action }: { action: ConstructionAttendanceDeviceIssueAction }) {
+  const config = {
+    create: "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300",
+    update: "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900 dark:bg-violet-950/40 dark:text-violet-300",
+    delete: "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300",
+  }[action];
+  const label = action === "create" ? "新增" : action === "update" ? "修改" : "删除";
+
+  return (
+    <span className={cn("inline-flex rounded-md border px-2 py-1 text-xs font-semibold", config)}>
+      {label}
+    </span>
+  );
+}
+
+function WorkerIssueMessage({ report }: { report: ConstructionAttendanceDeviceIssueReport }) {
+  const message = readableWorkerIssueMessage(report);
+  if (!message) {
+    return <span className="text-xs text-slate-400 dark:text-muted-foreground">-</span>;
+  }
+
+  return (
+    <div
+      className={cn(
+        "line-clamp-2 max-w-[420px] whitespace-normal break-words text-xs leading-5",
+        report.status === "failed"
+          ? "text-red-600 dark:text-red-400"
+          : "text-slate-500 dark:text-muted-foreground"
+      )}
+      title={message}
+    >
+      {message}
+    </div>
+  );
+}
+
+function readableWorkerIssueMessage(report: ConstructionAttendanceDeviceIssueReport) {
+  const message = report.message?.trim();
+  if (!message) {
+    if (report.status === "pending") return "等待设备回执";
+    if (report.status === "success") return "设备已确认";
+    return "";
+  }
+
+  return message.replace(
+    "Get pic Person Feature err, please change a pic",
+    "人脸照片提取特征失败，请更换清晰正脸照"
   );
 }
 
@@ -2111,15 +3151,21 @@ function AttendanceTab({
       {viewMode === "list" ? (
         <DataTable
           empty="暂无考勤记录"
-          headers={["照片", "工人", "班组", "进出", "考勤时间", "设备"]}
+          headers={["照片", "工人", "班组名称", "工种", "工人类型", "考勤天数", "进出", "考勤时间", "设备"]}
           rows={records.map((record) => [
             <AttendancePhoto key={`${record.id}-photo`} src={record.photoUrl} alt={`${record.worker} 考勤照片`} />,
             record.worker,
             record.team,
-            record.direction,
+            record.workType ?? "未填写",
+            record.workerType ?? "未填写",
+            record.attendanceDays ?? 0,
+            <AttendanceDirectionBadge key={`${record.id}-direction`} direction={record.direction} />,
             record.time,
             record.device,
           ])}
+          tableClassName="min-w-[980px]"
+          cellClassNames={["w-16", "w-24", "w-28", "w-24", "w-24", "w-20 text-right", "w-20", "w-44", "w-36"]}
+          scrollX
           pagination={pagination}
         />
       ) : (
@@ -2144,6 +3190,22 @@ function AttendancePhoto({ src, alt }: { src: string | undefined; alt: string })
   );
 }
 
+function AttendanceDirectionBadge({ direction }: { direction: AttendanceRecord["direction"] }) {
+  const isOutbound = direction === "出场";
+  return (
+    <span
+      className={cn(
+        "inline-flex min-w-12 items-center justify-center rounded-md border px-2 py-1 text-xs font-semibold",
+        isOutbound
+          ? "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300"
+          : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300"
+      )}
+    >
+      {direction}
+    </span>
+  );
+}
+
 function AttendanceCalendarTable({
   rows,
   dayCount,
@@ -2152,26 +3214,32 @@ function AttendanceCalendarTable({
   dayCount: number;
 }) {
   const days = Array.from({ length: dayCount }, (_, index) => index + 1);
-  const dayColumnWidth = `${78 / Math.max(dayCount, 1)}%`;
 
   return (
     <div className="max-w-full overflow-hidden rounded-lg border border-slate-200 dark:border-border">
-      <Table className="w-full table-fixed text-[11px]">
+      <div className="max-w-full overflow-x-auto">
+        <Table className="min-w-[1680px] table-fixed text-[11px]">
         <colgroup>
-          <col className="w-[6%]" />
-          <col className="w-[7%]" />
-          <col className="w-[4.5%]" />
-          <col className="w-[4.5%]" />
+          <col className="w-[96px]" />
+          <col className="w-[120px]" />
+          <col className="w-[86px]" />
+          <col className="w-[86px]" />
+          <col className="w-[72px]" />
+          <col className="w-[72px]" />
+          <col className="w-[72px]" />
           {days.map((day) => (
-            <col key={day} style={{ width: dayColumnWidth }} />
+            <col key={day} className="w-[36px]" />
           ))}
         </colgroup>
         <TableHeader className="bg-[#f8faf9] dark:bg-muted/30">
           <TableRow>
             <TableHead className="px-1 text-xs">工人</TableHead>
-            <TableHead className="px-1 text-xs">班组</TableHead>
-            <TableHead className="px-1 text-center text-[10px]">工时合计</TableHead>
-            <TableHead className="px-1 text-center text-[10px]">记工合计</TableHead>
+            <TableHead className="px-1 text-xs">班组名称</TableHead>
+            <TableHead className="px-1 text-xs">工种</TableHead>
+            <TableHead className="px-1 text-xs">工人类型</TableHead>
+            <TableHead className="px-1 text-center text-[10px]">考勤天数</TableHead>
+            <TableHead className="px-1 text-center text-[10px]">工时</TableHead>
+            <TableHead className="px-1 text-center text-[10px]">记工</TableHead>
             {days.map((day) => (
               <TableHead key={day} className="px-0.5 text-center text-[10px]">
                 {day}
@@ -2182,18 +3250,27 @@ function AttendanceCalendarTable({
         <TableBody>
           {rows.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={dayCount + 4} className="h-24 text-center text-sm text-muted-foreground">
+              <TableCell colSpan={dayCount + 7} className="h-24 text-center text-sm text-muted-foreground">
                 暂无月度考勤
               </TableCell>
             </TableRow>
           ) : (
             rows.map((row) => (
-              <TableRow key={`${row.worker}-${row.team}`}>
+              <TableRow key={row.workerId ?? `${row.worker}-${row.team}`}>
                 <TableCell className="truncate px-1 font-medium" title={row.worker}>
                   {row.worker}
                 </TableCell>
                 <TableCell className="truncate px-1 text-slate-500 dark:text-muted-foreground" title={row.team}>
                   {row.team}
+                </TableCell>
+                <TableCell className="truncate px-1 text-slate-500 dark:text-muted-foreground" title={row.workType ?? "未填写"}>
+                  {row.workType ?? "未填写"}
+                </TableCell>
+                <TableCell className="truncate px-1 text-slate-500 dark:text-muted-foreground" title={row.workerType ?? "未填写"}>
+                  {row.workerType ?? "未填写"}
+                </TableCell>
+                <TableCell className="px-1 text-center font-medium text-slate-700 dark:text-foreground">
+                  {row.attendanceDays ?? 0}
                 </TableCell>
                 <TableCell className="px-1 text-center font-medium text-slate-700 dark:text-foreground" title={`${formatCompactNumber(row.monthlyWorkingHours)} 小时`}>
                   {formatCompactNumber(row.monthlyWorkingHours)}
@@ -2231,7 +3308,8 @@ function AttendanceCalendarTable({
             ))
           )}
         </TableBody>
-      </Table>
+        </Table>
+      </div>
     </div>
   );
 }
@@ -2249,6 +3327,7 @@ function WageStatisticsTab({
   onDelete,
   onImportFile,
   onPageChange,
+  editable,
 }: {
   data: ConstructionWageListResponse | undefined;
   isLoading: boolean;
@@ -2257,6 +3336,7 @@ function WageStatisticsTab({
   onDelete: (id: string) => void;
   onImportFile: (file: File) => void;
   onPageChange: (page: number) => void;
+  editable: boolean;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const items = data?.items ?? [];
@@ -2291,7 +3371,7 @@ function WageStatisticsTab({
             按发放月份汇总企业工资单与发放金额。
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        {editable ? <div className="flex items-center gap-2">
           <input
             ref={fileInputRef}
             type="file"
@@ -2313,7 +3393,7 @@ function WageStatisticsTab({
             <Upload className="size-4" />
             导入工资表
           </Button>
-        </div>
+        </div> : null}
       </div>
 
       <DataTable
@@ -2345,7 +3425,7 @@ function WageStatisticsTab({
           "创建人",
           "创建日期",
           "状态",
-          "操作",
+          ...(editable ? ["操作"] : []),
         ]}
         rows={items.map((item) => [
           formatPayrollMonth(item.payroll_month),
@@ -2359,7 +3439,7 @@ function WageStatisticsTab({
           item.created_by_name ?? "系统",
           formatDateTime(item.created_at),
           <ProjectStatusBadge key={`${item.id}-status`} value={getWageStatusLabel(item.status)} />,
-          <RowActions key={`${item.id}-actions`} onEdit={() => onEdit(item.id)} onDelete={() => onDelete(item.id)} />,
+          ...(editable ? [<RowActions key={`${item.id}-actions`} onEdit={() => onEdit(item.id)} onDelete={() => onDelete(item.id)} />] : []),
         ])}
         pagination={
           data
@@ -2537,6 +3617,7 @@ function uploadBizTypeForTab(activeTab: DetailTab) {
 function getExportButtonLabel(activeTab: DetailTab) {
   if (activeTab === "项目基本信息") return "导出档案";
   if (activeTab === "工资统计") return "导出工资";
+  if (activeTab === "项目工人" || activeTab === "考勤记录") return "高级导出";
   return "导出数据";
 }
 
@@ -2668,45 +3749,6 @@ function exportTeamsCsv(projectName: string, teams: Team[]) {
   toast.success("班组信息已导出");
 }
 
-function exportWorkersCsv(projectName: string, workers: Worker[]) {
-  downloadCsv(
-    `${safeFilename(projectName)}-项目工人.csv`,
-    buildExcelCsv({
-      headers: ["姓名", "性别", "身份证", "手机号", "班组", "参建单位", "工种", "状态", "进场日期"],
-      rows: workers.map((worker) => [
-        worker.name,
-        worker.gender,
-        { value: worker.idCard, text: true },
-        { value: worker.phone, text: true },
-        worker.team,
-        worker.unit,
-        worker.workType,
-        worker.status,
-        worker.entryDate,
-      ]),
-    })
-  );
-  toast.success("项目工人数据已导出");
-}
-
-function exportAttendanceCsv(projectName: string, records: AttendanceRecord[]) {
-  downloadCsv(
-    `${safeFilename(projectName)}-考勤记录.csv`,
-    buildExcelCsv({
-      headers: ["工人", "班组", "进出方向", "考勤时间", "设备", "状态"],
-      rows: records.map((record) => [
-        record.worker,
-        record.team,
-        record.direction,
-        record.time,
-        record.device,
-        record.status,
-      ]),
-    })
-  );
-  toast.success("考勤记录已导出");
-}
-
 function downloadBlob(filename: string, blob: Blob) {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
@@ -2735,6 +3777,26 @@ function formatDateTime(value: string | null | undefined) {
   return value.replace("T", " ").slice(0, 16);
 }
 
+function formatBeijingDateTime(value: string | null | undefined) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value.replace("T", " ").slice(0, 19);
+  }
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  })
+    .format(date)
+    .replace(/\//g, "-");
+}
+
 function getWageStatusLabel(status: string): Parameters<typeof ProjectStatusBadge>[0]["value"] {
   const labels: Record<string, Parameters<typeof ProjectStatusBadge>[0]["value"]> = {
     draft: "草稿",
@@ -2753,6 +3815,7 @@ function DataTable({
   pagination,
   tableClassName,
   cellClassNames,
+  scrollX = false,
 }: {
   headers: string[];
   rows: ReactNode[][];
@@ -2760,6 +3823,7 @@ function DataTable({
   pagination?: TablePaginationConfig;
   tableClassName?: string;
   cellClassNames?: string[];
+  scrollX?: boolean;
 }) {
   const [localPage, setLocalPage] = useState(1);
   const total = pagination?.total ?? rows.length;
@@ -2794,7 +3858,7 @@ function DataTable({
 
   return (
     <div className="min-w-0 max-w-full overflow-hidden rounded-lg border border-slate-200 dark:border-border">
-      <div className="max-w-full overflow-x-hidden">
+      <div className={cn("max-w-full", scrollX ? "overflow-x-auto" : "overflow-x-hidden")}>
         <Table className={cn("w-full table-fixed", tableClassName)}>
           <TableHeader>
             <TableRow className="bg-[#f8faf9] hover:bg-[#f8faf9] dark:bg-muted/30 dark:hover:bg-muted/30">
@@ -2919,6 +3983,7 @@ function apiTeamToDetail(team: ConstructionTeam, units: ApiConstructionUnit[], w
   return {
     id: team.id,
     projectId: team.project_id,
+    unitId: team.unit_id,
     unitName: unit?.company_name ?? "未匹配单位",
     name: team.name ?? "未命名班组",
     type: getFieldOptionLabel(teamFormFields, "work_type", team.work_type),
@@ -2944,12 +4009,16 @@ function apiWorkerToDetail(
     id: worker.id,
     projectId: worker.project_id,
     name: worker.name ?? "未命名工人",
+    avatar: normalizeWorkerAvatar(worker.avatar),
     gender: worker.gender === 0 ? "女" : "男",
     idCard: worker.id_card ?? "",
     phone: worker.phone ?? "",
     team: team?.name ?? "未匹配班组",
     unit: unit?.company_name ?? "未匹配单位",
     workType: getFieldOptionLabel(workerFormFields, "work_type", worker.work_type),
+    workerType: getFieldOptionLabel(workerFormFields, "worker_type", worker.worker_type),
+    issuedDeviceSuccessCount: worker.attendance_issue_success_device_count ?? 0,
+    issuedDeviceTotalCount: worker.attendance_device_total_count ?? 0,
     status: worker.work_status === 2 ? "离场" : "在场",
     entryDate: worker.entry_time ?? "",
   };
@@ -2966,10 +4035,13 @@ function apiAttendanceToDetail(
   return {
     id: record.id,
     projectId: record.project_id,
+    workerId: record.worker_id,
     worker: worker?.name ?? "未匹配工人",
     team: team?.name ?? "未匹配班组",
+    workType: getFieldOptionLabel(workerFormFields, "work_type", worker?.work_type, "未填写"),
+    workerType: getFieldOptionLabel(workerFormFields, "worker_type", worker?.worker_type, "未填写"),
     direction: record.direction === 1 ? "出场" : "进场",
-    time: record.original_time ?? record.trigger_time,
+    time: formatBeijingDateTime(record.trigger_time) || formatBeijingDateTime(record.original_time),
     device: record.equipment_id ?? record.serial_number ?? "未填写",
     photoUrl: normalizeAttendancePhoto(record.closeup_photo ?? record.photo_path ?? record.overall_photo),
     status: "有效",
@@ -2987,6 +4059,20 @@ function normalizeAttendancePhoto(value: string | null | undefined) {
   }
   if (source.startsWith("/")) return source;
   return `data:image/jpeg;base64,${source}`;
+}
+
+function normalizeWorkerAvatar(value: string | null | undefined) {
+  const source = value?.trim();
+  if (!source) return "";
+  if (/^(https?:|data:|blob:)/i.test(source)) return source;
+  if (source.startsWith("//")) return `${window.location.protocol}${source}`;
+  if (source.startsWith("/9j") || source.startsWith("iVBOR") || source.startsWith("R0lGOD")) {
+    return `data:image/jpeg;base64,${source}`;
+  }
+  if (source.startsWith("/")) return source;
+
+  const apiBase = getApiUrl().replace(/\/$/, "");
+  return `${apiBase}/${source}`;
 }
 
 function defaultFormForTab(

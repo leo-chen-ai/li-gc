@@ -4,9 +4,19 @@
 
 1. 用微信开发者工具打开 `wx/` 目录。
 2. AppID 使用 `wx27135eec1b9aedbd`。
-3. 在微信开发者工具里执行「工具 -> 构建 npm」。
-4. 运行 `npm run localize:tdesign-font`，把 TDesign 图标字体改为京东云 OSS 资源。
-5. 编译后默认进入登录页，输入任意账号和密码可进入首页预览。
+3. 开发版请求本地 `http://192.168.32.126:8080/api/v1`，体验版和正式版自动请求 `https://shanhuai.top/api/v1`。
+4. 编译后默认进入登录页，使用有效账号和密码登录。
+
+## 发布
+
+1. 在微信公众平台「开发管理 -> 开发设置 -> 服务器域名」配置：
+   - `request` 合法域名：`https://shanhuai.top`
+   - `uploadFile` 合法域名：`https://shanhuai.top`
+   - `downloadFile` 合法域名：`https://shanhuai.top`、`https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com`
+2. 在微信开发者工具清缓存并重新编译，确认体验版登录、项目切换和图片加载正常。
+3. 点击工具栏「上传」，填写版本号和项目备注。
+4. 登录微信公众平台，在「版本管理」中将开发版本选为体验版测试。
+5. 测试通过后提交审核；审核通过后点击「发布」。
 
 ## 图片资产
 

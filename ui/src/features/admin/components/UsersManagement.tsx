@@ -34,6 +34,7 @@ import { useUsersList } from "@/features/admin/hooks/use-users-list";
 import { useCreateUser } from "@/features/admin/hooks/use-create-user";
 import { useUpdateUserRole } from "@/features/admin/hooks/use-update-user-role";
 import { useUpdateUserProjects } from "@/features/admin/hooks/use-update-user-projects";
+import { useDeleteUser, useResetUserPassword } from "@/features/admin/hooks/use-user-actions";
 import { useProjectOptionsQuery } from "@/features/projects/hooks/use-construction-projects";
 import { toast } from "sonner";
 import type { ManagedProject, UserWithTimestamps } from "@/features/admin/types/admin-types";
@@ -42,7 +43,7 @@ import { UsersTable, type DialogType } from "./UsersTable";
 const roleLabel = (role: "admin" | "user" | null) =>
   role === "admin" ? "系统管理员" : "普通用户";
 
-const DEFAULT_NEW_USER_PASSWORD = "Shanhuai@123";
+const DEFAULT_NEW_USER_PASSWORD = "888888";
 
 interface CreatedUserCredential {
   name: string;
@@ -55,6 +56,8 @@ export function UsersManagement() {
   const { mutate: updateRole } = useUpdateUserRole();
   const createUser = useCreateUser();
   const updateProjects = useUpdateUserProjects();
+  const resetPassword = useResetUserPassword();
+  const deleteUser = useDeleteUser();
 
   const [dialogType, setDialogType] = useState<DialogType>(null);
   const [selectedUser, setSelectedUser] = useState<UserWithTimestamps | null>(null);
@@ -62,12 +65,12 @@ export function UsersManagement() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [newUserForm, setNewUserForm] = useState({
     name: "",
-    email: "",
     username: "",
     role: "user" as "admin" | "user",
     projectIds: [] as string[],
   });
   const [createdCredential, setCreatedCredential] = useState<CreatedUserCredential | null>(null);
+  const [resetPasswordValue, setResetPasswordValue] = useState(DEFAULT_NEW_USER_PASSWORD);
   const [projectDialogUser, setProjectDialogUser] = useState<UserWithTimestamps | null>(null);
   const [projectSelection, setProjectSelection] = useState<string[]>([]);
 
@@ -80,12 +83,8 @@ export function UsersManagement() {
   };
 
   const handleResetPassword = (user: UserWithTimestamps) => {
-    if (!user.email) {
-      toast.error("该用户未填写邮箱，无法发送重置密码链接");
-      return;
-    }
-
     setSelectedUser(user);
+    setResetPasswordValue(DEFAULT_NEW_USER_PASSWORD);
     setDialogType("reset");
   };
 
@@ -119,9 +118,23 @@ export function UsersManagement() {
   };
 
   const handleConfirmResetPassword = () => {
-    toast.success(`已向 ${selectedUser?.email} 发送重置密码链接`);
-    setDialogType(null);
-    setSelectedUser(null);
+    if (!selectedUser) return;
+    if (resetPasswordValue.length < 6) {
+      toast.error("新密码至少 6 位");
+      return;
+    }
+
+    resetPassword.mutate(
+      { userId: selectedUser.id, newPassword: resetPasswordValue },
+      {
+        onSuccess: () => {
+          toast.success(`已为 ${selectedUser.name} 设置新密码`);
+          setDialogType(null);
+          setSelectedUser(null);
+        },
+        onError: () => toast.error("密码设置失败"),
+      }
+    );
   };
 
   const handleConfirmBlockAccount = () => {
@@ -131,9 +144,15 @@ export function UsersManagement() {
   };
 
   const handleConfirmDeleteAccount = () => {
-    toast.success(`已删除 ${selectedUser?.name}`);
-    setDialogType(null);
-    setSelectedUser(null);
+    if (!selectedUser) return;
+    deleteUser.mutate(selectedUser.id, {
+      onSuccess: () => {
+        toast.success(`已删除 ${selectedUser.name}`);
+        setDialogType(null);
+        setSelectedUser(null);
+      },
+      onError: () => toast.error("用户删除失败"),
+    });
   };
 
   const handleBulkBlock = (count: number) => {
@@ -151,19 +170,17 @@ export function UsersManagement() {
     }
 
     const name = newUserForm.name.trim();
-    const email = newUserForm.email.trim();
     const username = newUserForm.username.trim();
-    const account = email || username || name;
+    const account = username;
 
-    if (!email && !username) {
-      toast.error("请填写用户名或邮箱，作为小程序登录账号");
+    if (!username) {
+      toast.error("请填写用户名，作为登录账号");
       return;
     }
 
     createUser.mutate(
       {
         name,
-        email: email || undefined,
         username: username || undefined,
         role: newUserForm.role,
         password: DEFAULT_NEW_USER_PASSWORD,
@@ -177,7 +194,7 @@ export function UsersManagement() {
             account,
             password: DEFAULT_NEW_USER_PASSWORD,
           });
-          setNewUserForm({ name: "", email: "", username: "", role: "user", projectIds: [] });
+          setNewUserForm({ name: "", username: "", role: "user", projectIds: [] });
           setIsCreateOpen(false);
         },
         onError: () => {
@@ -237,10 +254,19 @@ export function UsersManagement() {
         };
       case "reset":
         return {
-          title: "重置密码",
-          description: `向 ${selectedUser?.email} 发送密码重置链接？`,
+          title: "设置新密码",
+          description: (
+            <div className="grid gap-2 pt-2">
+              <span>直接为 {selectedUser?.name} 设置新密码：</span>
+              <Input
+                value={resetPasswordValue}
+                onChange={(event) => setResetPasswordValue(event.target.value)}
+                placeholder="至少 6 位"
+              />
+            </div>
+          ),
           action: handleConfirmResetPassword,
-          actionText: "发送链接",
+          actionText: resetPassword.isPending ? "设置中..." : "确认设置",
         };
       case "block":
         return {
@@ -297,10 +323,10 @@ export function UsersManagement() {
       />
 
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-        <DialogContent>
+        <DialogContent className="overflow-hidden sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>新增用户</DialogTitle>
-            <DialogDescription>创建后可用用户名或邮箱登录小程序，初始密码统一生成。</DialogDescription>
+            <DialogDescription>创建后使用用户名登录 PC 或小程序，默认密码为 888888。</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2">
             <div className="grid gap-2">
@@ -313,20 +339,10 @@ export function UsersManagement() {
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="user-email">邮箱（选填）</Label>
-              <Input
-                id="user-email"
-                type="email"
-                placeholder="可选"
-                value={newUserForm.email}
-                onChange={(event) => setNewUserForm((form) => ({ ...form, email: event.target.value }))}
-              />
-            </div>
-            <div className="grid gap-2">
               <Label htmlFor="user-username">用户名（小程序登录账号）</Label>
               <Input
                 id="user-username"
-                placeholder="可选"
+                placeholder="请输入登录用户名"
                 value={newUserForm.username}
                 onChange={(event) => setNewUserForm((form) => ({ ...form, username: event.target.value }))}
               />
@@ -383,7 +399,7 @@ export function UsersManagement() {
           }
         }}
       >
-        <DialogContent>
+        <DialogContent className="overflow-hidden sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>管理项目权限</DialogTitle>
             <DialogDescription>
@@ -514,7 +530,7 @@ function ProjectPermissionSelect({
   };
 
   return (
-    <div className="rounded-md border">
+    <div className="min-w-0 max-w-full overflow-hidden rounded-md border">
       <div className="border-b p-3">
         <Input
           value={keyword}
@@ -522,9 +538,9 @@ function ProjectPermissionSelect({
           placeholder="搜索项目名称、施工许可证、单位"
         />
         {selected.length > 0 ? (
-          <div className="mt-3 flex flex-wrap gap-2">
+          <div className="mt-3 flex max-w-full flex-wrap gap-2">
             {selected.map((project) => (
-              <Badge key={project.id} variant="secondary" className="gap-1">
+              <Badge key={project.id} variant="secondary" className="max-w-full gap-1">
                 <span className="max-w-[180px] truncate">{project.name}</span>
                 <button
                   type="button"
@@ -538,7 +554,7 @@ function ProjectPermissionSelect({
           </div>
         ) : null}
       </div>
-      <div className="max-h-64 overflow-y-auto p-2">
+      <div className="max-h-64 min-w-0 overflow-y-auto overflow-x-hidden p-2">
         {optionsQuery.isFetching ? (
           <div className="flex items-center gap-2 px-2 py-6 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -549,7 +565,7 @@ function ProjectPermissionSelect({
         ) : options.length === 0 ? (
           <div className="px-2 py-6 text-sm text-muted-foreground">暂无匹配项目</div>
         ) : (
-          <div className="grid gap-1">
+          <div className="grid min-w-0 gap-1">
             {options.map((project) => {
               const checked = selectedProjectIds.includes(project.id);
               const meta = [project.work_permit, project.build_unit || project.contractor]
@@ -560,14 +576,14 @@ function ProjectPermissionSelect({
                 <button
                   key={project.id}
                   type="button"
-                  className="flex items-start gap-2 rounded-md px-2 py-2 text-left hover:bg-muted"
+                  className="flex w-full min-w-0 items-start gap-2 overflow-hidden rounded-md px-2 py-2 text-left hover:bg-muted"
                   onClick={() => toggleProject(project.id)}
                 >
-                  <span className="mt-0.5 flex h-4 w-4 items-center justify-center rounded-sm border">
+                  <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border">
                     {checked ? <Check className="h-3 w-3 text-[#0f6b5d]" /> : null}
                   </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium">
+                  <span className="min-w-0 flex-1 overflow-hidden">
+                    <span className="block max-w-full break-words text-sm font-medium leading-5">
                       {project.name || project.id}
                     </span>
                     {meta ? (

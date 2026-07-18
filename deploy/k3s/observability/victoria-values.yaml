@@ -1,0 +1,76 @@
+namespaceOverride: shanhuai-observability
+
+defaultDashboards:
+  enabled: false
+
+syncJob:
+  enabled: false
+
+alertmanager:
+  enabled: false
+
+vmalert:
+  enabled: false
+
+grafana:
+  enabled: true
+  sidecar:
+    datasources:
+      enabled: false
+    dashboards:
+      enabled: false
+  admin:
+    existingSecret: shanhuai-grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+  service:
+    type: ClusterIP
+  persistence:
+    enabled: true
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 384Mi
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: VictoriaMetrics
+          type: prometheus
+          access: proxy
+          url: http://vmsingle-shanhuai-vm-victoria-metrics-k8s-stack.shanhuai-observability.svc.cluster.local:8428
+          isDefault: true
+        - name: Loki
+          type: loki
+          access: proxy
+          url: http://shanhuai-loki-gateway.shanhuai-observability.svc.cluster.local
+
+vmsingle:
+  spec:
+    retentionPeriod: 14d
+    storage:
+      resources:
+        requests:
+          storage: 10Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 768Mi
+
+vmagent:
+  spec:
+    scrapeInterval: 30s
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 300m
+        memory: 384Mi

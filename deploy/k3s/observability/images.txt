@@ -1,0 +1,11 @@
+docker.io/grafana/alloy:v1.17.1
+docker.io/grafana/loki:3.6.7
+docker.io/nginxinc/nginx-unprivileged:1.29-alpine
+docker.io/grafana/grafana:13.0.1-security-01
+docker.io/library/busybox:1.37.0
+docker.io/victoriametrics/operator:v0.72.0
+docker.io/victoriametrics/victoria-metrics:v1.146.0
+docker.io/victoriametrics/vmagent:v1.146.0
+quay.io/prometheus/node-exporter:v1.11.1
+registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.19.1
+registry.k8s.io/kubectl:v1.36.0

@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS idx_attendance_records_worker_serial_original_active;

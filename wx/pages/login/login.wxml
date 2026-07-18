@@ -13,11 +13,13 @@
       <view class="field-group">
         <view class="field-label">账号</view>
         <view class="native-input-wrap">
-          <text class="input-icon">◇</text>
+          <view class="input-icon" aria-hidden="true">
+            <image class="input-icon-image" src="{{accountIcon}}" mode="aspectFit" />
+          </view>
           <input
             class="native-input"
             value="{{account}}"
-            placeholder="请输入邮箱或用户名"
+            placeholder="请输入手机号或用户名"
             placeholder-class="input-placeholder"
             bindinput="onAccountChange"
           />
@@ -27,37 +29,34 @@
       <view class="field-group">
         <view class="field-label">密码</view>
         <view class="native-input-wrap">
-          <text class="input-icon">□</text>
+          <view class="input-icon" aria-hidden="true">
+            <image class="input-icon-image" src="{{lockIcon}}" mode="aspectFit" />
+          </view>
           <input
             class="native-input"
             value="{{password}}"
-            password
+            password="{{!passwordVisible}}"
             placeholder="请输入密码"
             placeholder-class="input-placeholder"
             bindinput="onPasswordChange"
           />
-          <text class="input-action">●</text>
+          <view class="input-action" bind:tap="togglePasswordVisibility" aria-label="{{passwordVisible ? '隐藏密码' : '显示密码'}}">
+            <image class="input-icon-image" src="{{passwordVisible ? eyeOffIcon : eyeIcon}}" mode="aspectFit" />
+          </view>
         </view>
       </view>
 
       <view class="form-row">
         <view class="remember-row" bind:tap="toggleRemember">
-          <view class="checkbox {{rememberAccount ? 'checkbox-active' : ''}}"></view>
+          <view class="checkbox {{rememberAccount ? 'checkbox-active' : ''}}">
+            <view wx:if="{{rememberAccount}}" class="checkbox-check"></view>
+          </view>
           <text>记住账号</text>
         </view>
         <view class="forgot-link" bind:tap="forgotPassword">忘记密码</view>
       </view>
 
-      <t-button
-        block
-        theme="primary"
-        size="large"
-        loading="{{loading}}"
-        bind:tap="submitLogin"
-        t-class="login-button"
-      >
-        登录
-      </t-button>
+      <button class="login-button-native" loading="{{loading}}" disabled="{{loading}}" bind:tap="submitLogin">登录</button>
     </view>
 
 

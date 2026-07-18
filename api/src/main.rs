@@ -37,6 +37,13 @@ async fn main() -> eyre::Result<()> {
     // 6. Bootstrap (create initial admin if needed)
     bootstrap::bootstrap(&state.db, &config).await?;
 
-    // 7. Start server (dual-stack, graceful shutdown)
+    // 7. Start attendance alert scheduler (daily 14:00 Asia/Shanghai)
+    quax::feature::admin::attendance_alert::spawn_attendance_alert_scheduler(state.clone());
+
+    // 8. Start attendance device MQTT worker when MQTT_BROKER_URL is configured
+    quax::feature::device_mqtt::worker::spawn_device_mqtt_worker(state.clone());
+    quax::feature::device_mqtt::retry::spawn_device_issue_retry_worker(state.clone());
+
+    // 9. Start server (dual-stack, graceful shutdown)
     server::serve(state).await
 }

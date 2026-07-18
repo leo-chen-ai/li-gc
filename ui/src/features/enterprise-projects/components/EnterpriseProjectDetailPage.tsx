@@ -642,7 +642,7 @@ function RecordForm({
           <Field label="付款账户" value={form.account_name ?? ""} onChange={(value) => patch("account_name", value)} />
         </>
       )}
-      <Field label="金额(元) *" value={form.amount ?? ""} onChange={(value) => patch("amount", value)} />
+      <Field type="number" step="0.01" inputMode="decimal" label="金额(元) *" value={form.amount ?? ""} onChange={(value) => patch("amount", value)} />
       {(module === "issued-invoices" || module === "received-invoices") && (
         <Field label="税率" value={form.tax_rate ?? ""} onChange={(value) => patch("tax_rate", value)} />
       )}
@@ -761,11 +761,11 @@ function SummaryCard({ label, value, emphasis }: { label: string; value: string;
   );
 }
 
-function Field({ label, value, type = "text", onChange }: { label: string; value: string; type?: string; onChange: (value: string) => void }) {
+function Field({ label, value, type = "text", step, inputMode, onChange }: { label: string; value: string; type?: string; step?: string; inputMode?: "numeric" | "decimal"; onChange: (value: string) => void }) {
   return (
     <div className="space-y-1.5">
       <label className="text-sm font-medium text-slate-700">{label}</label>
-      <Input type={type} value={value} onChange={(event) => onChange(event.target.value)} />
+      <Input type={type} step={step} inputMode={inputMode} value={value} onChange={(event) => onChange(event.target.value)} />
     </div>
   );
 }

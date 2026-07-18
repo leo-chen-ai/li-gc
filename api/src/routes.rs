@@ -40,6 +40,7 @@ pub fn app_routes(state: AppState) -> Router {
         .nest("/uploads", upload::upload_routes())
         .nest("/ocr", ocr::ocr_routes())
         .nest("/miniapp", miniapp::routes::miniapp_routes(state.clone()))
+        .nest("/management", admin::routes::management_routes())
         .nest("/admin", admin::routes::admin_routes())
         .nest("/admin/api-keys", admin::api_key::api_key_routes())
         .layer(Extension(blacklist)) // Inject blacklist for auth middleware

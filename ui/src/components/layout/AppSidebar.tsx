@@ -4,6 +4,7 @@ import {
   BarChart3,
   BriefcaseBusiness,
   Building2,
+  CalendarClock,
   Camera,
   ChevronDown,
   ClipboardCheck,
@@ -18,7 +19,6 @@ import {
   Leaf,
   Link2,
   Package,
-  PanelLeft,
   ReceiptText,
   ShieldAlert,
   ShieldCheck,
@@ -39,8 +39,6 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarRail,
-  SidebarTrigger,
 } from "@/components/ui/sidebar";
 import {
   Collapsible,
@@ -84,12 +82,14 @@ export function AppSidebar() {
     {
       title: "劳务管理",
       items: [
-        { key: "projects", title: "项目列表", href: "/app/admin/projects", icon: Building2, enabled: isAdmin },
+        { key: "projects", title: "项目列表", href: "/app/admin/projects", icon: Building2, enabled: true },
         { key: "contract_templates", title: "劳务分包合同模板", href: "/app/admin/contract-templates", icon: FileText, enabled: isAdmin },
         { key: "work_hour_configs", title: "工时配置", href: "/app/admin/work-hour-configs", icon: Clock3, enabled: isAdmin },
         { key: "platform_integrations", title: "平台对接管理", href: "/app/admin/platform-integrations", icon: Link2, enabled: isAdmin },
-        { key: "attendance_devices", title: "考勤机绑定", href: "/app/admin/attendance-devices", icon: Fingerprint, enabled: isAdmin },
-        { key: "attendance_device_issue_reports", title: "考勤机人员下发报告", href: "/app/admin/attendance-device-issue-reports", icon: FileClock, enabled: isAdmin },
+        { key: "attendance_devices", title: "考勤机绑定", href: "/app/admin/attendance-devices", icon: Fingerprint, enabled: true },
+        { key: "attendance_device_issue_reports", title: "考勤机人员下发报告", href: "/app/admin/attendance-device-issue-reports", icon: FileClock, enabled: true },
+        { key: "attendance_alerts", title: "考勤预警", href: "/app/admin/attendance-alerts", icon: ShieldAlert, enabled: isAdmin },
+        { key: "managed_attendance", title: "自动托管", href: "/app/admin/managed-attendance", icon: CalendarClock, enabled: isAdmin },
         { key: "environment_monitoring", title: "环境检测", href: "/app/admin/environment-monitoring", icon: Leaf, enabled: isAdmin },
         { key: "video_monitoring", title: "视频监控", href: "/app/admin/video-monitoring", icon: Camera, enabled: isAdmin },
       ],
@@ -108,7 +108,7 @@ export function AppSidebar() {
     {
       title: "人员管理",
       items: [
-        { key: "personnel_workers", title: "人员信息列表", href: "/app/admin/personnel-workers", icon: Users, enabled: isAdmin },
+        { key: "personnel_workers", title: "人员信息列表", href: "/app/admin/personnel-workers", icon: Users, enabled: true },
         { key: "personnel_contracts", title: "人员合同信息", href: "/app/admin/personnel-contracts", icon: FileText, enabled: isAdmin },
         { key: "personnel_qualifications", title: "人员资格信息", href: "/app/admin/personnel-qualifications", icon: ShieldCheck, enabled: isAdmin },
         { key: "personnel_registrations", title: "人员注册信息", href: "/app/admin/personnel-registrations", icon: ClipboardCheck, enabled: isAdmin },
@@ -154,13 +154,13 @@ export function AppSidebar() {
     .filter((section) => section.items.length > 0);
 
   return (
-    <Sidebar collapsible="icon" className="border-r bg-sidebar/95">
+    <Sidebar collapsible="none" className="border-r bg-sidebar/95">
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
             <div className="flex items-center justify-between">
               <SidebarMenuButton size="lg" asChild>
-                <Link to={isAdmin ? "/app/admin" : "/app"}>
+                <Link to={isAdmin ? "/app/admin" : "/app/admin/projects"}>
                   <div className="flex aspect-square size-8 items-center justify-center rounded-md bg-[#0f6b5d] text-sm font-semibold text-white">
                     山
                   </div>
@@ -170,27 +170,24 @@ export function AppSidebar() {
                   </div>
                 </Link>
               </SidebarMenuButton>
-              <SidebarTrigger className="ml-1 hidden h-8 w-8 md:flex">
-                <PanelLeft className="h-4 w-4" />
-              </SidebarTrigger>
             </div>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
 
-      <SidebarContent className="max-h-[calc(100svh-4.25rem)] overflow-y-auto overscroll-contain pr-1">
+      <SidebarContent className="max-h-[calc(100svh-4.25rem)] gap-1 overflow-y-auto overscroll-contain pr-1">
         {visibleSections.map((section) => (
-          <Collapsible key={section.title} defaultOpen>
-            <SidebarGroup>
-              <CollapsibleTrigger className="group flex w-full items-center justify-between rounded-md pr-2 hover:bg-emerald-50 dark:hover:bg-sidebar-accent">
-                <SidebarGroupLabel>{section.title}</SidebarGroupLabel>
+          <Collapsible key={section.title}>
+            <SidebarGroup className="px-1 py-1.5">
+              <CollapsibleTrigger className="group flex w-full items-center justify-between rounded-md pr-1 hover:bg-emerald-50 dark:hover:bg-sidebar-accent">
+                <SidebarGroupLabel className="h-7 px-2">{section.title}</SidebarGroupLabel>
                 <ChevronDown className="size-3.5 text-muted-foreground transition-transform group-data-[state=closed]:-rotate-90 group-data-[collapsible=icon]:hidden" />
               </CollapsibleTrigger>
               <CollapsibleContent>
-                <SidebarMenu>
+                <SidebarMenu className="gap-1">
                   {section.items.map((item) => (
                     <SidebarMenuItem key={item.key}>
-                      <SidebarMenuButton asChild isActive={isActive(item.href)} tooltip={item.title}>
+                      <SidebarMenuButton asChild isActive={isActive(item.href)} tooltip={item.title} className="h-7 px-2 text-xs">
                         <Link to={item.href}>
                           <item.icon className="size-4" />
                           <span>{item.title}</span>
@@ -204,7 +201,6 @@ export function AppSidebar() {
           </Collapsible>
         ))}
       </SidebarContent>
-      <SidebarRail />
     </Sidebar>
   );
 }

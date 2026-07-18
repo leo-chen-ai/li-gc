@@ -1,16 +1,18 @@
 const { assetPath } = require("../../config/assets.js");
+const { request } = require("../../config/api.js");
 const {
   createResource,
   getSelectedProject,
   listResource,
   updateResource,
 } = require("../../utils/construction-api.js");
-const { fieldSets } = require("../../utils/construction-fields.js");
+const { fieldSets, inferNativePlaceFromAddress } = require("../../utils/construction-fields.js");
 const {
   buildDefaultForm,
   buildFormFields,
   buildPayloadFromForm,
   nextUploadValue,
+  previewUploadedFile,
   today,
   uploadForField,
 } = require("../../utils/form-utils.js");
@@ -27,6 +29,29 @@ function buildSections(formFields) {
     return sections;
   }, []);
 }
+
+const ONBOARDING_HIDDEN_FIELDS = new Set([
+  "education",
+  "has_major_medical_history",
+  "current_address",
+  "has_insurance",
+  "work_status",
+  "entry_time",
+  "exit_time",
+  "dormitory_id",
+  "settlement_file",
+  "labor_contract_file",
+]);
+
+const ONBOARDING_REQUIRED_PHOTOS = new Set(["avatar", "ocr_photo", "id_card_back_file"]);
+
+const onboardingWorkerFields = fieldSets.workers
+  .map((field) => {
+    if (field.key === "ocr_photo") return { ...field, label: "身份证正面", required: true };
+    if (field.key === "id_card_back_file") return { ...field, label: "身份证反面", required: true };
+    if (ONBOARDING_REQUIRED_PHOTOS.has(field.key)) return { ...field, required: true };
+    return field;
+  });
 
 Page({
   data: {
@@ -69,7 +94,7 @@ Page({
       const units = unitsResult.items || [];
       const teams = teamsResult.items || [];
       const workers = workersResult.items || [];
-      const defaultForm = buildDefaultForm(fieldSets.workers, {}, {
+      const defaultForm = buildDefaultForm(onboardingWorkerFields, {}, {
         unit_id: units[0] ? units[0].id : "",
         team_id: teams[0] ? teams[0].id : "",
         worker_type: "1",
@@ -92,7 +117,8 @@ Page({
   },
 
   applyForm(form, extra = {}) {
-    const formFields = buildFormFields(fieldSets.workers, form, this.lookupData());
+    const formFields = buildFormFields(onboardingWorkerFields, form, this.lookupData())
+      .filter((field) => !ONBOARDING_HIDDEN_FIELDS.has(field.key));
     this.setData({
       form,
       formFields,
@@ -119,7 +145,9 @@ Page({
 
     const matched = this.data.workers.find((worker) => String(worker.phone || "") === phone);
     if (matched) {
-      const form = buildDefaultForm(fieldSets.workers, matched);
+      const form = buildDefaultForm(onboardingWorkerFields, matched, {
+        entry_time: matched.entry_time || today(),
+      });
       this.applyForm(form, {
         editingId: matched.id,
         phoneModalVisible: false,
@@ -147,7 +175,7 @@ Page({
 
   onPickerChange(event) {
     const key = event.currentTarget.dataset.key;
-    const field = fieldSets.workers.find((item) => item.key === key);
+    const field = onboardingWorkerFields.find((item) => item.key === key);
     if (!field) return;
     const options = buildFormFields([field], this.data.form, this.lookupData())[0].options || [];
     const option = options[Number(event.detail.value)];
@@ -165,28 +193,66 @@ Page({
 
   async chooseUpload(event) {
     const key = event.currentTarget.dataset.key;
-    const field = fieldSets.workers.find((item) => item.key === key);
+    const field = onboardingWorkerFields.find((item) => item.key === key);
     if (!field) return;
     try {
-      wx.showLoading({ title: "上传中" });
+      wx.showLoading({ title: "上传中", mask: true });
       const file = await uploadForField(field, {
         bizType: "workers",
         bizId: this.data.editingId || this.data.project.id,
       });
+      const value = nextUploadValue(field, this.data.form[key], file);
+      this.applyForm({ ...this.data.form, [key]: value }, { submitNotice: "" });
       wx.hideLoading();
-      this.updateFormValue(key, nextUploadValue(field, this.data.form[key], file));
-      wx.showToast({ title: "上传成功", icon: "success" });
+      if (key === "ocr_photo" || key === "id_card_back_file") {
+        await this.recognizeIdCard(key, file.public_url || value);
+      } else {
+        wx.showToast({ title: "上传成功", icon: "success" });
+      }
     } catch (error) {
       wx.hideLoading();
       wx.showToast({ title: error.message || "上传失败", icon: "none" });
     }
   },
 
+  async recognizeIdCard(key, imageUrl) {
+    wx.showLoading({ title: "身份证识别中", mask: true });
+    try {
+      const result = await request({
+        url: "/ocr/id-card",
+        method: "POST",
+        data: {
+          side: key === "ocr_photo" ? "front" : "back",
+          image_url: imageUrl,
+        },
+      });
+      const fields = result && result.fields ? result.fields : {};
+      if (!fields.native_place && fields.address) {
+        const nativePlace = inferNativePlaceFromAddress(fields.address);
+        if (nativePlace) fields.native_place = nativePlace;
+      }
+      this.applyForm(
+        { ...this.data.form, ...fields },
+        { submitNotice: Object.keys(fields).length ? "身份证识别完成，信息已自动回填。" : "身份证识别完成，请核对并补充信息。" },
+      );
+      wx.hideLoading();
+      wx.showToast({ title: "识别完成", icon: "success" });
+    } catch (error) {
+      wx.hideLoading();
+      wx.showToast({ title: error.message || "身份证识别失败", icon: "none" });
+    }
+  },
+
+  previewUpload(event) {
+    const { url, name, isImage } = event.currentTarget.dataset;
+    previewUploadedFile({ url, name, isImage: isImage === true || isImage === "true" });
+  },
+
   async submitOnboarding() {
     if (this.data.saving) return;
     let payload;
     try {
-      payload = buildPayloadFromForm(fieldSets.workers, this.data.form);
+      payload = buildPayloadFromForm(onboardingWorkerFields, this.data.form);
     } catch (error) {
       wx.showToast({ title: error.message, icon: "none" });
       return;

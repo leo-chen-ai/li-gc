@@ -18,6 +18,22 @@ export interface AuthResponse {
   token: TokenResponse;
 }
 
+export type ScanLoginStatus = "pending" | "confirmed" | "consumed";
+
+export interface ScanLoginSession {
+  scan_token: string;
+  qr_payload: string;
+  expires_in: number;
+  status: ScanLoginStatus;
+}
+
+export interface ScanLoginStatusResponse {
+  status: ScanLoginStatus;
+  expires_in: number;
+}
+
+export type ScanLoginPollResponse = AuthResponse | ScanLoginStatusResponse;
+
 export interface LoginCredentials {
   account: string;
   password: string;

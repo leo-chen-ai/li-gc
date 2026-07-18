@@ -45,6 +45,7 @@ export type ConstructionUnit = {
 export type Team = {
   id: string;
   projectId: string;
+  unitId?: string;
   unitName: string;
   name: string;
   type: string;
@@ -61,12 +62,16 @@ export type Worker = {
   id: string;
   projectId: string;
   name: string;
+  avatar?: string;
   gender: "男" | "女";
   idCard: string;
   phone: string;
   team: string;
   unit: string;
   workType: string;
+  workerType?: string;
+  issuedDeviceSuccessCount?: number;
+  issuedDeviceTotalCount?: number;
   status: "在场" | "离场";
   entryDate: string;
 };
@@ -74,8 +79,14 @@ export type Worker = {
 export type AttendanceRecord = {
   id: string;
   projectId: string;
+  workerId?: string;
   worker: string;
   team: string;
+  workType?: string;
+  workerType?: string;
+  attendanceDays?: number;
+  workingHours?: number;
+  workPoint?: number;
   direction: AttendanceDirection;
   time: string;
   device: string;

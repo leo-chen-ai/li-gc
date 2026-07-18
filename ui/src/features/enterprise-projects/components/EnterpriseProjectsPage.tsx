@@ -404,7 +404,7 @@ export function EnterpriseProjectsPage() {
                   }
                 />
               </div>
-              <Field label="合同金额(元)" value={formState.contract_amount} onChange={(value) => setFormState({ ...formState, contract_amount: value })} />
+              <Field type="number" step="0.01" inputMode="decimal" label="合同金额(元)" value={formState.contract_amount} onChange={(value) => setFormState({ ...formState, contract_amount: value })} />
               <Field label="负责人" value={formState.owner_name} onChange={(value) => setFormState({ ...formState, owner_name: value })} />
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-slate-700">状态</label>
@@ -467,17 +467,21 @@ function Field({
   label,
   value,
   type = "text",
+  step,
+  inputMode,
   onChange,
 }: {
   label: string;
   value: string;
   type?: string;
+  step?: string;
+  inputMode?: "numeric" | "decimal";
   onChange: (value: string) => void;
 }) {
   return (
     <div className="space-y-1.5">
       <label className="text-sm font-medium text-slate-700">{label}</label>
-      <Input type={type} value={value} onChange={(event) => onChange(event.target.value)} />
+      <Input type={type} step={step} inputMode={inputMode} value={value} onChange={(event) => onChange(event.target.value)} />
     </div>
   );
 }

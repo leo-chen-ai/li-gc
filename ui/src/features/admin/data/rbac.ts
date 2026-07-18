@@ -13,6 +13,8 @@ export type MenuPermissionKey =
   | "platform_integrations"
   | "attendance_devices"
   | "attendance_device_issue_reports"
+  | "attendance_alerts"
+  | "managed_attendance"
   | "environment_monitoring"
   | "video_monitoring"
   | "quality_safety"
@@ -143,6 +145,20 @@ export const menuPermissions: MenuPermission[] = [
     group: "劳务管理",
     path: "/app/admin/attendance-device-issue-reports",
     description: "查看人员下发到考勤机的动作、时间和状态",
+  },
+  {
+    key: "attendance_alerts",
+    name: "考勤预警",
+    group: "劳务管理",
+    path: "/app/admin/attendance-alerts",
+    description: "配置项目管理人员、民工和监理未考勤提醒并查看日志",
+  },
+  {
+    key: "managed_attendance",
+    name: "自动托管",
+    group: "劳务管理",
+    path: "/app/admin/managed-attendance",
+    description: "维护托管配置、照片组和月度托管数据",
   },
   {
     key: "environment_monitoring",
@@ -291,6 +307,8 @@ export function getMenuKeysForUserRole(
     "platform_integrations",
     "attendance_devices",
     "attendance_device_issue_reports",
+    "attendance_alerts",
+    "managed_attendance",
     "environment_monitoring",
     "video_monitoring",
     "quality_safety",
@@ -323,7 +341,12 @@ export function getMenuKeysForUserRole(
     return adminDefaults;
   }
 
-  return ["projects"];
+  return [
+    "projects",
+    "attendance_devices",
+    "attendance_device_issue_reports",
+    "personnel_workers",
+  ];
 }
 
 function isMenuPermissionKey(key: string): key is MenuPermissionKey {

@@ -1,6 +1,8 @@
 pub mod admin;
 pub mod auth;
+pub mod device_mqtt;
 pub mod health;
+pub mod integration;
 pub mod miniapp;
 pub mod ocr;
 pub mod upload;

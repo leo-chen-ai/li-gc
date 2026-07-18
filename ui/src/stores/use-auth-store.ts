@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { clearAdminWindowState } from "@/components/layout/admin-window-storage";
 import type { User } from "@/features/auth/types/auth-types";
 
 interface AuthState {
@@ -30,6 +31,7 @@ export const useAuthStore = create<AuthState>()((set) => ({
       });
     },
     logout: () => {
+      clearAdminWindowState();
       set({
         user: null,
         accessToken: null,

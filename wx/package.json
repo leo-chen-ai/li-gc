@@ -4,10 +4,6 @@
   "private": true,
   "description": "山淮筑微信小程序",
   "scripts": {
-    "verify": "node tests/verify-miniapp.mjs",
-    "localize:tdesign-font": "node scripts/localize-tdesign-font.mjs"
-  },
-  "dependencies": {
-    "tdesign-miniprogram": "1.15.2"
+    "verify": "node tests/verify-miniapp.mjs"
   }
 }

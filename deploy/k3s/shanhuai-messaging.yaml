@@ -1,0 +1,223 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shanhuai-infra
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nats
+  namespace: shanhuai-infra
+  labels:
+    app.kubernetes.io/name: nats
+    app.kubernetes.io/part-of: shanhuai-infra
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: nats
+  ports:
+    - name: client
+      port: 4222
+      targetPort: client
+    - name: monitor
+      port: 8222
+      targetPort: monitor
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nats
+  namespace: shanhuai-infra
+  labels:
+    app.kubernetes.io/name: nats
+    app.kubernetes.io/part-of: shanhuai-infra
+spec:
+  serviceName: nats
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nats
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nats
+        app.kubernetes.io/part-of: shanhuai-infra
+    spec:
+      containers:
+        - name: nats
+          image: nats:2-alpine
+          imagePullPolicy: IfNotPresent
+          args:
+            - "-js"
+            - "-m"
+            - "8222"
+            - "--store_dir"
+            - "/data/jetstream"
+          ports:
+            - name: client
+              containerPort: 4222
+            - name: monitor
+              containerPort: 8222
+          readinessProbe:
+            tcpSocket:
+              port: client
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: monitor
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: nats-data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: nats-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: emqx
+  namespace: shanhuai-infra
+  labels:
+    app.kubernetes.io/name: emqx
+    app.kubernetes.io/part-of: shanhuai-infra
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: emqx
+  ports:
+    - name: mqtt
+      port: 1883
+      targetPort: mqtt
+    - name: ws
+      port: 8083
+      targetPort: ws
+    - name: dashboard
+      port: 18083
+      targetPort: dashboard
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: emqx-mqtt-nodeport
+  namespace: shanhuai-infra
+  labels:
+    app.kubernetes.io/name: emqx
+    app.kubernetes.io/part-of: shanhuai-infra
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: emqx
+  ports:
+    - name: mqtt
+      port: 1883
+      targetPort: mqtt
+      nodePort: 31883
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: emqx
+  namespace: shanhuai-infra
+  labels:
+    app.kubernetes.io/name: emqx
+    app.kubernetes.io/part-of: shanhuai-infra
+spec:
+  serviceName: emqx
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: emqx
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: emqx
+        app.kubernetes.io/part-of: shanhuai-infra
+    spec:
+      containers:
+        - name: emqx
+          image: docker.1ms.run/emqx/emqx:5.8.6
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: mqtt
+              containerPort: 1883
+            - name: ws
+              containerPort: 8083
+            - name: dashboard
+              containerPort: 18083
+          env:
+            - name: EMQX_NODE_NAME
+              value: emqx@127.0.0.1
+            - name: EMQX_DASHBOARD__DEFAULT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: shanhuai-messaging-secret
+                  key: EMQX_DASHBOARD_USER
+            - name: EMQX_DASHBOARD__DEFAULT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: shanhuai-messaging-secret
+                  key: EMQX_DASHBOARD_PASSWORD
+          readinessProbe:
+            tcpSocket:
+              port: mqtt
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 12
+          livenessProbe:
+            tcpSocket:
+              port: mqtt
+            initialDelaySeconds: 45
+            periodSeconds: 20
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: emqx-data
+              mountPath: /opt/emqx/data
+            - name: emqx-log
+              mountPath: /opt/emqx/log
+  volumeClaimTemplates:
+    - metadata:
+        name: emqx-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 2Gi
+    - metadata:
+        name: emqx-log
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 1Gi

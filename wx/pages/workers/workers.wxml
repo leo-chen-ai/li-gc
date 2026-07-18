@@ -2,8 +2,9 @@
   <block wx:if="{{!detailVisible}}">
     <view class="page-top">
       <view class="back-button" bind:tap="goBack">‹</view>
-      <view class="page-title">在场人数（{{filteredWorkers.length}}）</view>
-      <view class="top-action" data-name="批量退场" bind:tap="showAction">批量退场</view>
+      <view class="page-title">{{statusLabel}}人数（{{total}}）</view>
+      <view wx:if="{{workStatus === 1}}" class="top-action" catch:tap="toggleBatchMode">{{batchMode ? '取消' : '批量退场'}}</view>
+      <view wx:else class="top-action-placeholder"></view>
     </view>
 
     <view class="project-strip">
@@ -15,9 +16,17 @@
     <view class="search-card">
       <view class="search-box">
         <text class="search-dot"></text>
-        <input class="search-input" value="{{keyword}}" placeholder="请输入姓名或手机号" placeholder-class="muted-placeholder" bindinput="onKeywordInput" />
+        <input
+          class="search-input"
+          value="{{keyword}}"
+          placeholder="请输入姓名或手机号"
+          placeholder-class="muted-placeholder"
+          confirm-type="search"
+          bindinput="onKeywordInput"
+          bindconfirm="submitSearch"
+        />
       </view>
-      <view class="search-button" bind:tap="refresh">搜索</view>
+      <view class="search-button" bind:tap="submitSearch">搜索</view>
     </view>
 
     <view class="filter-card">
@@ -32,7 +41,10 @@
 
     <view class="worker-list">
       <block wx:for="{{filteredWorkers}}" wx:key="id">
-        <view class="worker-card" data-id="{{item.id}}" bind:tap="openWorkerDetail">
+        <view class="worker-card {{batchMode ? 'selecting' : ''}}" data-id="{{item.id}}" bind:tap="handleWorkerTap">
+          <view wx:if="{{batchMode}}" class="worker-select {{item.batchSelected ? 'selected' : ''}}">
+            <view wx:if="{{item.batchSelected}}" class="worker-select-check"></view>
+          </view>
           <view class="auth-ribbon {{item.authStatus === '已认证' ? 'ok' : 'warn'}}">{{item.authStatus}}</view>
           <image class="worker-avatar" src="{{item.avatarUrl}}" mode="aspectFill" />
           <view class="worker-info">
@@ -41,14 +53,22 @@
             <view class="worker-line">工种：{{item.workType}}　手机号：{{item.phone}}</view>
             <view class="worker-line">班组：{{item.team}}</view>
           </view>
-          <view class="worker-actions">
+          <view class="worker-actions" wx:if="{{!batchMode}}">
             <view class="worker-action edit" data-id="{{item.id}}" catchtap="openEditWorker">编辑</view>
-            <view class="worker-action issue" data-id="{{item.id}}" catchtap="retireWorker">退场</view>
-            <view class="worker-action issue" data-name="下发" catchtap="showAction">下发</view>
+            <view wx:if="{{workStatus === 1}}" class="worker-action issue" data-id="{{item.id}}" catchtap="retireWorker">退场</view>
+            <view wx:else class="worker-action reentry" data-id="{{item.id}}" catchtap="openReentry">进场</view>
           </view>
         </view>
       </block>
       <view class="empty-state" wx:if="{{!filteredWorkers.length}}">暂无匹配工人</view>
+      <view class="load-more-state" wx:if="{{filteredWorkers.length && loadingMore}}">加载中...</view>
+      <view class="load-more-state" wx:elif="{{filteredWorkers.length && !hasMore}}">没有更多了</view>
+    </view>
+    <view class="batch-retire-bar" wx:if="{{batchMode}}">
+      <view class="batch-retire-count">已选择 {{selectedWorkerIds.length}} 人</view>
+      <view class="batch-retire-button {{selectedWorkerIds.length && !batchRetiring ? '' : 'disabled'}}" bind:tap="confirmBatchRetire">
+        {{batchRetiring ? '处理中...' : '确认退场'}}
+      </view>
     </view>
   </block>
 
@@ -98,28 +118,59 @@
       <view class="info-row"><text>默认单价（元）</text><text>{{currentWorker.unitPrice}} <text class="row-link" data-id="{{currentWorker.id}}" catchtap="openEditWorker">修改</text></text></view>
       <view class="info-row"><text>手机号</text><text>{{currentWorker.phone}} <text class="row-link" data-id="{{currentWorker.id}}" catchtap="openEditWorker">修改</text></text></view>
       <view class="info-row"><text>劳务合同</text><text class="row-link" data-name="劳务合同" bind:tap="showAction">签字</text></view>
-      <view class="info-row"><text>退场</text><text class="row-link danger" data-id="{{currentWorker.id}}" bind:tap="retireWorker">办理退场</text></view>
+      <view class="info-row" wx:if="{{workStatus === 1}}"><text>退场</text><text class="row-link danger" data-id="{{currentWorker.id}}" bind:tap="retireWorker">办理退场</text></view>
+      <view class="info-row" wx:else><text>进场</text><text class="row-link" data-id="{{currentWorker.id}}" bind:tap="openReentry">办理进场</text></view>
       <view class="info-row"><text>删除</text><text class="row-link danger" data-id="{{currentWorker.id}}" bind:tap="deleteWorker">删除工人</text></view>
     </view>
 
     <view class="detail-card file-card">
       <view class="section-title">相关文件</view>
       <view class="file-label">身份证正面</view>
-      <view class="id-preview">
+      <image
+        wx:if="{{currentWorker.idCardFrontUrl}}"
+        class="id-photo-preview"
+        src="{{currentWorker.idCardFrontUrl}}"
+        mode="aspectFill"
+        data-url="{{currentWorker.idCardFrontUrl}}"
+        data-name="身份证正面"
+        data-is-image="{{true}}"
+        bind:tap="previewUpload"
+      />
+      <view wx:else class="id-preview">
         <view class="id-name">姓名　{{currentWorker.name}}</view>
         <view class="id-line">性别　{{currentWorker.genderText}}　民族　{{currentWorker.nation}}</view>
         <view class="id-line">住址　{{currentWorker.address}}</view>
         <view class="id-number">公民身份号码　{{currentWorker.idCard}}</view>
       </view>
       <view class="file-label">身份证反面</view>
-      <view class="id-preview back">
+      <image
+        wx:if="{{currentWorker.idCardBackUrl}}"
+        class="id-photo-preview"
+        src="{{currentWorker.idCardBackUrl}}"
+        mode="aspectFill"
+        data-url="{{currentWorker.idCardBackUrl}}"
+        data-name="身份证反面"
+        data-is-image="{{true}}"
+        bind:tap="previewUpload"
+      />
+      <view wx:else class="id-preview back">
         <view class="id-title">中华人民共和国 居民身份证</view>
         <view class="id-line">签发机关　{{currentWorker.issuingAuthority}}</view>
         <view class="id-line">有效期限　{{currentWorker.validPeriod}}</view>
       </view>
       <view class="file-label">人员签字</view>
       <view class="signature-button" data-name="人员签字" bind:tap="showAction">签字</view>
-      <view class="signature-box">未签字</view>
+      <image
+        wx:if="{{currentWorker.signatureUrl}}"
+        class="signature-image"
+        src="{{currentWorker.signatureUrl}}"
+        mode="aspectFit"
+        data-url="{{currentWorker.signatureUrl}}"
+        data-name="人员签字"
+        data-is-image="{{true}}"
+        bind:tap="previewUpload"
+      />
+      <view wx:else class="signature-box">未签字</view>
     </view>
   </block>
 
@@ -143,7 +194,24 @@
           <block wx:if="{{item.control === 'upload'}}">
             <view class="upload-field" data-key="{{item.key}}" bind:tap="chooseUpload">
               <view class="upload-main">{{item.uploadDisplay}}</view>
-              <view class="upload-action">上传</view>
+              <view class="upload-action">{{item.uploadActionText}}</view>
+            </view>
+            <view class="upload-list" wx:if="{{item.uploadItems.length}}">
+              <view
+                class="upload-item"
+                wx:for="{{item.uploadItems}}"
+                wx:for-item="file"
+                wx:key="url"
+                data-url="{{file.url}}"
+                data-name="{{file.name}}"
+                data-is-image="{{file.isImage}}"
+                bind:tap="previewUpload"
+              >
+                <image wx:if="{{file.isImage}}" class="upload-thumb" src="{{file.url}}" mode="aspectFill" />
+                <view wx:else class="upload-file-icon">文</view>
+                <view class="upload-file-name">{{file.name}}</view>
+                <view class="upload-view-action">查看</view>
+              </view>
             </view>
           </block>
           <block wx:elif="{{item.control === 'select'}}">
@@ -154,6 +222,11 @@
           <block wx:elif="{{item.control === 'textarea'}}">
             <textarea class="native-textarea" value="{{item.value}}" placeholder="{{item.placeholder}}" placeholder-class="muted-placeholder" data-key="{{item.key}}" bindinput="onFormInput" />
           </block>
+          <block wx:elif="{{item.valueType === 'date'}}">
+            <picker mode="date" value="{{item.value}}" data-key="{{item.key}}" bindchange="onFormInput">
+              <view class="select-value {{item.value ? '' : 'placeholder'}}">{{item.dateDisplay}}</view>
+            </picker>
+          </block>
           <block wx:else>
             <input class="native-field" value="{{item.value}}" type="{{item.inputType}}" placeholder="{{item.placeholder}}" placeholder-class="muted-placeholder" data-key="{{item.key}}" bindinput="onFormInput" />
           </block>
@@ -163,6 +236,24 @@
     <view class="sheet-footer">
       <view class="ghost-button" bind:tap="closeEdit">取消</view>
       <view class="primary-button {{saving ? 'disabled' : ''}}" bind:tap="submitEditWorker">{{saving ? '保存中...' : '保存'}}</view>
+    </view>
+  </view>
+
+  <view class="reentry-mask" wx:if="{{reentryVisible}}" catchtap="closeReentry"></view>
+  <view class="reentry-dialog" wx:if="{{reentryVisible}}">
+    <view class="reentry-title">办理进场</view>
+    <view class="reentry-name">{{reentryWorker.name}}</view>
+    <view class="reentry-label">所属班组</view>
+    <picker range="{{teams}}" range-key="name" value="{{reentryTeamIndex}}" bindchange="onReentryTeamChange">
+      <view class="reentry-picker">{{reentryTeamName}}<text>›</text></view>
+    </picker>
+    <view class="reentry-label">进场日期</view>
+    <picker mode="date" value="{{reentryEntryTime}}" bindchange="onReentryDateChange">
+      <view class="reentry-picker">{{reentryEntryTime}}<text>›</text></view>
+    </picker>
+    <view class="reentry-actions">
+      <view class="reentry-cancel" bind:tap="closeReentry">取消</view>
+      <view class="reentry-submit {{reentrySaving ? 'disabled' : ''}}" bind:tap="submitReentry">{{reentrySaving ? '提交中...' : '确认进场'}}</view>
     </view>
   </view>
 </view>

@@ -2,6 +2,7 @@ pub mod auth_method;
 pub mod handlers;
 mod repository;
 mod routes;
+pub mod scan_login;
 pub mod service;
 pub mod session;
 pub mod types;

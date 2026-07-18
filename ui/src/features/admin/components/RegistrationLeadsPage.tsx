@@ -22,7 +22,7 @@ export function RegistrationLeadsPage() {
           <div>
             <div className="text-xs font-medium text-[#0f6b5d]">系统 / 注册列表</div>
             <h1 className="mt-1 text-xl font-semibold tracking-normal">注册列表</h1>
-            <p className="mt-1 text-sm text-muted-foreground">查看登录页提交的注册姓名和手机号。</p>
+            <p className="mt-1 text-sm text-muted-foreground">查看登录页提交的用户名、姓名和手机号。</p>
           </div>
           <Button variant="outline" size="sm" onClick={() => void leads.refetch()} disabled={leads.isFetching}>
             <RefreshCw className={`mr-2 size-4 ${leads.isFetching ? "animate-spin" : ""}`} />
@@ -41,6 +41,7 @@ export function RegistrationLeadsPage() {
               <TableHeader>
                 <TableRow className="bg-[#f8faf9]">
                   <TableHead>姓名</TableHead>
+                  <TableHead>用户名</TableHead>
                   <TableHead>手机号</TableHead>
                   <TableHead>提交时间</TableHead>
                 </TableRow>
@@ -48,13 +49,13 @@ export function RegistrationLeadsPage() {
               <TableBody>
                 {leads.isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={3} className="h-24 text-center text-muted-foreground">
+                    <TableCell colSpan={4} className="h-24 text-center text-muted-foreground">
                       注册记录加载中
                     </TableCell>
                   </TableRow>
                 ) : leads.isError ? (
                   <TableRow>
-                    <TableCell colSpan={3} className="h-24 text-center text-red-600">
+                    <TableCell colSpan={4} className="h-24 text-center text-red-600">
                       注册记录加载失败，请检查登录状态或后端服务
                     </TableCell>
                   </TableRow>
@@ -62,6 +63,7 @@ export function RegistrationLeadsPage() {
                   leads.data.map((lead) => (
                     <TableRow key={lead.id}>
                       <TableCell className="font-medium">{lead.name}</TableCell>
+                      <TableCell>{lead.username || "未填写"}</TableCell>
                       <TableCell>{lead.phone}</TableCell>
                       <TableCell className="text-muted-foreground">
                         {new Date(lead.created_at).toLocaleString("zh-CN")}
@@ -70,7 +72,7 @@ export function RegistrationLeadsPage() {
                   ))
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={3} className="h-24 text-center text-muted-foreground">
+                    <TableCell colSpan={4} className="h-24 text-center text-muted-foreground">
                       暂无注册记录
                     </TableCell>
                   </TableRow>

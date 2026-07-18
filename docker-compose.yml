@@ -66,6 +66,58 @@ services:
       - full
 
   # ===========================================================================
+  # Internal Event Bus (NATS JetStream)
+  # ===========================================================================
+  nats:
+    image: nats:2-alpine
+    container_name: quax-nats
+    command:
+      - "-js"
+      - "-m"
+      - "8222"
+      - "--store_dir"
+      - "/data/jetstream"
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    volumes:
+      - nats_data:/data
+    networks:
+      - quax_net
+    profiles:
+      - infra
+      - full
+
+  # ===========================================================================
+  # MQTT Broker for Attendance Devices (EMQX)
+  # ===========================================================================
+  emqx:
+    image: docker.1ms.run/emqx/emqx:5.8.6
+    container_name: quax-emqx
+    environment:
+      EMQX_NODE_NAME: emqx@127.0.0.1
+      EMQX_DASHBOARD__DEFAULT_USERNAME: ${EMQX_DASHBOARD_USER:-admin}
+      EMQX_DASHBOARD__DEFAULT_PASSWORD: ${EMQX_DASHBOARD_PASSWORD:-public}
+    ports:
+      - "1883:1883"
+      - "8083:8083"
+      - "18083:18083"
+    volumes:
+      - emqx_data:/opt/emqx/data
+      - emqx_log:/opt/emqx/log
+    healthcheck:
+      test: ["CMD", "/opt/emqx/bin/emqx", "ctl", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks:
+      - quax_net
+    profiles:
+      - infra
+      - full
+
+  # ===========================================================================
   # Backend API
   # ===========================================================================
   api:
@@ -75,6 +127,11 @@ services:
     container_name: quax-api
     env_file:
       - ./api/.env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgres://quax:secret@postgres:5432/quax_db}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      NATS_URL: ${NATS_URL:-nats://nats:4222}
+      MQTT_BROKER_URL: ${MQTT_BROKER_URL:-mqtt://emqx:1883}
     ports:
       - "8080:8080"
     restart: unless-stopped
@@ -88,6 +145,12 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+        required: false
+      nats:
+        condition: service_started
+        required: false
+      emqx:
         condition: service_healthy
         required: false
     networks:
@@ -195,6 +258,9 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  nats_data:
+  emqx_data:
+  emqx_log:
   pgadmin_data:
   caddy_data:
   caddy_config:

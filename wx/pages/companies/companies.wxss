@@ -222,13 +222,30 @@
   font-size: 25rpx;
 }
 
+.toolbar-search-button,
+.toolbar-button,
+.primary-button,
+.empty-button {
+  font-weight: 800;
+  text-align: center;
+}
+
 .toolbar-button,
 .primary-button,
 .empty-button {
   color: #ffffff;
-  font-weight: 800;
-  text-align: center;
   background: #0a9875;
+}
+
+.toolbar-search-button {
+  width: 108rpx;
+  height: 72rpx;
+  border: 1rpx solid rgba(10, 152, 117, 0.32);
+  border-radius: 17rpx;
+  color: #0a8066;
+  font-size: 26rpx;
+  line-height: 70rpx;
+  background: #eef8f5;
 }
 
 .toolbar-button {
@@ -239,68 +256,42 @@
   line-height: 72rpx;
 }
 
-.filter-row {
-  display: flex;
-  gap: 14rpx;
-  margin-top: 22rpx;
-  overflow-x: auto;
-  white-space: nowrap;
-}
-
-.filter-chip {
-  flex: 0 0 auto;
-  height: 56rpx;
-  padding: 0 22rpx;
-  border: 1rpx solid rgba(209, 221, 225, 0.85);
-  border-radius: 999rpx;
-  color: #69777d;
-  font-size: 23rpx;
-  line-height: 54rpx;
-  background: rgba(255, 255, 255, 0.74);
-}
-
-.filter-chip.active {
-  border-color: #0a9875;
-  color: #ffffff;
-  background: #0a9875;
-}
-
 .record-list {
-  margin-top: 22rpx;
+  margin-top: 14rpx;
 }
 
 .record-card {
   position: relative;
-  padding: 26rpx 24rpx 24rpx;
-  border-radius: 22rpx;
+  padding: 16rpx 18rpx 14rpx;
+  border-radius: 18rpx;
   background: rgba(255, 255, 255, 0.93);
   box-shadow: 0 16rpx 42rpx rgba(42, 59, 78, 0.055);
 }
 
 .record-card + .record-card {
-  margin-top: 18rpx;
+  margin-top: 12rpx;
 }
 
 .record-main {
   min-width: 0;
-  padding-right: 120rpx;
+  padding-right: 106rpx;
 }
 
 .record-title {
   overflow: hidden;
   color: #1f2d30;
-  font-size: 31rpx;
+  font-size: 28rpx;
   font-weight: 800;
-  line-height: 1.25;
+  line-height: 1.15;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .record-subtitle {
   overflow: hidden;
-  margin-top: 8rpx;
+  margin-top: 4rpx;
   color: #7b888d;
-  font-size: 23rpx;
+  font-size: 21rpx;
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -308,16 +299,16 @@
 
 .status-badge {
   position: absolute;
-  top: 26rpx;
-  right: 24rpx;
-  min-width: 92rpx;
-  height: 46rpx;
-  padding: 0 16rpx;
+  top: 16rpx;
+  right: 18rpx;
+  min-width: 78rpx;
+  height: 38rpx;
+  padding: 0 12rpx;
   border-radius: 999rpx;
   color: #7c8790;
-  font-size: 21rpx;
+  font-size: 20rpx;
   font-weight: 700;
-  line-height: 46rpx;
+  line-height: 38rpx;
   text-align: center;
   background: #eef3f5;
 }
@@ -338,10 +329,7 @@
 }
 
 .record-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14rpx;
-  margin-top: 24rpx;
+  display: none;
 }
 
 .detail-cell {
@@ -369,8 +357,8 @@
 }
 
 .record-footer {
-  gap: 12rpx;
-  margin-top: 20rpx;
+  gap: 8rpx;
+  margin-top: 10rpx;
 }
 
 .record-note {
@@ -378,25 +366,25 @@
   min-width: 0;
   overflow: hidden;
   color: #879399;
-  font-size: 21rpx;
+  font-size: 20rpx;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .record-actions {
   flex: 0 0 auto;
-  gap: 20rpx;
+  gap: 10rpx;
 }
 
 .text-button {
-  min-width: 96rpx;
-  height: 58rpx;
-  padding: 0 18rpx;
-  border-radius: 15rpx;
+  min-width: 72rpx;
+  height: 44rpx;
+  padding: 0 12rpx;
+  border-radius: 12rpx;
   color: #0a9875;
-  font-size: 24rpx;
+  font-size: 22rpx;
   font-weight: 700;
-  line-height: 58rpx;
+  line-height: 44rpx;
   text-align: center;
   background: #e6f5f1;
 }
@@ -411,6 +399,13 @@
   border-radius: 24rpx;
   text-align: center;
   background: rgba(255, 255, 255, 0.82);
+}
+
+.load-more-state {
+  padding: 30rpx 0 8rpx;
+  color: #7b888d;
+  font-size: 24rpx;
+  text-align: center;
 }
 
 .empty-title {
@@ -603,4 +598,59 @@
   font-weight: 800;
   line-height: 52rpx;
   background: #0a9875;
+}
+
+.upload-list {
+  display: grid;
+  gap: 12rpx;
+  margin-top: 12rpx;
+}
+
+.upload-item {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+  min-height: 72rpx;
+  padding: 10rpx 14rpx;
+  border: 1rpx solid #e0eaec;
+  border-radius: 14rpx;
+  background: #f8fbfb;
+}
+
+.upload-thumb,
+.upload-file-icon {
+  width: 52rpx;
+  height: 52rpx;
+  flex: 0 0 52rpx;
+  border-radius: 10rpx;
+}
+
+.upload-thumb {
+  background: #edf4f2;
+}
+
+.upload-file-icon {
+  color: #0a8066;
+  font-size: 22rpx;
+  font-weight: 800;
+  line-height: 52rpx;
+  text-align: center;
+  background: #e5f3ef;
+}
+
+.upload-file-name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: #233033;
+  font-size: 24rpx;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-view-action {
+  flex: 0 0 auto;
+  color: #0a8066;
+  font-size: 23rpx;
+  font-weight: 800;
 }

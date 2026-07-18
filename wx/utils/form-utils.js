@@ -12,7 +12,7 @@ function buildDefaultForm(fields, record = {}, overrides = {}) {
 
 function buildFormFields(fields, form, lookups = {}) {
   return fields
-    .filter((field) => !field.hidden)
+    .filter((field) => !field.hidden && isFieldVisible(field, form))
     .map((field) => {
       const options = resolveOptions(field, form, lookups);
       const value = form[field.key] || "";
@@ -26,7 +26,10 @@ function buildFormFields(fields, form, lookups = {}) {
         optionIndex,
         valueLabel,
         displayValue: valueLabel || (field.control === "select" ? "请选择" : ""),
+        dateDisplay: value || "请选择日期",
         uploadDisplay: uploadDisplayValue(field, value),
+        uploadActionText: field.uploadKind === "image" ? "上传图片" : "选择本地文件",
+        uploadItems: uploadPreviewItems(field, value),
         placeholder: field.placeholder || "请输入",
         inputType: field.valueType === "number" ? "number" : "text",
       };
@@ -59,6 +62,7 @@ function resolveOptions(field, form, lookups) {
 
 function buildPayloadFromForm(fields, form) {
   return fields.reduce((payload, field) => {
+    if (!isFieldVisible(field, form)) return payload;
     const rawValue = form[field.key];
     const textValue = rawValue === undefined || rawValue === null ? "" : String(rawValue).trim();
 
@@ -104,15 +108,27 @@ function buildPayloadFromForm(fields, form) {
       return payload;
     }
 
+    if (field.valueType === "date") {
+      const date = new Date(`${textValue}T00:00:00`);
+      if (Number.isNaN(date.getTime())) {
+        throw new Error(`${field.label}日期格式无效`);
+      }
+    }
+
     payload[field.key] = textValue;
     return payload;
   }, {});
+}
+
+function isFieldVisible(field, form) {
+  return !field.visibleWhenWorkerType || String(form.worker_type || "") === field.visibleWhenWorkerType;
 }
 
 function stringifyFormValue(field, value) {
   if (value === undefined || value === null) return "";
   if (field.valueType === "json") return JSON.stringify(value);
   if (field.valueType === "datetime" && typeof value === "string") return toDatetimeLocal(value);
+  if (field.valueType === "date" && typeof value === "string") return value.slice(0, 10);
   return String(value);
 }
 
@@ -165,7 +181,7 @@ function pickUploadFile(field) {
     if (wx.chooseMessageFile) {
       wx.chooseMessageFile({
         count: 1,
-        type: "file",
+        type: "all",
         success: (res) => done(res.tempFiles && res.tempFiles[0] && res.tempFiles[0].path),
         fail: reject,
       });
@@ -217,13 +233,90 @@ function uploadDisplayValue(field, value) {
   }
 }
 
+function uploadPreviewItems(field, value) {
+  if (!value) return [];
+  return parseUploadItems(field, value).map((file, index) => {
+    const url = typeof file === "string" ? file : file.public_url || file.url || "";
+    const name = typeof file === "string"
+      ? (url ? url.split("/").pop() : "") || `${field.label || "文件"}${index + 1}`
+      : file.original_filename || file.name || file.object_key || (url ? url.split("/").pop() : "") || `${field.label || "文件"}${index + 1}`;
+    return {
+      name,
+      url,
+      isImage: isImageUpload(field, file, url),
+    };
+  }).filter((file) => file.url);
+}
+
+function parseUploadItems(field, value) {
+  if (field.valueType !== "json") {
+    return [{ public_url: value }];
+  }
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed.filter(Boolean);
+    return parsed ? [parsed] : [];
+  } catch (error) {
+    return value ? [{ public_url: value }] : [];
+  }
+}
+
+function isImageUpload(field, file, url) {
+  const contentType = typeof file === "string" ? "" : String(file.content_type || file.mime_type || "");
+  if (contentType.startsWith("image/")) return true;
+  if (field.uploadKind === "image") return true;
+  return /\.(png|jpe?g|gif|webp|bmp|heic|heif)(\?.*)?$/i.test(url);
+}
+
+function previewUploadedFile(file) {
+  const url = file && file.url;
+  if (!url) {
+    wx.showToast({ title: "暂无可查看文件", icon: "none" });
+    return;
+  }
+  if (file.isImage) {
+    wx.previewImage({ current: url, urls: [url] });
+    return;
+  }
+  wx.showLoading({ title: "打开中" });
+  wx.downloadFile({
+    url,
+    success: (res) => {
+      wx.hideLoading();
+      if (res.statusCode < 200 || res.statusCode >= 300 || !res.tempFilePath) {
+        copyFileLink(url);
+        return;
+      }
+      wx.openDocument({
+        filePath: res.tempFilePath,
+        showMenu: true,
+        fail: () => copyFileLink(url),
+      });
+    },
+    fail: () => {
+      wx.hideLoading();
+      copyFileLink(url);
+    },
+  });
+}
+
+function copyFileLink(url) {
+  wx.setClipboardData({
+    data: url,
+    success: () => wx.showToast({ title: "文件链接已复制", icon: "none" }),
+    fail: () => wx.showToast({ title: "文件暂不可预览", icon: "none" }),
+  });
+}
+
 module.exports = {
   buildDefaultForm,
   buildFormFields,
   buildPayloadFromForm,
   nextUploadValue,
   optionLabel,
+  previewUploadedFile,
   today,
   uploadDisplayValue,
   uploadForField,
+  uploadPreviewItems,
 };

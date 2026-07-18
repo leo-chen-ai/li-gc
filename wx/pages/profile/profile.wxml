@@ -20,27 +20,6 @@
       <view class="account-main">
         <view class="user-name">{{userName}}</view>
         <view class="user-account">{{account}}</view>
-        <view class="phone-row">
-          <text>手机号码</text>
-          <text class="phone-number">{{phoneNumber}}</text>
-        </view>
-      </view>
-    </view>
-
-    <view class="info-grid">
-      <view class="info-card">
-        <view class="info-icon mint">
-          <view class="profile-symbol symbol-home"></view>
-        </view>
-        <view class="info-title">当前项目</view>
-        <view class="info-value">{{projectName}}</view>
-      </view>
-      <view class="info-card">
-        <view class="info-icon deep">
-          <view class="profile-symbol symbol-users"></view>
-        </view>
-        <view class="info-title">所属单位</view>
-        <view class="info-value">{{companyName}}</view>
       </view>
     </view>
 
@@ -48,16 +27,22 @@
       <view class="contact-card-content">
         <image class="contact-icon" src="{{contactIcon}}" mode="aspectFill" />
         <view class="contact-main">
-          <view class="contact-title">联系我们</view>
-          <view class="contact-copy">账号、权限或项目使用问题，可联系管理员协助处理。</view>
+          <view class="contact-title">拨打13777114735</view>
+          <view class="contact-copy">账号、权限或项目使用问题，可直接电话联系管理员。</view>
         </view>
-        <view class="contact-button">联系</view>
+        <view class="contact-button">拨打</view>
       </view>
     </view>
 
     <view class="tool-section">
       <view class="section-title">常用功能</view>
       <view class="tool-grid">
+        <view class="tool-item" bind:tap="scanPcLogin">
+          <view class="tool-icon">
+            <view class="profile-symbol symbol-scan"></view>
+          </view>
+          <view class="tool-label">扫码登录电脑端</view>
+        </view>
         <view class="tool-item" bind:tap="changePassword">
           <view class="tool-icon">
             <view class="profile-symbol symbol-lock"></view>

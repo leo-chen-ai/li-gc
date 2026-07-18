@@ -77,10 +77,40 @@
   </view>
 
   <view class="detail-mask" wx:if="{{detailVisible}}" catchtap="closeDetail"></view>
-  <view class="detail-sheet {{detailVisible ? 'show' : ''}}">
-    <view class="sheet-handle"></view>
-    <view class="detail-title">{{currentDetail.name}}</view>
-    <view class="detail-subtitle">{{currentDetail.teamName}} / {{currentDetail.companyName}}</view>
+  <view class="detail-dialog {{detailVisible ? 'show' : ''}}">
+    <view class="detail-header">
+      <view>
+        <view class="detail-title">{{currentDetail.name}}</view>
+        <view class="detail-subtitle">{{currentDetail.teamName}} / {{currentDetail.companyName}}</view>
+      </view>
+      <view class="detail-close" bind:tap="closeDetail">×</view>
+    </view>
+
+    <view class="calendar-card">
+      <view class="calendar-title-row">
+        <view class="calendar-title">{{currentDetail.calendarMonth}}</view>
+        <view class="calendar-summary">{{currentDetail.calendarLoading ? '加载中' : currentDetail.calendarAttendanceDays + '天出勤'}}</view>
+      </view>
+      <view class="calendar-week-row">
+        <block wx:for="{{calendarWeekdays}}" wx:key="*this">
+          <view>{{item}}</view>
+        </block>
+      </view>
+      <view class="calendar-grid">
+        <block wx:for="{{currentDetail.calendarDays}}" wx:key="key">
+          <view class="calendar-day {{item.empty ? 'empty' : ''}} {{item.hasAttendance ? 'present' : ''}} {{item.isActive ? 'active' : ''}}">
+            <text wx:if="{{!item.empty}}">{{item.day}}</text>
+            <text wx:if="{{item.hasAttendance}}" class="day-dot"></text>
+          </view>
+        </block>
+      </view>
+      <view class="calendar-legend">
+        <text class="legend-dot present"></text>
+        <text>绿色日期表示当天有出勤记录</text>
+      </view>
+    </view>
+
+    <view class="daily-title">{{activeDate}} 明细</view>
     <scroll-view class="detail-records" scroll-y>
       <block wx:if="{{currentDetail.records.length}}">
         <block wx:for="{{currentDetail.records}}" wx:key="id">

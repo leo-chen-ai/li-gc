@@ -107,14 +107,22 @@
 
 .input-icon,
 .input-action {
+  display: flex;
+  align-items: center;
+  flex: 0 0 42rpx;
+  justify-content: center;
   width: 42rpx;
-  color: #b2bbc0;
-  font-size: 30rpx;
-  line-height: 1;
+  height: 42rpx;
 }
 
 .input-action {
-  text-align: right;
+  margin-left: 8rpx;
+}
+
+.input-icon-image {
+  display: block;
+  width: 32rpx;
+  height: 32rpx;
 }
 
 .native-input {
@@ -144,9 +152,13 @@
 }
 
 .checkbox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
   width: 28rpx;
   height: 28rpx;
-  border: 3rpx solid #d8e0e5;
+  border: 2rpx solid #cbd5d9;
   border-radius: 6rpx;
   background: #ffffff;
 }
@@ -156,18 +168,46 @@
   background: #0f8f70;
 }
 
+.checkbox-check {
+  box-sizing: border-box;
+  width: 12rpx;
+  height: 7rpx;
+  margin-top: -3rpx;
+  border-bottom: 3rpx solid #ffffff;
+  border-left: 3rpx solid #ffffff;
+  transform: rotate(-45deg);
+}
+
 .forgot-link {
   color: #6d777d;
 }
 
-.login-button {
+.login-button-native {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
   height: 88rpx !important;
   margin-top: 36rpx !important;
+  padding: 0;
+  border: 0;
   border-radius: 12rpx !important;
+  color: #ffffff;
   background: #07966f !important;
   box-shadow: 0 16rpx 32rpx rgba(7, 150, 111, 0.24);
   font-size: 30rpx !important;
   font-weight: 700 !important;
+  line-height: 1;
+}
+
+.login-button-native::after {
+  border: 0;
+}
+
+.login-button-native[disabled] {
+  color: rgba(255, 255, 255, 0.86);
+  background: #07966f !important;
+  opacity: 0.72;
 }
 
 .security-footer {

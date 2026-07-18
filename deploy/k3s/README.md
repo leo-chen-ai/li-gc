@@ -59,6 +59,22 @@ deploy/k3s/deploy-local.sh --api --skip-migrate
 deploy/k3s/deploy-local.sh --auto --dry-run
 ```
 
+## 消息服务
+
+平台对接内部任务使用 NATS JetStream，考勤机 MQTT 协议使用 EMQX。首次部署或更新消息服务：
+
+```bash
+deploy/k3s/deploy-messaging-services.sh
+```
+
+默认地址：
+
+- 集群内 NATS：`nats://nats.shanhuai-infra.svc.cluster.local:4222`
+- 集群内 EMQX：`mqtt://emqx.shanhuai-infra.svc.cluster.local:1883`
+- 设备公网 MQTT 兜底入口：`mqtt://36.151.143.235:31883`
+
+EMQX Dashboard 只保留 ClusterIP，不直接暴露公网。需要临时查看时使用 `kubectl port-forward`。
+
 ## 工作方式
 
 - 默认构建平台是 `linux/amd64`，适配当前宿迁 K3s 节点。

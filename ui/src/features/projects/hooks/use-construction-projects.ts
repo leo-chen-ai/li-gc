@@ -2,7 +2,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { constructionProjectService } from "../services/construction-project-service";
 import type {
+  ConstructionAttendanceDeviceIssueAction,
   ConstructionAttendanceDeviceIssueReportPayload,
+  ConstructionAttendanceAlertConfigFilters,
+  ConstructionAttendanceAlertConfigPayload,
+  ConstructionAttendanceAlertLogFilters,
+  ConstructionAttendanceAlertRunPayload,
   ConstructionAttendanceDevicePayload,
   ConstructionAttendancePayload,
   ConstructionContractTemplatePayload,
@@ -59,8 +64,12 @@ export const constructionProjectKeys = {
     [...constructionProjectKeys.detail(projectId), "attendance"] as const,
   attendance: (projectId: string, filters?: ConstructionResourceListFilters) =>
     [...constructionProjectKeys.attendanceRoot(projectId), filters ?? {}] as const,
-  attendanceCalendar: (projectId: string, month: string) =>
-    [...constructionProjectKeys.attendanceRoot(projectId), "calendar", month] as const,
+  attendanceCalendar: (
+    projectId: string,
+    month: string,
+    filters?: ConstructionResourceListFilters
+  ) =>
+    [...constructionProjectKeys.attendanceRoot(projectId), "calendar", month, filters ?? {}] as const,
   allAttendance: (projectId: string) =>
     [...constructionProjectKeys.attendanceRoot(projectId), "all"] as const,
   attendanceRecord: (projectId: string, attendanceId: string) =>
@@ -81,6 +90,14 @@ export const constructionProjectKeys = {
     [...constructionProjectKeys.attendanceDeviceIssueReportsRoot(), filters ?? {}] as const,
   attendanceDeviceIssueReport: (reportId: string) =>
     [...constructionProjectKeys.attendanceDeviceIssueReportsRoot(), reportId] as const,
+  attendanceAlertConfigsRoot: () =>
+    [...constructionProjectKeys.all, "attendance-alert-configs"] as const,
+  attendanceAlertConfigs: (filters?: ConstructionAttendanceAlertConfigFilters) =>
+    [...constructionProjectKeys.attendanceAlertConfigsRoot(), filters ?? {}] as const,
+  attendanceAlertLogsRoot: () =>
+    [...constructionProjectKeys.all, "attendance-alert-logs"] as const,
+  attendanceAlertLogs: (filters?: ConstructionAttendanceAlertLogFilters) =>
+    [...constructionProjectKeys.attendanceAlertLogsRoot(), filters ?? {}] as const,
   contractTemplatesRoot: () =>
     [...constructionProjectKeys.all, "contract-templates"] as const,
   contractTemplates: (filters?: ConstructionModuleListFilters) =>
@@ -91,6 +108,8 @@ export const constructionProjectKeys = {
     [...constructionProjectKeys.all, "work-hour-configs"] as const,
   workHourConfigs: (filters?: ConstructionModuleListFilters) =>
     [...constructionProjectKeys.workHourConfigsRoot(), filters ?? {}] as const,
+  allWorkHourConfigs: () =>
+    [...constructionProjectKeys.workHourConfigsRoot(), "all"] as const,
   platformConfigsRoot: () =>
     [...constructionProjectKeys.all, "platform-configs"] as const,
   platformConfigs: (filters?: ConstructionModuleListFilters) =>
@@ -405,11 +424,16 @@ export function useProjectAttendanceQuery(
   });
 }
 
-export function useProjectAttendanceCalendarQuery(projectId: string, month: string) {
+export function useProjectAttendanceCalendarQuery(
+  projectId: string,
+  month: string,
+  filters?: ConstructionResourceListFilters
+) {
   return useQuery({
-    queryKey: constructionProjectKeys.attendanceCalendar(projectId, month),
+    queryKey: constructionProjectKeys.attendanceCalendar(projectId, month, filters),
     queryFn: () =>
       constructionProjectService.getAttendanceCalendar(projectId, {
+        ...filters,
         view: "calendar",
         month,
       }),
@@ -614,10 +638,41 @@ export function useDeleteAttendanceDeviceMutation(projectId: string) {
   });
 }
 
-export function useAttendanceDeviceIssueReportsQuery(filters?: ConstructionModuleListFilters) {
+export function useIssueAttendanceDeviceWorkersMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      projectId,
+      deviceId,
+      action = "update",
+      remark,
+    }: {
+      projectId: string;
+      deviceId: string;
+      action?: ConstructionAttendanceDeviceIssueAction;
+      remark?: string;
+    }) =>
+      constructionProjectService.issueAttendanceDeviceWorkers(projectId, deviceId, {
+        action,
+        remark,
+      }),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: constructionProjectKeys.attendanceDevicesRoot(variables.projectId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: constructionProjectKeys.attendanceDeviceIssueReportsRoot(),
+      });
+    },
+  });
+}
+
+export function useAttendanceDeviceIssueReportsQuery(filters?: ConstructionModuleListFilters, enabled = true) {
   return useQuery({
     queryKey: constructionProjectKeys.attendanceDeviceIssueReports(filters),
     queryFn: () => constructionProjectService.listAttendanceDeviceIssueReports(filters),
+    enabled,
   });
 }
 
@@ -674,6 +729,83 @@ export function useDeleteAttendanceDeviceIssueReportMutation() {
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: constructionProjectKeys.attendanceDeviceIssueReportsRoot(),
+      });
+    },
+  });
+}
+
+export function useAttendanceAlertConfigsQuery(filters?: ConstructionAttendanceAlertConfigFilters) {
+  return useQuery({
+    queryKey: constructionProjectKeys.attendanceAlertConfigs(filters),
+    queryFn: () => constructionProjectService.listAttendanceAlertConfigs(filters),
+  });
+}
+
+export function useCreateAttendanceAlertConfigMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: ConstructionAttendanceAlertConfigPayload) =>
+      constructionProjectService.createAttendanceAlertConfig(payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: constructionProjectKeys.attendanceAlertConfigsRoot(),
+      });
+    },
+  });
+}
+
+export function useUpdateAttendanceAlertConfigMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      configId,
+      payload,
+    }: {
+      configId: string;
+      payload: ConstructionAttendanceAlertConfigPayload;
+    }) => constructionProjectService.updateAttendanceAlertConfig(configId, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: constructionProjectKeys.attendanceAlertConfigsRoot(),
+      });
+    },
+  });
+}
+
+export function useDeleteAttendanceAlertConfigMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: constructionProjectService.deleteAttendanceAlertConfig,
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: constructionProjectKeys.attendanceAlertConfigsRoot(),
+      });
+      queryClient.invalidateQueries({
+        queryKey: constructionProjectKeys.attendanceAlertLogsRoot(),
+      });
+    },
+  });
+}
+
+export function useAttendanceAlertLogsQuery(filters?: ConstructionAttendanceAlertLogFilters) {
+  return useQuery({
+    queryKey: constructionProjectKeys.attendanceAlertLogs(filters),
+    queryFn: () => constructionProjectService.listAttendanceAlertLogs(filters),
+  });
+}
+
+export function useRunAttendanceAlertsMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: ConstructionAttendanceAlertRunPayload) =>
+      constructionProjectService.runAttendanceAlerts(payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: constructionProjectKeys.attendanceAlertLogsRoot(),
       });
     },
   });
@@ -765,6 +897,13 @@ export function useWorkHourConfigsQuery(filters?: ConstructionModuleListFilters)
   return useQuery({
     queryKey: constructionProjectKeys.workHourConfigs(filters),
     queryFn: () => constructionProjectService.listWorkHourConfigs(filters),
+  });
+}
+
+export function useAllWorkHourConfigsQuery() {
+  return useQuery({
+    queryKey: constructionProjectKeys.allWorkHourConfigs(),
+    queryFn: constructionProjectService.listAllWorkHourConfigs,
   });
 }
 

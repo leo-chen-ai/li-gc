@@ -3,6 +3,10 @@
 参考项目的->测试项目 :project/detail/1206
 参考项目的->管理员账户密码:admin,nbgcxm998998
 
+## 权限记忆
+
+- 除系统管理员 `admin` 可查看全部项目数据外，普通管理账号/用户在项目、人员、考勤等跨项目接口和页面中只能访问 `user_managed_projects` 授权的项目；新增聚合列表必须在后端查询层过滤项目范围，不能只依赖前端过滤。
+
 ## 山淮服务器
 
 - 主机：`36.151.143.235`
@@ -13,7 +17,7 @@
 - 机器可读变量：`VPS_HOST`、`VPS_USER`、`VPS_PASSWORD`、`VPS_SSH_PORT`、`VPS_OS`
 - Rancher：`https://rancher.shanhuai.test`
 - Rancher 纯 IP 入口：`https://36.151.143.235:30443`
-- 山淮后台管理域名：`http://admin.shanhuai.top`（K3s Ingress 已配置；公网当前仍需京东云域名解析/备案放行）
+- 山淮后台管理正式域名：`https://shanhuai.top`（Let's Encrypt 免费证书由 cert-manager 自动续期，K3s Ingress 同时保留 `admin.shanhuai.top` 备用入口）
 - 山淮后台管理兜底 IP 入口：`http://36.151.143.235:30081`
 - 本机访问 Rancher 前需要 hosts 映射：`36.151.143.235 rancher.shanhuai.test`
 - 如果只想用 IP，不需要 hosts，直接访问 `https://36.151.143.235:30443`；对应 Service manifest 在服务器 `/srv/shanhuai/ops/rancher-nodeport.yaml`。
@@ -22,8 +26,14 @@
 - 服务器密钥和数据库连接串：`/srv/shanhuai/secrets/infra.env`
 - PostgreSQL 集群内地址：`postgresql.shanhuai-infra.svc.cluster.local:5432`
 - Redis 集群内地址：`redis.shanhuai-infra.svc.cluster.local:6379`
-- 京东云域名解析：`shanhuai.top` 下新增/修改 A 记录，主机记录 `admin`，记录值 `36.151.143.235`，TTL 可先用 600；不要解析到 `198.18.*` 或其他代理/保留网段地址。
-- 当前公网带 `Host: admin.shanhuai.top` 访问会被京东外层返回 `JDTP 403/网页禁止访问`，但服务器本机 `Host: admin.shanhuai.top` 访问 Traefik 已验证 200；这通常需要完成京东云 ICP 备案/接入或域名放行后才能在公网 80/443 使用。
+- 山淮 K3s 观测栈命名空间：`shanhuai-observability`。
+- 观测栈部署命令：`deploy/k3s/deploy-observability.sh`；values/manifests 在 `deploy/k3s/observability/`，服务器副本在 `/srv/shanhuai/ops/observability/`。
+- 观测栈组件：VictoriaMetrics K8s Stack `0.85.8`（指标采集/存储）、Loki `7.0.0` 单体模式（日志）、Grafana（由 VictoriaMetrics stack 部署）、Grafana Alloy `v1.17.1` DaemonSet（通过 Kubernetes API 采集 Pod 日志）。
+- Grafana 入口：`http://36.151.143.235:30082`；账号密码存服务器 `/srv/shanhuai/secrets/observability.env`，Kubernetes Secret 为 `shanhuai-observability/shanhuai-grafana-admin`。
+- Grafana 已导入 `Shanhuai` 文件夹下 3 张仪表盘：`山淮 / 主机概览`、`山淮 / 服务资源与状态`、`山淮 / 服务日志`；JSON 在 `deploy/k3s/observability/dashboards/`，重新导入命令：`deploy/k3s/import-observability-dashboards.sh`。
+- Loki 日志保留：`168h`（7 天），`reject_old_samples_max_age=168h`；7 天后的日志由 Loki compactor 清理。Loki PVC 默认 `10Gi`，Grafana PVC 默认 `2Gi`，VictoriaMetrics 指标 PVC 默认 `10Gi` 且指标保留 `14d`。
+- 观测栈镜像不依赖远端 K3s 直接拉 Docker Hub；部署脚本会优先用本机 Docker `pull --platform linux/amd64`（Docker Hub 镜像默认先试 `docker.m.daocloud.io`、`docker.1ms.run` 镜像站并 retag）后通过 SSH `docker save | gzip | k3s ctr images import -` 导入宿迁 K3s。如镜像已在 K3s，可用 `SKIP_IMAGE_IMPORT=1 deploy/k3s/deploy-observability.sh`。
+- 京东云域名解析：`shanhuai.top` 下新增/修改 A 记录，主机记录 `@`，记录值 `36.151.143.235`，TTL 可先用 600；如继续保留备用入口，再给主机记录 `admin` 配同样 A 记录。不要解析到 `198.18.*` 或其他代理/保留网段地址。
 - 后续 Codex 需要部署或连服务器时，优先读取 `.env.deploy`，不要在命令里硬编码密码。
 
 ## 山淮本地直连 K3s 发布/更新流程
@@ -97,7 +107,7 @@ ssh -i ~/.ssh/shanhuai_k3s_deploy_ed25519 -p 22 root@36.151.143.235 \
 当前前端入口：
 
 ```text
-http://admin.shanhuai.top
+https://shanhuai.top
 ```
 
 DNS 未生效或排查时可用兜底入口：
@@ -116,9 +126,9 @@ http://36.151.143.235:30081
 - 前端构建阶段使用 `BUILDPLATFORM`，最终 nginx 镜像仍按 `DEPLOY_PLATFORM=linux/amd64` 输出，避免 Apple Silicon 本机跨平台构建时 Bun SIGILL。
 - `ui/.dockerignore` 必须保留，避免把 `node_modules`、`dist` 等大目录发送进 Docker build context。
 - 前端默认使用浏览器当前 `origin` 作为 API 基址；`FRONTEND_API_URL` 只有在必须强制固化 API 地址时才设置，通常保持空值，这样同一份镜像可同时支持 IP 兜底和正式域名。
-- `PUBLIC_WEB_URL` 记录正式入口，当前为 `http://admin.shanhuai.top`；`VERIFY_WEB_URL` 是发布脚本健康检查地址，DNS/备案未生效前可继续用 `http://36.151.143.235:30081`。
-- `deploy/k3s/shanhuai-app.yaml` 已配置 `admin.shanhuai.top` 的 Traefik Ingress，域名解析到 `36.151.143.235` 后可不带端口访问。
-- 如果以后配置 HTTPS，DNS A 记录仍指向 `36.151.143.235`，K3s 侧再新增 cert-manager/Let's Encrypt 证书；不要再依赖 `:30081` 作为正式入口。
+- `PUBLIC_WEB_URL` 和 `VERIFY_WEB_URL` 均使用正式入口 `https://shanhuai.top`；`http://36.151.143.235:30081` 仅用于应急排查。
+- `deploy/k3s/shanhuai-app.yaml` 已配置 `shanhuai.top` 的 Traefik HTTPS Ingress、HTTP 自动跳转、cert-manager/Let's Encrypt 自动续期，并保留 `admin.shanhuai.top` 的 HTTP 备用 Ingress。
+- DNS A 记录仍指向 `36.151.143.235`；正式入口不再依赖 `:30081`，IP NodePort 仅用于应急排查。
 
 ## 山淮北京轻量 CI 机
 

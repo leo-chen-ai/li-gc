@@ -39,6 +39,7 @@ import { Route as AppAdminPersonnelBadRecordsRouteImport } from './routes/app/ad
 import { Route as AppAdminPersonnelApproversRouteImport } from './routes/app/admin/personnel-approvers'
 import { Route as AppAdminPartyBuildingRouteImport } from './routes/app/admin/party-building'
 import { Route as AppAdminMaterialManagementRouteImport } from './routes/app/admin/material-management'
+import { Route as AppAdminManagedAttendanceRouteImport } from './routes/app/admin/managed-attendance'
 import { Route as AppAdminEnvironmentMonitoringRouteImport } from './routes/app/admin/environment-monitoring'
 import { Route as AppAdminEnterpriseReceivedInvoicesRouteImport } from './routes/app/admin/enterprise-received-invoices'
 import { Route as AppAdminEnterpriseProjectsRouteImport } from './routes/app/admin/enterprise-projects'
@@ -52,6 +53,7 @@ import { Route as AppAdminContractTemplatesRouteImport } from './routes/app/admi
 import { Route as AppAdminConstructionSiteRouteImport } from './routes/app/admin/construction-site'
 import { Route as AppAdminAttendanceDevicesRouteImport } from './routes/app/admin/attendance-devices'
 import { Route as AppAdminAttendanceDeviceIssueReportsRouteImport } from './routes/app/admin/attendance-device-issue-reports'
+import { Route as AppAdminAttendanceAlertsRouteImport } from './routes/app/admin/attendance-alerts'
 import { Route as AppAdminApiKeysRouteImport } from './routes/app/admin/api-keys'
 import { Route as AppAdminProjectsProjectIdRouteImport } from './routes/app/admin/projects.$projectId'
 import { Route as AppAdminEnterpriseProjectsProjectIdRouteImport } from './routes/app/admin/enterprise-projects.$projectId'
@@ -217,6 +219,12 @@ const AppAdminMaterialManagementRoute =
     path: '/material-management',
     getParentRoute: () => AppAdminRoute,
   } as any)
+const AppAdminManagedAttendanceRoute =
+  AppAdminManagedAttendanceRouteImport.update({
+    id: '/managed-attendance',
+    path: '/managed-attendance',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
 const AppAdminEnvironmentMonitoringRoute =
   AppAdminEnvironmentMonitoringRouteImport.update({
     id: '/environment-monitoring',
@@ -295,6 +303,12 @@ const AppAdminAttendanceDeviceIssueReportsRoute =
     path: '/attendance-device-issue-reports',
     getParentRoute: () => AppAdminRoute,
   } as any)
+const AppAdminAttendanceAlertsRoute =
+  AppAdminAttendanceAlertsRouteImport.update({
+    id: '/attendance-alerts',
+    path: '/attendance-alerts',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
 const AppAdminApiKeysRoute = AppAdminApiKeysRouteImport.update({
   id: '/api-keys',
   path: '/api-keys',
@@ -328,6 +342,7 @@ export interface FileRoutesByFullPath {
   '/app/settings': typeof AppSettingsRouteWithChildren
   '/app/': typeof AppIndexRoute
   '/app/admin/api-keys': typeof AppAdminApiKeysRoute
+  '/app/admin/attendance-alerts': typeof AppAdminAttendanceAlertsRoute
   '/app/admin/attendance-device-issue-reports': typeof AppAdminAttendanceDeviceIssueReportsRoute
   '/app/admin/attendance-devices': typeof AppAdminAttendanceDevicesRoute
   '/app/admin/construction-site': typeof AppAdminConstructionSiteRoute
@@ -341,6 +356,7 @@ export interface FileRoutesByFullPath {
   '/app/admin/enterprise-projects': typeof AppAdminEnterpriseProjectsRouteWithChildren
   '/app/admin/enterprise-received-invoices': typeof AppAdminEnterpriseReceivedInvoicesRoute
   '/app/admin/environment-monitoring': typeof AppAdminEnvironmentMonitoringRoute
+  '/app/admin/managed-attendance': typeof AppAdminManagedAttendanceRoute
   '/app/admin/material-management': typeof AppAdminMaterialManagementRoute
   '/app/admin/party-building': typeof AppAdminPartyBuildingRoute
   '/app/admin/personnel-approvers': typeof AppAdminPersonnelApproversRoute
@@ -374,6 +390,7 @@ export interface FileRoutesByTo {
   '/app/register': typeof AppRegisterRoute
   '/app': typeof AppIndexRoute
   '/app/admin/api-keys': typeof AppAdminApiKeysRoute
+  '/app/admin/attendance-alerts': typeof AppAdminAttendanceAlertsRoute
   '/app/admin/attendance-device-issue-reports': typeof AppAdminAttendanceDeviceIssueReportsRoute
   '/app/admin/attendance-devices': typeof AppAdminAttendanceDevicesRoute
   '/app/admin/construction-site': typeof AppAdminConstructionSiteRoute
@@ -387,6 +404,7 @@ export interface FileRoutesByTo {
   '/app/admin/enterprise-projects': typeof AppAdminEnterpriseProjectsRouteWithChildren
   '/app/admin/enterprise-received-invoices': typeof AppAdminEnterpriseReceivedInvoicesRoute
   '/app/admin/environment-monitoring': typeof AppAdminEnvironmentMonitoringRoute
+  '/app/admin/managed-attendance': typeof AppAdminManagedAttendanceRoute
   '/app/admin/material-management': typeof AppAdminMaterialManagementRoute
   '/app/admin/party-building': typeof AppAdminPartyBuildingRoute
   '/app/admin/personnel-approvers': typeof AppAdminPersonnelApproversRoute
@@ -424,6 +442,7 @@ export interface FileRoutesById {
   '/app/settings': typeof AppSettingsRouteWithChildren
   '/app/': typeof AppIndexRoute
   '/app/admin/api-keys': typeof AppAdminApiKeysRoute
+  '/app/admin/attendance-alerts': typeof AppAdminAttendanceAlertsRoute
   '/app/admin/attendance-device-issue-reports': typeof AppAdminAttendanceDeviceIssueReportsRoute
   '/app/admin/attendance-devices': typeof AppAdminAttendanceDevicesRoute
   '/app/admin/construction-site': typeof AppAdminConstructionSiteRoute
@@ -437,6 +456,7 @@ export interface FileRoutesById {
   '/app/admin/enterprise-projects': typeof AppAdminEnterpriseProjectsRouteWithChildren
   '/app/admin/enterprise-received-invoices': typeof AppAdminEnterpriseReceivedInvoicesRoute
   '/app/admin/environment-monitoring': typeof AppAdminEnvironmentMonitoringRoute
+  '/app/admin/managed-attendance': typeof AppAdminManagedAttendanceRoute
   '/app/admin/material-management': typeof AppAdminMaterialManagementRoute
   '/app/admin/party-building': typeof AppAdminPartyBuildingRoute
   '/app/admin/personnel-approvers': typeof AppAdminPersonnelApproversRoute
@@ -475,6 +495,7 @@ export interface FileRouteTypes {
     | '/app/settings'
     | '/app/'
     | '/app/admin/api-keys'
+    | '/app/admin/attendance-alerts'
     | '/app/admin/attendance-device-issue-reports'
     | '/app/admin/attendance-devices'
     | '/app/admin/construction-site'
@@ -488,6 +509,7 @@ export interface FileRouteTypes {
     | '/app/admin/enterprise-projects'
     | '/app/admin/enterprise-received-invoices'
     | '/app/admin/environment-monitoring'
+    | '/app/admin/managed-attendance'
     | '/app/admin/material-management'
     | '/app/admin/party-building'
     | '/app/admin/personnel-approvers'
@@ -521,6 +543,7 @@ export interface FileRouteTypes {
     | '/app/register'
     | '/app'
     | '/app/admin/api-keys'
+    | '/app/admin/attendance-alerts'
     | '/app/admin/attendance-device-issue-reports'
     | '/app/admin/attendance-devices'
     | '/app/admin/construction-site'
@@ -534,6 +557,7 @@ export interface FileRouteTypes {
     | '/app/admin/enterprise-projects'
     | '/app/admin/enterprise-received-invoices'
     | '/app/admin/environment-monitoring'
+    | '/app/admin/managed-attendance'
     | '/app/admin/material-management'
     | '/app/admin/party-building'
     | '/app/admin/personnel-approvers'
@@ -570,6 +594,7 @@ export interface FileRouteTypes {
     | '/app/settings'
     | '/app/'
     | '/app/admin/api-keys'
+    | '/app/admin/attendance-alerts'
     | '/app/admin/attendance-device-issue-reports'
     | '/app/admin/attendance-devices'
     | '/app/admin/construction-site'
@@ -583,6 +608,7 @@ export interface FileRouteTypes {
     | '/app/admin/enterprise-projects'
     | '/app/admin/enterprise-received-invoices'
     | '/app/admin/environment-monitoring'
+    | '/app/admin/managed-attendance'
     | '/app/admin/material-management'
     | '/app/admin/party-building'
     | '/app/admin/personnel-approvers'
@@ -828,6 +854,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdminMaterialManagementRouteImport
       parentRoute: typeof AppAdminRoute
     }
+    '/app/admin/managed-attendance': {
+      id: '/app/admin/managed-attendance'
+      path: '/managed-attendance'
+      fullPath: '/app/admin/managed-attendance'
+      preLoaderRoute: typeof AppAdminManagedAttendanceRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
     '/app/admin/environment-monitoring': {
       id: '/app/admin/environment-monitoring'
       path: '/environment-monitoring'
@@ -919,6 +952,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdminAttendanceDeviceIssueReportsRouteImport
       parentRoute: typeof AppAdminRoute
     }
+    '/app/admin/attendance-alerts': {
+      id: '/app/admin/attendance-alerts'
+      path: '/attendance-alerts'
+      fullPath: '/app/admin/attendance-alerts'
+      preLoaderRoute: typeof AppAdminAttendanceAlertsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
     '/app/admin/api-keys': {
       id: '/app/admin/api-keys'
       path: '/api-keys'
@@ -993,6 +1033,7 @@ const AppAdminProjectsRouteWithChildren =
 
 interface AppAdminRouteChildren {
   AppAdminApiKeysRoute: typeof AppAdminApiKeysRoute
+  AppAdminAttendanceAlertsRoute: typeof AppAdminAttendanceAlertsRoute
   AppAdminAttendanceDeviceIssueReportsRoute: typeof AppAdminAttendanceDeviceIssueReportsRoute
   AppAdminAttendanceDevicesRoute: typeof AppAdminAttendanceDevicesRoute
   AppAdminConstructionSiteRoute: typeof AppAdminConstructionSiteRoute
@@ -1006,6 +1047,7 @@ interface AppAdminRouteChildren {
   AppAdminEnterpriseProjectsRoute: typeof AppAdminEnterpriseProjectsRouteWithChildren
   AppAdminEnterpriseReceivedInvoicesRoute: typeof AppAdminEnterpriseReceivedInvoicesRoute
   AppAdminEnvironmentMonitoringRoute: typeof AppAdminEnvironmentMonitoringRoute
+  AppAdminManagedAttendanceRoute: typeof AppAdminManagedAttendanceRoute
   AppAdminMaterialManagementRoute: typeof AppAdminMaterialManagementRoute
   AppAdminPartyBuildingRoute: typeof AppAdminPartyBuildingRoute
   AppAdminPersonnelApproversRoute: typeof AppAdminPersonnelApproversRoute
@@ -1029,6 +1071,7 @@ interface AppAdminRouteChildren {
 
 const AppAdminRouteChildren: AppAdminRouteChildren = {
   AppAdminApiKeysRoute: AppAdminApiKeysRoute,
+  AppAdminAttendanceAlertsRoute: AppAdminAttendanceAlertsRoute,
   AppAdminAttendanceDeviceIssueReportsRoute:
     AppAdminAttendanceDeviceIssueReportsRoute,
   AppAdminAttendanceDevicesRoute: AppAdminAttendanceDevicesRoute,
@@ -1045,6 +1088,7 @@ const AppAdminRouteChildren: AppAdminRouteChildren = {
   AppAdminEnterpriseReceivedInvoicesRoute:
     AppAdminEnterpriseReceivedInvoicesRoute,
   AppAdminEnvironmentMonitoringRoute: AppAdminEnvironmentMonitoringRoute,
+  AppAdminManagedAttendanceRoute: AppAdminManagedAttendanceRoute,
   AppAdminMaterialManagementRoute: AppAdminMaterialManagementRoute,
   AppAdminPartyBuildingRoute: AppAdminPartyBuildingRoute,
   AppAdminPersonnelApproversRoute: AppAdminPersonnelApproversRoute,

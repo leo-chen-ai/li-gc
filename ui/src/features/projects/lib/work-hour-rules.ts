@@ -19,8 +19,9 @@ const MAX_WORK_HOURS = 24;
 export function createDefaultWorkHourRuleForm(): WorkHourRuleForm {
   return {
     segments: [
-      { id: "segment-1", startHour: "0", endHour: "8", rate: "1" },
-      { id: "segment-2", startHour: "8", endHour: "15", rate: "1.5" },
+      { id: "segment-1", startHour: "2", endHour: "4", rate: "0.5" },
+      { id: "segment-2", startHour: "4", endHour: "20", rate: "1" },
+      { id: "segment-3", startHour: "20", endHour: "24", rate: "1.5" },
     ],
   };
 }
@@ -61,7 +62,7 @@ export function parseWorkHourRules(value: unknown): WorkHourRuleForm {
 export function summarizeWorkHourRules(value: unknown) {
   const form = parseWorkHourRules(value);
   const parts = form.segments.slice(0, 4).map((segment) => (
-    `${segment.startHour}-${segment.endHour}小时 x${segment.rate}`
+    `${segment.startHour}-${segment.endHour}小时算${segment.rate}`
   ));
   if (form.segments.length > 4) {
     parts.push(`另${form.segments.length - 4}段`);

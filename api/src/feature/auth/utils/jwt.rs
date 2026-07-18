@@ -22,14 +22,14 @@ fn access_expiry_secs() -> i64 {
     env::var("JWT_ACCESS_EXPIRY_SECS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(3600) // default 1 hour
+        .unwrap_or(2_592_000) // default 30 days
 }
 
 fn refresh_expiry_secs() -> i64 {
     env::var("JWT_REFRESH_EXPIRY_SECS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(604800) // default 7 days
+        .unwrap_or(2_592_000) // default 30 days
 }
 
 /// JWT Error types
@@ -254,7 +254,7 @@ pub fn validate_refresh_token(token: &str) -> Result<Claims, JwtError> {
         return Err(JwtError::WrongType);
     }
 
-    // Check absolute session timeout (7 days from session start)
+    // Check the absolute session timeout from session start.
     let max_session_duration = refresh_expiry_secs();
     let now = Utc::now().timestamp();
 

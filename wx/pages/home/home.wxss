@@ -143,6 +143,7 @@
 .feature-card {
   position: relative;
   overflow: hidden;
+  box-sizing: border-box;
   border-radius: 18rpx;
   background: rgba(255, 255, 255, 0.9);
   box-shadow: 0 16rpx 40rpx rgba(42, 59, 78, 0.065);
@@ -157,6 +158,17 @@
   border-radius: 999rpx;
   background: rgba(15, 125, 111, 0.055);
   content: "";
+  pointer-events: none;
+}
+
+.feature-card image,
+.feature-card .feature-title,
+.feature-card .feature-note,
+.section-item image,
+.section-item .icon-disc,
+.section-item .section-item-title,
+.section-item .section-item-note {
+  pointer-events: none;
 }
 
 .tone-mint {
@@ -204,6 +216,7 @@
 
 .feature-wide {
   display: flex;
+  z-index: 2;
   align-items: center;
   justify-content: space-between;
   height: 186rpx;
@@ -309,6 +322,8 @@
 }
 
 .section-item {
+  position: relative;
+  box-sizing: border-box;
   min-height: 184rpx;
   padding: 28rpx 8rpx 24rpx;
   text-align: center;
@@ -604,4 +619,92 @@
   color: #7f8c91;
   font-size: 24rpx;
   text-align: center;
+}
+
+.worker-entry-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(16, 31, 35, 0.36);
+}
+
+.worker-entry-modal {
+  position: fixed;
+  top: 50%;
+  right: 30rpx;
+  left: 30rpx;
+  z-index: 51;
+  box-sizing: border-box;
+  padding: 14rpx 30rpx 34rpx;
+  border-radius: 28rpx;
+  background: #f7faf9;
+  box-shadow: 0 22rpx 70rpx rgba(16, 31, 35, 0.18);
+  opacity: 0;
+  transform: translateY(-44%);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.worker-entry-modal.show {
+  opacity: 1;
+  transform: translateY(-50%);
+}
+
+.worker-entry-header,
+.worker-entry-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.worker-entry-loading {
+  padding: 70rpx 0;
+  color: #748187;
+  font-size: 25rpx;
+  text-align: center;
+}
+
+.worker-entry-options {
+  display: grid;
+  gap: 18rpx;
+  margin-top: 28rpx;
+}
+
+.worker-entry-option {
+  min-height: 128rpx;
+  padding: 24rpx;
+  border: 1rpx solid #dce7e9;
+  border-radius: 20rpx;
+  background: #ffffff;
+}
+
+.worker-entry-option.onsite {
+  border-color: #b9dfd4;
+  background: #edf9f5;
+}
+
+.worker-entry-option.departed {
+  background: #f3f6f7;
+}
+
+.worker-entry-title {
+  color: #203034;
+  font-size: 29rpx;
+  font-weight: 800;
+}
+
+.worker-entry-copy {
+  margin-top: 9rpx;
+  color: #718086;
+  font-size: 22rpx;
+}
+
+.worker-entry-count {
+  color: #0a9875;
+  font-size: 44rpx;
+  font-weight: 800;
+}
+
+.worker-entry-count text {
+  margin-left: 5rpx;
+  font-size: 22rpx;
 }

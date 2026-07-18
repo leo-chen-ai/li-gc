@@ -8,11 +8,57 @@ use crate::{
     state::AppState,
 };
 
-use super::{construction, enterprise, log, registration_lead, role, stats, upload, user};
+use super::{
+    attendance_alert, construction, enterprise, log, registration_lead, role, stats, upload, user,
+};
 
 pub fn admin_routes() -> Router<AppState> {
     Router::new()
         .route("/log/level", post(log::handler::set_log_level))
+        .route(
+            "/attendance-alert-configs",
+            get(attendance_alert::list_configs).post(attendance_alert::create_config),
+        )
+        .route(
+            "/attendance-alert-configs/{config_id}",
+            put(attendance_alert::update_config)
+                .patch(attendance_alert::update_config)
+                .delete(attendance_alert::delete_config),
+        )
+        .route("/attendance-alert-logs", get(attendance_alert::list_logs))
+        .route("/attendance-alerts/run", post(attendance_alert::run_alerts))
+        .route(
+            "/managed-attendance/photo-groups",
+            get(construction::handler::list_managed_attendance_photo_groups)
+                .post(construction::handler::create_managed_attendance_photo_group),
+        )
+        .route(
+            "/managed-attendance/photo-groups/{photo_group_id}",
+            get(construction::handler::get_managed_attendance_photo_group)
+                .put(construction::handler::update_managed_attendance_photo_group)
+                .patch(construction::handler::update_managed_attendance_photo_group)
+                .delete(construction::handler::delete_managed_attendance_photo_group),
+        )
+        .route(
+            "/managed-attendance/configs",
+            get(construction::handler::list_managed_attendance_configs)
+                .post(construction::handler::create_managed_attendance_config),
+        )
+        .route(
+            "/managed-attendance/configs/{config_id}",
+            get(construction::handler::get_managed_attendance_config)
+                .put(construction::handler::update_managed_attendance_config)
+                .patch(construction::handler::update_managed_attendance_config)
+                .delete(construction::handler::delete_managed_attendance_config),
+        )
+        .route(
+            "/managed-attendance/configs/{config_id}/generate",
+            post(construction::handler::generate_managed_attendance_records),
+        )
+        .route(
+            "/managed-attendance/records",
+            get(construction::handler::list_managed_attendance_records),
+        )
         .route("/projects", get(construction::handler::list_projects))
         .route("/projects", post(construction::handler::create_project))
         .route(
@@ -53,6 +99,10 @@ pub fn admin_routes() -> Router<AppState> {
             get(construction::handler::list_workers).post(construction::handler::create_worker),
         )
         .route(
+            "/projects/{project_id}/workers/export",
+            post(construction::handler::export_project_workers_advanced),
+        )
+        .route(
             "/projects/{project_id}/workers/{worker_id}",
             get(construction::handler::get_worker)
                 .put(construction::handler::update_worker)
@@ -74,6 +124,10 @@ pub fn admin_routes() -> Router<AppState> {
                 .post(construction::handler::create_attendance),
         )
         .route(
+            "/projects/{project_id}/attendance-records/export",
+            post(construction::handler::export_project_attendance_advanced),
+        )
+        .route(
             "/projects/{project_id}/attendance-records/{attendance_id}",
             get(construction::handler::get_attendance)
                 .put(construction::handler::update_attendance)
@@ -91,6 +145,10 @@ pub fn admin_routes() -> Router<AppState> {
                 .put(construction::handler::update_attendance_device)
                 .patch(construction::handler::update_attendance_device)
                 .delete(construction::handler::delete_attendance_device),
+        )
+        .route(
+            "/projects/{project_id}/attendance-devices/{device_id}/issue-workers",
+            post(construction::handler::issue_attendance_device_workers),
         )
         .route(
             "/attendance-device-issue-reports",
@@ -303,11 +361,144 @@ pub fn admin_routes() -> Router<AppState> {
             get(user::handler::list_users).post(user::handler::create_user),
         )
         .route("/users/{id}/role", post(user::handler::update_user_role))
+        .route("/users/{id}", delete(user::handler::delete_user))
+        .route(
+            "/users/{id}/password",
+            put(user::handler::reset_user_password),
+        )
         .route(
             "/users/{id}/projects",
             put(user::handler::update_user_projects),
         )
         .route("/stats", get(stats::handler::get_dashboard_stats))
         .route_layer(middleware::from_fn(admin_middleware))
+        .route_layer(middleware::from_fn(auth_middleware))
+}
+
+pub fn management_routes() -> Router<AppState> {
+    Router::new()
+        .route("/projects", get(construction::handler::list_projects))
+        .route(
+            "/projects/{project_id}",
+            get(construction::handler::get_project)
+                .put(construction::handler::update_project)
+                .patch(construction::handler::update_project),
+        )
+        .route(
+            "/projects/options",
+            get(construction::handler::list_accessible_project_options),
+        )
+        .route(
+            "/projects/{project_id}/units",
+            get(construction::handler::list_units).post(construction::handler::create_unit),
+        )
+        .route(
+            "/projects/{project_id}/units/{unit_id}",
+            get(construction::handler::get_unit)
+                .put(construction::handler::update_unit)
+                .patch(construction::handler::update_unit)
+                .delete(construction::handler::delete_unit),
+        )
+        .route(
+            "/projects/{project_id}/teams",
+            get(construction::handler::list_teams).post(construction::handler::create_team),
+        )
+        .route(
+            "/projects/{project_id}/teams/{team_id}",
+            get(construction::handler::get_team)
+                .put(construction::handler::update_team)
+                .patch(construction::handler::update_team)
+                .delete(construction::handler::delete_team),
+        )
+        .route(
+            "/projects/{project_id}/workers",
+            get(construction::handler::list_workers).post(construction::handler::create_worker),
+        )
+        .route(
+            "/projects/{project_id}/workers/export",
+            post(construction::handler::export_project_workers_advanced),
+        )
+        .route(
+            "/projects/{project_id}/workers/{worker_id}",
+            get(construction::handler::get_worker)
+                .put(construction::handler::update_worker)
+                .patch(construction::handler::update_worker)
+                .delete(construction::handler::delete_worker),
+        )
+        .route(
+            "/projects/{project_id}/workers/{worker_id}/contract-download",
+            get(construction::handler::download_worker_contract),
+        )
+        .route(
+            "/projects/{project_id}/attendance-records",
+            get(construction::handler::list_attendance)
+                .post(construction::handler::create_attendance),
+        )
+        .route(
+            "/projects/{project_id}/attendance-records/export",
+            post(construction::handler::export_project_attendance_advanced),
+        )
+        .route(
+            "/projects/{project_id}/attendance-records/{attendance_id}",
+            get(construction::handler::get_attendance)
+                .put(construction::handler::update_attendance)
+                .patch(construction::handler::update_attendance)
+                .delete(construction::handler::delete_attendance),
+        )
+        .route(
+            "/projects/{project_id}/wage-batches",
+            get(construction::handler::list_wage_batches)
+                .post(construction::handler::create_wage_batch),
+        )
+        .route(
+            "/projects/{project_id}/wage-batches/import",
+            post(construction::handler::import_wage_batch),
+        )
+        .route(
+            "/projects/{project_id}/wage-batches/export",
+            get(construction::handler::export_wage_batches),
+        )
+        .route(
+            "/projects/{project_id}/wage-batches/{batch_id}",
+            put(construction::handler::update_wage_batch)
+                .patch(construction::handler::update_wage_batch)
+                .delete(construction::handler::delete_wage_batch),
+        )
+        .route(
+            "/projects/{project_id}/attendance-devices",
+            get(construction::handler::list_attendance_devices)
+                .post(construction::handler::create_attendance_device),
+        )
+        .route(
+            "/projects/{project_id}/attendance-devices/{device_id}",
+            get(construction::handler::get_attendance_device)
+                .put(construction::handler::update_attendance_device)
+                .patch(construction::handler::update_attendance_device)
+                .delete(construction::handler::delete_attendance_device),
+        )
+        .route(
+            "/projects/{project_id}/attendance-devices/{device_id}/issue-workers",
+            post(construction::handler::issue_attendance_device_workers),
+        )
+        .route(
+            "/attendance-device-issue-reports",
+            get(construction::handler::list_attendance_device_issue_reports)
+                .post(construction::handler::create_attendance_device_issue_report),
+        )
+        .route(
+            "/attendance-device-issue-reports/{report_id}",
+            get(construction::handler::get_attendance_device_issue_report)
+                .put(construction::handler::update_attendance_device_issue_report)
+                .patch(construction::handler::update_attendance_device_issue_report)
+                .delete(construction::handler::delete_attendance_device_issue_report),
+        )
+        .route(
+            "/personnel-workers",
+            get(construction::handler::list_personnel_workers),
+        )
+        .route(
+            "/personnel-workers/{worker_id}",
+            get(construction::handler::get_personnel_worker),
+        )
         .route_layer(middleware::from_fn(auth_middleware))
 }

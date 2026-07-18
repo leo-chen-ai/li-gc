@@ -1,4 +1,5 @@
 pub mod api_key;
+pub mod attendance_alert;
 pub mod construction;
 pub mod enterprise;
 pub mod log;

@@ -38,6 +38,16 @@ test("construction ledger dictionary fields render as selects", () => {
   }
 });
 
+test("unit form hides legacy timer settings and keeps date picker registration date", () => {
+  const keys = unitFormFields.map((field) => field.key);
+  const registerDate = unitFormFields.find((field) => field.key === "register_date");
+
+  assert.equal(keys.includes("timer_set_a"), false);
+  assert.equal(keys.includes("timer_set_b"), false);
+  assert.equal(keys.includes("timer_set_c"), false);
+  assert.equal(registerDate?.valueType, "date");
+});
+
 test("team leader is selected from project workers", () => {
   const field = teamFormFields.find((item) => item.key === "leader_id");
 
@@ -57,14 +67,26 @@ test("worker form starts with team scope fields", () => {
   );
 });
 
-test("worker native place is grouped with identity document information", () => {
+test("worker identity and employment fields are grouped with basic information", () => {
   const sections = getFieldsBySection(workerFormFields);
   const teamScopeSection = sections.find((item) => item.section === "班组归属");
-  const identitySection = sections.find((item) => item.section === "证件信息");
+  const basicSection = sections.find((item) => item.section === "基础信息");
 
-  assert.ok(identitySection, "identity section exists");
+  assert.ok(basicSection, "basic section exists");
   assert.equal(teamScopeSection?.fields.some((field) => field.key === "native_place"), false);
-  assert.equal(identitySection.fields.some((field) => field.key === "native_place"), true);
+  assert.equal(basicSection.fields.some((field) => field.key === "native_place"), true);
+  assert.equal(basicSection.fields.some((field) => field.key === "work_type"), true);
+  assert.equal(basicSection.fields.some((field) => field.key === "political_status"), true);
+});
+
+test("manager type only appears for manager workers", () => {
+  const constructionFields = getFieldsBySection(workerFormFields, { worker_type: "1" })
+    .flatMap((section) => section.fields);
+  const managerFields = getFieldsBySection(workerFormFields, { worker_type: "1001" })
+    .flatMap((section) => section.fields);
+
+  assert.equal(constructionFields.some((field) => field.key === "manager_type"), false);
+  assert.equal(managerFields.find((field) => field.key === "manager_type")?.required, true);
 });
 
 test("worker signature photo supports manual signing", () => {
@@ -86,6 +108,6 @@ test("worker form hides real-name authentication bookkeeping fields", () => {
 
 test("worker native place is inferred from recognized address", () => {
   assert.equal(inferNativePlaceFromAddress("杭州市西湖区桑园地村4组25号"), "330100");
-  assert.equal(inferNativePlaceFromAddress("江苏省淮安市清江浦区北京北路"), "320000");
+  assert.equal(inferNativePlaceFromAddress("江苏省淮安市清江浦区北京北路"), "320800");
   assert.equal(inferNativePlaceFromAddress(""), null);
 });

@@ -57,6 +57,22 @@ async fn table_column_data_types(pool: &PgPool, table_name: &str) -> HashMap<Str
     .collect()
 }
 
+async fn index_exists(pool: &PgPool, index_name: &str) -> bool {
+    sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM pg_indexes
+            WHERE schemaname = 'public' AND indexname = $1
+        )
+        "#,
+    )
+    .bind(index_name)
+    .fetch_one(pool)
+    .await
+    .expect("read index existence")
+}
+
 fn assert_has_columns(columns: &[String], required: &[&str]) {
     for column in required {
         assert!(
@@ -330,6 +346,14 @@ async fn construction_core_tables_use_normalized_non_platform_fields() {
             "original_time",
         ],
     );
+    assert!(
+        index_exists(
+            &pool,
+            "idx_attendance_records_worker_serial_original_active"
+        )
+        .await,
+        "attendance record MQTT dedupe index should exist"
+    );
     assert_lacks_columns(
         &attendance_columns,
         &[
@@ -337,6 +361,22 @@ async fn construction_core_tables_use_normalized_non_platform_fields() {
             "rs_send_status",
             "gj_status",
             "zhigong_send_time",
+        ],
+    );
+
+    let attendance_photo_columns =
+        table_columns(&pool, "construction_attendance_record_photos").await;
+    assert_has_columns(
+        &attendance_photo_columns,
+        &[
+            "attendance_record_id",
+            "project_id",
+            "worker_id",
+            "photo_kind",
+            "photo_data",
+            "content_type",
+            "source",
+            "created_at",
         ],
     );
 }
@@ -514,4 +554,210 @@ async fn construction_core_tables_support_project_nested_crud_and_fake_attendanc
         .await
         .expect("count projects");
     assert_eq!(remaining, 0);
+}
+
+#[tokio::test]
+async fn integration_and_device_messaging_tables_support_job_ledgers() {
+    let (pool, _container) = build_pool().await;
+
+    for table in [
+        "integration_platforms",
+        "integration_project_bindings",
+        "integration_entity_mappings",
+        "integration_outbox_events",
+        "integration_jobs",
+        "integration_attempts",
+        "integration_event_logs",
+        "integration_token_cache",
+        "device_dispatch_batches",
+        "device_dispatch_jobs",
+        "device_dispatch_events",
+        "device_mqtt_messages",
+        "construction_attendance_device_issue_reports",
+    ] {
+        let columns = table_columns(&pool, table).await;
+        assert!(!columns.is_empty(), "{table} should exist");
+    }
+
+    let issue_report_columns =
+        table_columns(&pool, "construction_attendance_device_issue_reports").await;
+    assert_has_columns(
+        &issue_report_columns,
+        &[
+            "mqtt_message_id",
+            "request_payload",
+            "response_payload",
+            "acknowledged_at",
+            "retry_count",
+            "max_retries",
+            "next_retry_at",
+            "last_retry_at",
+            "last_error",
+            "retry_locked_until",
+        ],
+    );
+
+    let project_id: uuid::Uuid = sqlx::query_scalar(
+        r#"
+        INSERT INTO construction_projects (name, address, status)
+        VALUES ('集成测试项目', '集成路 1 号', 1)
+        RETURNING id
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("insert project");
+
+    let platform_id: uuid::Uuid =
+        sqlx::query_scalar("SELECT id FROM integration_platforms WHERE code = 'zhenhai'")
+            .fetch_one(&pool)
+            .await
+            .expect("seeded zhenhai platform");
+
+    let binding_id: uuid::Uuid = sqlx::query_scalar(
+        r#"
+        INSERT INTO integration_project_bindings
+            (project_id, platform_id, external_project_id, credentials, enabled_events)
+        VALUES
+            ($1, $2, '119203', '{"app_key":"demo","app_secret":"masked"}'::jsonb, ARRAY['worker.created'])
+        RETURNING id
+        "#,
+    )
+    .bind(project_id)
+    .bind(platform_id)
+    .fetch_one(&pool)
+    .await
+    .expect("insert platform binding");
+
+    let outbox_event_id: uuid::Uuid = sqlx::query_scalar(
+        r#"
+        INSERT INTO integration_outbox_events
+            (project_id, event_type, aggregate_type, aggregate_id, payload)
+        VALUES
+            ($1, 'worker.created', 'worker', gen_random_uuid(), '{"name":"demo"}'::jsonb)
+        RETURNING id
+        "#,
+    )
+    .bind(project_id)
+    .fetch_one(&pool)
+    .await
+    .expect("insert outbox event");
+
+    let job_id: uuid::Uuid = sqlx::query_scalar(
+        r#"
+        INSERT INTO integration_jobs
+            (project_id, binding_id, outbox_event_id, platform_code, operation, entity_type, idempotency_key, request_payload)
+        VALUES
+            ($1, $2, $3, 'zhenhai', 'addStaff_v2', 'worker', 'zhenhai-worker-created-demo', '{"staff_name":"demo"}'::jsonb)
+        RETURNING id
+        "#,
+    )
+    .bind(project_id)
+    .bind(binding_id)
+    .bind(outbox_event_id)
+    .fetch_one(&pool)
+    .await
+    .expect("insert integration job");
+
+    sqlx::query(
+        r#"
+        INSERT INTO integration_attempts
+            (job_id, project_id, binding_id, attempt_no, transport, request_method, request_url, status)
+        VALUES
+            ($1, $2, $3, 1, 'http', 'POST', 'https://mock.test/addStaff_v2', 'success')
+        "#,
+    )
+    .bind(job_id)
+    .bind(project_id)
+    .bind(binding_id)
+    .execute(&pool)
+    .await
+    .expect("insert integration attempt");
+
+    let device_id: uuid::Uuid = sqlx::query_scalar(
+        r#"
+        INSERT INTO construction_attendance_devices
+            (project_id, device_type, serial_number, device_name)
+        VALUES
+            ($1, 'face_mqtt_v203', 'SN-1306612', '北门入口')
+        RETURNING id
+        "#,
+    )
+    .bind(project_id)
+    .fetch_one(&pool)
+    .await
+    .expect("insert attendance device");
+
+    sqlx::query(
+        r#"
+        INSERT INTO integration_entity_mappings
+            (binding_id, project_id, entity_type, local_entity_id, external_entity_id)
+        VALUES
+            ($1, $2, 'attendance_device', $3, '5019')
+        "#,
+    )
+    .bind(binding_id)
+    .bind(project_id)
+    .bind(device_id)
+    .execute(&pool)
+    .await
+    .expect("insert entity mapping");
+
+    let batch_id: uuid::Uuid = sqlx::query_scalar(
+        r#"
+        INSERT INTO device_dispatch_batches
+            (project_id, source, status, total_count, pending_count)
+        VALUES
+            ($1, 'test', 'pending', 1, 1)
+        RETURNING id
+        "#,
+    )
+    .bind(project_id)
+    .fetch_one(&pool)
+    .await
+    .expect("insert dispatch batch");
+
+    let dispatch_job_id: uuid::Uuid = sqlx::query_scalar(
+        r#"
+        INSERT INTO device_dispatch_jobs
+            (batch_id, project_id, attendance_device_id, device_sn, action, mqtt_topic, message_id, payload)
+        VALUES
+            ($1, $2, $3, 'SN-1306612', 'edit_person', 'mqtt/face/SN-1306612', 'msg-1', '{"operator":"EditPerson"}'::jsonb)
+        RETURNING id
+        "#,
+    )
+    .bind(batch_id)
+    .bind(project_id)
+    .bind(device_id)
+    .fetch_one(&pool)
+    .await
+    .expect("insert dispatch job");
+
+    sqlx::query(
+        r#"
+        INSERT INTO device_dispatch_events
+            (batch_id, job_id, event_type, message)
+        VALUES
+            ($1, $2, 'sent', 'published to mqtt')
+        "#,
+    )
+    .bind(batch_id)
+    .bind(dispatch_job_id)
+    .execute(&pool)
+    .await
+    .expect("insert dispatch event");
+
+    sqlx::query(
+        r#"
+        INSERT INTO device_mqtt_messages
+            (project_id, attendance_device_id, device_sn, direction, topic, operator, message_id, payload)
+        VALUES
+            ($1, $2, 'SN-1306612', 'inbound', 'mqtt/face/SN-1306612/Ack', 'EditPerson-Ack', 'msg-1', '{"code":"200"}'::jsonb)
+        "#,
+    )
+    .bind(project_id)
+    .bind(device_id)
+    .execute(&pool)
+    .await
+    .expect("insert mqtt message");
 }

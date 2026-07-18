@@ -90,6 +90,23 @@ async fn test_admin_can_list_seeded_roles_with_menu_permissions() {
             "roles",
             "attendance_devices",
             "attendance_device_issue_reports",
+            "attendance_alerts",
+            "managed_attendance",
+            "environment_monitoring",
+            "video_monitoring",
+            "quality_safety",
+            "safety_management",
+            "material_management",
+            "construction_site",
+            "party_building",
+            "emergency_management",
+            "personnel_workers",
+            "personnel_contracts",
+            "personnel_qualifications",
+            "personnel_registrations",
+            "personnel_bad_records",
+            "personnel_approvers",
+            "registration_leads",
             "uploads"
         ])
     );
@@ -157,7 +174,7 @@ async fn test_admin_update_role_menus_ignores_stale_menu_keys() {
         app,
         &format!("/api/v1/admin/roles/{role_id}/menus"),
         &token,
-        json!({ "menu_keys": ["users", "api_keys", "attendance_devices", "attendance_device_issue_reports"] }),
+        json!({ "menu_keys": ["users", "api_keys", "attendance_devices", "attendance_device_issue_reports", "managed_attendance"] }),
     )
     .await;
 
@@ -168,7 +185,8 @@ async fn test_admin_update_role_menus_ignores_stale_menu_keys() {
             "projects",
             "users",
             "attendance_devices",
-            "attendance_device_issue_reports"
+            "attendance_device_issue_reports",
+            "managed_attendance"
         ])
     );
 }

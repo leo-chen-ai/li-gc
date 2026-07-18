@@ -15,7 +15,7 @@ test("requires phone when creating worker", () => {
   );
 });
 
-test("requires work type for construction worker", () => {
+test("requires work type for every worker", () => {
   assert.throws(
     () =>
       validateWorkerCreatePayload({
@@ -34,8 +34,23 @@ test("requires manager type for manager worker", () => {
         name: "李四",
         phone: "13800000001",
         worker_type: 1001,
+        work_type: 2,
+        political_status: 1,
       }),
     /请选择人员类型/
+  );
+});
+
+test("requires political status for every worker", () => {
+  assert.throws(
+    () =>
+      validateWorkerCreatePayload({
+        name: "张三",
+        phone: "13800000000",
+        worker_type: 1,
+        work_type: 2,
+      }),
+    /请选择政治面貌/
   );
 });
 
@@ -46,6 +61,7 @@ test("accepts required fields for create", () => {
       phone: "13800000000",
       worker_type: 1,
       work_type: 2,
+      political_status: 1,
     })
   );
 });

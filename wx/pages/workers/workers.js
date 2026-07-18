@@ -11,6 +11,7 @@ const {
   buildFormFields,
   buildPayloadFromForm,
   nextUploadValue,
+  previewUploadedFile,
   today,
   uploadForField,
 } = require("../../utils/form-utils.js");
@@ -27,9 +28,13 @@ function calculateAge(idCard) {
   return age > 0 ? age : "";
 }
 
+const LIST_PAGE_SIZE = 10;
+
 Page({
   data: {
     pageHeaderBg: assetPath("/page-header-bg-v1.png"),
+    workStatus: 1,
+    statusLabel: "在场",
     project: null,
     projectName: "",
     keyword: "",
@@ -43,16 +48,33 @@ Page({
     teams: [],
     workers: [],
     filteredWorkers: [],
+    total: 0,
+    page: 1,
+    pageSize: LIST_PAGE_SIZE,
+    hasMore: false,
     currentWorker: null,
     detailVisible: false,
     editVisible: false,
     editId: "",
     form: {},
     formFields: [],
+    loading: false,
+    loadingMore: false,
     saving: false,
+    batchMode: false,
+    selectedWorkerIds: [],
+    batchRetiring: false,
+    reentryVisible: false,
+    reentryWorker: null,
+    reentryTeamIndex: 0,
+    reentryTeamName: "",
+    reentryEntryTime: today(),
+    reentrySaving: false,
   },
 
-  async onLoad() {
+  async onLoad(options = {}) {
+    const workStatus = Number(options.status) === 2 ? 2 : 1;
+    this.setData({ workStatus, statusLabel: workStatus === 2 ? "离场" : "在场" });
     await this.loadData();
   },
 
@@ -64,25 +86,84 @@ Page({
       return;
     }
 
-    this.setData({ project, projectName: project.title || project.name || "已授权项目" });
+    this.setData({
+      project,
+      projectName: project.title || project.name || "已授权项目",
+      loading: true,
+      loadingMore: false,
+      page: 1,
+      hasMore: false,
+    });
     try {
-      const [unitsResult, teamsResult, workersResult] = await Promise.all([
-        listResource(project.id, "units", { page: 1, page_size: 200 }),
-        listResource(project.id, "teams", { page: 1, page_size: 200 }),
-        listResource(project.id, "workers", { page: 1, page_size: 300 }),
+      const [unitsResult, teamsResult] = await Promise.all([
+        listResource(project.id, "units", { page: 1, page_size: 100 }),
+        listResource(project.id, "teams", { page: 1, page_size: 100 }),
       ]);
       const units = unitsResult.items || [];
       const teams = teamsResult.items || [];
-      const workers = (workersResult.items || []).map((worker) => this.decorateWorker(worker, units, teams));
       this.setData({
         units,
         teams,
-        workers,
         teamOptions: ["全部"].concat(teams.map((team) => team.name || "未命名班组")),
-      }, () => this.refresh());
+      });
+      const workersResult = await this.loadWorkers(1);
+      this.setData({ loading: false });
+      this.applyWorkersResult(workersResult, 1, false);
     } catch (error) {
+      this.setData({ loading: false, loadingMore: false });
       wx.showToast({ title: error.message || "工人加载失败", icon: "none" });
     }
+  },
+
+  async loadWorkers(page = 1) {
+    return listResource(this.data.project.id, "workers", this.buildWorkerListParams(page));
+  },
+
+  buildWorkerListParams(page = 1) {
+    const params = {
+      page,
+      page_size: this.data.pageSize || LIST_PAGE_SIZE,
+      work_status: this.data.workStatus,
+    };
+    const keyword = String(this.data.keyword || "").trim();
+    if (keyword) {
+      params.keyword = keyword;
+    }
+    if (this.data.teamIndex > 0) {
+      const team = this.data.teams[this.data.teamIndex - 1];
+      if (team && team.id) {
+        params.team_id = team.id;
+      }
+    }
+    if (this.data.authFilter === "已认证") {
+      params.auth_status = 2;
+    }
+    if (this.data.authFilter === "未认证") {
+      params.auth_status = "unverified";
+    }
+    return params;
+  },
+
+  applyWorkersResult(result, page, append) {
+    const selected = new Set(this.data.selectedWorkerIds);
+    const items = (result.items || []).map((worker) => ({
+      ...this.decorateWorker(worker),
+      batchSelected: selected.has(worker.id),
+    }));
+    const workers = append ? this.data.workers.concat(items) : items;
+    const total = Number.isFinite(Number(result.total)) ? Number(result.total) : workers.length;
+    const currentWorker = this.data.currentWorker
+      ? workers.find((item) => item.id === this.data.currentWorker.id) || this.data.currentWorker
+      : workers[0] || null;
+
+    this.setData({
+      workers,
+      filteredWorkers: workers,
+      currentWorker,
+      total,
+      page,
+      hasMore: workers.length < total,
+    });
   },
 
   decorateWorker(worker, units = this.data.units, teams = this.data.teams) {
@@ -104,12 +185,15 @@ Page({
       validPeriod: [worker.validity_period, worker.validity_period_end].filter(Boolean).join(" 至 "),
       nativePlace: optionLabel(fieldSets.workers, "native_place", worker.native_place, ""),
       avatarUrl: worker.avatar || assetPath("/module-workers.png"),
+      idCardFrontUrl: worker.ocr_photo || "",
+      idCardBackUrl: worker.id_card_back_file || "",
+      signatureUrl: worker.signature_photo || "",
       statusText: worker.work_status === 2 ? "离场" : "在场",
     };
   },
 
   onKeywordInput(event) {
-    this.setData({ keyword: event.detail.value }, () => this.refresh());
+    this.setData({ keyword: event.detail.value });
   },
 
   onTeamFilterChange(event) {
@@ -117,7 +201,7 @@ Page({
     this.setData({
       teamIndex,
       teamFilter: this.data.teamOptions[teamIndex],
-    }, () => this.refresh());
+    }, () => this.submitSearch());
   },
 
   onAuthFilterChange(event) {
@@ -125,22 +209,35 @@ Page({
     this.setData({
       authIndex,
       authFilter: this.data.authOptions[authIndex],
-    }, () => this.refresh());
+    }, () => this.submitSearch());
   },
 
-  refresh() {
-    const kw = String(this.data.keyword || "").trim().toLowerCase();
-    const filteredWorkers = this.data.workers.filter((worker) => {
-      const text = `${worker.name || ""} ${worker.phone || ""} ${worker.team} ${worker.workType} ${worker.id_card || ""}`.toLowerCase();
-      const matchesKeyword = !kw || text.includes(kw);
-      const matchesTeam = this.data.teamFilter === "全部" || worker.team === this.data.teamFilter;
-      const matchesAuth = this.data.authFilter === "全部" || worker.authStatus === this.data.authFilter;
-      return matchesKeyword && matchesTeam && matchesAuth;
-    });
-    const currentWorker = this.data.currentWorker
-      ? filteredWorkers.find((item) => item.id === this.data.currentWorker.id) || this.data.currentWorker
-      : filteredWorkers[0] || null;
-    this.setData({ filteredWorkers, currentWorker });
+  async submitSearch() {
+    await this.reloadWorkers({ append: false });
+  },
+
+  async reloadWorkers({ append = false } = {}) {
+    if (append) {
+      if (this.data.loadingMore || this.data.loading || !this.data.hasMore) return;
+    } else if (this.data.loading) {
+      return;
+    }
+
+    const page = append ? this.data.page + 1 : 1;
+    this.setData(append ? { loadingMore: true } : { loading: true, hasMore: false });
+    try {
+      const result = await this.loadWorkers(page);
+      this.setData({ loading: false, loadingMore: false });
+      this.applyWorkersResult(result, page, append);
+    } catch (error) {
+      this.setData({ loading: false, loadingMore: false });
+      wx.showToast({ title: error.message || "工人加载失败", icon: "none" });
+    }
+  },
+
+  async onReachBottom() {
+    if (this.data.detailVisible || this.data.editVisible) return;
+    await this.reloadWorkers({ append: true });
   },
 
   openWorkerDetail(event) {
@@ -148,6 +245,70 @@ Page({
     const currentWorker = this.data.workers.find((item) => item.id === id);
     if (!currentWorker) return;
     this.setData({ currentWorker, detailVisible: true });
+  },
+
+  handleWorkerTap(event) {
+    if (this.data.batchMode) {
+      this.toggleWorkerSelection(event);
+      return;
+    }
+    this.openWorkerDetail(event);
+  },
+
+  toggleBatchMode() {
+    if (this.data.workStatus !== 1 || this.data.batchRetiring) return;
+    this.setData({
+      batchMode: !this.data.batchMode,
+      selectedWorkerIds: [],
+      workers: this.data.workers.map((worker) => ({ ...worker, batchSelected: false })),
+      filteredWorkers: this.data.filteredWorkers.map((worker) => ({ ...worker, batchSelected: false })),
+    });
+  },
+
+  toggleWorkerSelection(event) {
+    const { id } = event.currentTarget.dataset;
+    if (!id) return;
+    const selected = new Set(this.data.selectedWorkerIds);
+    if (selected.has(id)) selected.delete(id);
+    else selected.add(id);
+    const markSelection = (worker) => ({ ...worker, batchSelected: selected.has(worker.id) });
+    this.setData({
+      selectedWorkerIds: Array.from(selected),
+      workers: this.data.workers.map(markSelection),
+      filteredWorkers: this.data.filteredWorkers.map(markSelection),
+    });
+  },
+
+  confirmBatchRetire() {
+    const ids = this.data.selectedWorkerIds;
+    if (!ids.length || this.data.batchRetiring) {
+      wx.showToast({ title: "请先选择工人", icon: "none" });
+      return;
+    }
+    wx.showModal({
+      title: "批量退场",
+      content: `确认将已选择的 ${ids.length} 名工人标记为离场？`,
+      confirmText: "确认退场",
+      confirmColor: "#d93026",
+      success: async (result) => {
+        if (!result.confirm) return;
+        this.setData({ batchRetiring: true });
+        try {
+          for (const id of ids) {
+            await updateResource(this.data.project.id, "workers", id, {
+              work_status: 2,
+              exit_time: today(),
+            });
+          }
+          this.setData({ batchRetiring: false, batchMode: false, selectedWorkerIds: [] });
+          await this.reloadWorkers({ append: false });
+          wx.showToast({ title: `已退场${ids.length}人`, icon: "success" });
+        } catch (error) {
+          this.setData({ batchRetiring: false });
+          wx.showToast({ title: error.message || "批量退场失败", icon: "none" });
+        }
+      },
+    });
   },
 
   closeWorkerDetail() {
@@ -224,6 +385,11 @@ Page({
     }
   },
 
+  previewUpload(event) {
+    const { url, name, isImage } = event.currentTarget.dataset;
+    previewUploadedFile({ url, name, isImage: isImage === true || isImage === "true" });
+  },
+
   async submitEditWorker() {
     if (this.data.saving) return;
     let payload;
@@ -238,7 +404,7 @@ Page({
     try {
       await updateResource(this.data.project.id, "workers", this.data.editId, payload);
       this.setData({ saving: false, editVisible: false });
-      await this.loadData();
+      await this.reloadWorkers({ append: false });
       wx.showToast({ title: "工人信息已修改", icon: "success" });
     } catch (error) {
       this.setData({ saving: false });
@@ -262,13 +428,75 @@ Page({
             work_status: 2,
             exit_time: today(),
           });
-          await this.loadData();
+          await this.reloadWorkers({ append: false });
           wx.showToast({ title: "已退场", icon: "success" });
         } catch (error) {
           wx.showToast({ title: error.message || "退场失败", icon: "none" });
         }
       },
     });
+  },
+
+  openReentry(event) {
+    const id = event.currentTarget.dataset.id || (this.data.currentWorker && this.data.currentWorker.id);
+    const worker = this.data.workers.find((item) => item.id === id);
+    if (!worker) return;
+    if (!this.data.teams.length) {
+      wx.showToast({ title: "请先维护班组", icon: "none" });
+      return;
+    }
+
+    const teamIndex = Math.max(0, this.data.teams.findIndex((team) => team.id === worker.team_id));
+    const team = this.data.teams[teamIndex];
+    this.setData({
+      reentryVisible: true,
+      reentryWorker: worker,
+      reentryTeamIndex: teamIndex,
+      reentryTeamName: team.name || "未命名班组",
+      reentryEntryTime: today(),
+    });
+  },
+
+  closeReentry() {
+    if (this.data.reentrySaving) return;
+    this.setData({ reentryVisible: false, reentryWorker: null });
+  },
+
+  onReentryTeamChange(event) {
+    const reentryTeamIndex = Number(event.detail.value);
+    const team = this.data.teams[reentryTeamIndex];
+    this.setData({
+      reentryTeamIndex,
+      reentryTeamName: team ? team.name || "未命名班组" : "",
+    });
+  },
+
+  onReentryDateChange(event) {
+    this.setData({ reentryEntryTime: event.detail.value });
+  },
+
+  async submitReentry() {
+    const worker = this.data.reentryWorker;
+    const team = this.data.teams[this.data.reentryTeamIndex];
+    const entryTime = this.data.reentryEntryTime;
+    if (!worker || !team || !entryTime || this.data.reentrySaving) return;
+
+    this.setData({ reentrySaving: true });
+    try {
+      await updateResource(this.data.project.id, "workers", worker.id, {
+        unit_id: team.unit_id,
+        team_id: team.id,
+        work_status: 1,
+        entry_time: entryTime,
+        exit_time: null,
+      });
+      this.setData({ reentrySaving: false, reentryVisible: false, reentryWorker: null, detailVisible: false });
+      await this.reloadWorkers({ append: false });
+      wx.showToast({ title: "已办理进场", icon: "success" });
+    } catch (error) {
+      this.setData({ reentrySaving: false });
+      wx.showToast({ title: error.message || "进场失败", icon: "none" });
+    }
   },
 
   deleteWorker(event) {
@@ -285,7 +513,7 @@ Page({
         try {
           await deleteResource(this.data.project.id, "workers", id);
           this.setData({ detailVisible: false });
-          await this.loadData();
+          await this.reloadWorkers({ append: false });
           wx.showToast({ title: "已删除", icon: "success" });
         } catch (error) {
           wx.showToast({ title: error.message || "删除失败", icon: "none" });
@@ -296,10 +524,6 @@ Page({
 
   showAction(event) {
     const { name } = event.currentTarget.dataset;
-    if (name === "批量退场") {
-      wx.showToast({ title: "请逐个确认退场", icon: "none" });
-      return;
-    }
     wx.showToast({ title: `${name}功能待设备接口开放`, icon: "none" });
   },
 

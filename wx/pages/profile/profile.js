@@ -1,16 +1,30 @@
 const { request } = require("../../config/api.js");
+const { assetPath } = require("../../config/assets.js");
 const { clearSelectedProject, getSelectedProject } = require("../../utils/construction-api.js");
+
+function extractScanLoginToken(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+
+  const match = text.match(/^shanhuai:\/\/scan-login\?(.+)$/);
+  if (match) {
+    const tokenPair = match[1]
+      .split("&")
+      .map((part) => part.split("="))
+      .find(([key]) => key === "token");
+    return tokenPair ? decodeURIComponent(tokenPair[1] || "") : "";
+  }
+
+  return /^[a-f0-9]{64}$/i.test(text) ? text : "";
+}
 
 Page({
   data: {
-    account: "admin",
+    account: "",
     userName: "项目管理员",
-    companyName: "未选择单位",
-    projectName: "未选择项目",
-    phoneNumber: "未绑定手机号",
-    profilePageBg: "/assets/generated/profile-page-green-bg.jpg",
-    profileVisual: "/assets/generated/profile-construction-visual.jpg",
-    contactIcon: "/assets/generated/profile-contact-icon.png",
+    profilePageBg: assetPath("/profile-page-green-bg.jpg"),
+    profileVisual: assetPath("/profile-construction-visual.jpg"),
+    contactIcon: assetPath("/profile-contact-icon.png"),
     passwordModalVisible: false,
     currentPassword: "",
     newPassword: "",
@@ -27,17 +41,11 @@ Page({
       return;
     }
     if (user) {
-      const rawPhone = user.phone || user.mobile || user.phone_number || user.phoneNumber || "";
       this.setData({
         account: user.username || user.email || "未命名账号",
         userName: user.name || user.username || "项目管理员",
-        phoneNumber: rawPhone ? this.maskPhone(rawPhone) : "未绑定手机号",
       });
     }
-    this.setData({
-      projectName: project.title || project.name || "已授权项目",
-      companyName: project.developerName || "已授权单位",
-    });
   },
 
   goHome() {
@@ -51,6 +59,52 @@ Page({
       newPassword: "",
       confirmPassword: "",
     });
+  },
+
+  scanPcLogin() {
+    wx.scanCode({
+      onlyFromCamera: false,
+      scanType: ["qrCode"],
+      success: (result) => {
+        const scanToken = extractScanLoginToken(result.result || result.path);
+        if (!scanToken) {
+          wx.showToast({ title: "请扫描电脑端登录二维码", icon: "none" });
+          return;
+        }
+
+        wx.showModal({
+          title: "确认登录电脑端",
+          content: "将使用当前小程序账号登录电脑端山淮筑后台。",
+          confirmText: "确认登录",
+          confirmColor: "#0a9875",
+          success: (modalResult) => {
+            if (modalResult.confirm) {
+              this.confirmPcLogin(scanToken);
+            }
+          },
+        });
+      },
+      fail: (error) => {
+        if (error && String(error.errMsg || "").includes("cancel")) return;
+        wx.showToast({ title: "扫码失败，请重试", icon: "none" });
+      },
+    });
+  },
+
+  async confirmPcLogin(scanToken) {
+    wx.showLoading({ title: "确认中" });
+    try {
+      await request({
+        url: `/auth/scan-login/sessions/${encodeURIComponent(scanToken)}/confirm`,
+        method: "POST",
+        data: {},
+      });
+      wx.hideLoading();
+      wx.showToast({ title: "电脑端登录成功", icon: "success" });
+    } catch (error) {
+      wx.hideLoading();
+      wx.showToast({ title: error.message || "确认失败", icon: "none" });
+    }
   },
 
   closePasswordModal() {
@@ -100,18 +154,9 @@ Page({
   },
 
   contactUs() {
-    wx.showModal({
-      title: "联系我们",
-      content: "如需账号、项目权限或使用协助，请联系项目管理员。",
-      showCancel: false,
-      confirmText: "我知道了",
-      confirmColor: "#0a9875",
+    wx.makePhoneCall({
+      phoneNumber: "13777114735",
     });
-  },
-
-  maskPhone(phone) {
-    const value = String(phone || "").trim();
-    return value.replace(/^(\d{3})\d{4}(\d{4})$/, "$1****$2");
   },
 
   logout() {

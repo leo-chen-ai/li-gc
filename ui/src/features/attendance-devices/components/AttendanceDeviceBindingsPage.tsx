@@ -1,12 +1,16 @@
+import { Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import {
   AlertTriangle,
   Fingerprint,
+  FileClock,
   Loader2,
   Pencil,
   Plus,
   Search,
+  Send,
   Trash2,
+  UserX,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -33,6 +37,7 @@ import {
 import {
   useCreateAttendanceDeviceMutation,
   useDeleteAttendanceDeviceMutation,
+  useIssueAttendanceDeviceWorkersMutation,
   useProjectAttendanceDevicesQuery,
   useProjectOptionsQuery,
   useUpdateAttendanceDeviceMutation,
@@ -40,6 +45,7 @@ import {
 import { ProjectSearchSelect } from "@/features/projects/components/ProjectSearchSelect";
 import type {
   ConstructionAttendanceDevice,
+  ConstructionAttendanceDeviceIssueWorkersSummary,
   ConstructionAttendanceDevicePayload,
 } from "@/features/projects/types/construction-types";
 
@@ -50,6 +56,9 @@ const directionOptions = [
   { label: "出场", value: "1" },
   { label: "通用", value: "2" },
 ] as const;
+
+const deviceTypeOptions = [{ label: "A厂家", value: "A厂家" }] as const;
+const HEARTBEAT_ONLINE_WINDOW_MS = 3 * 60 * 1000;
 
 type DeviceFormState = {
   project_id: string;
@@ -78,6 +87,9 @@ export function AttendanceDeviceBindingsPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [editingDevice, setEditingDevice] = useState<ConstructionAttendanceDevice | null>(null);
   const [devicePendingDelete, setDevicePendingDelete] = useState<ConstructionAttendanceDevice | null>(null);
+  const [devicePendingClear, setDevicePendingClear] = useState<ConstructionAttendanceDevice | null>(null);
+  const [issuingDeviceId, setIssuingDeviceId] = useState<string | null>(null);
+  const [clearingDeviceId, setClearingDeviceId] = useState<string | null>(null);
   const [form, setForm] = useState<DeviceFormState>(defaultFormState);
 
   useEffect(() => {
@@ -105,6 +117,7 @@ export function AttendanceDeviceBindingsPage() {
   const createDevice = useCreateAttendanceDeviceMutation(form.project_id);
   const updateDevice = useUpdateAttendanceDeviceMutation(editingDevice?.project_id ?? form.project_id);
   const deleteDevice = useDeleteAttendanceDeviceMutation(devicePendingDelete?.project_id ?? selectedProjectId);
+  const issueWorkers = useIssueAttendanceDeviceWorkersMutation();
   const devices = devicesQuery.data?.items ?? [];
   const total = devicesQuery.data?.total ?? 0;
   const pageSize = devicesQuery.data?.page_size ?? DEVICE_PAGE_SIZE;
@@ -114,6 +127,7 @@ export function AttendanceDeviceBindingsPage() {
   const inboundCount = devices.filter((device) => device.direction === 0).length;
   const outboundCount = devices.filter((device) => device.direction === 1).length;
   const genericCount = devices.filter((device) => device.direction === 2).length;
+  const onlineCount = devices.filter(isDeviceOnline).length;
   const isSaving = createDevice.isPending || updateDevice.isPending;
 
   const openCreateDialog = () => {
@@ -164,9 +178,26 @@ export function AttendanceDeviceBindingsPage() {
         await updateDevice.mutateAsync({ deviceId: editingDevice.id, payload });
         toast.success("考勤机绑定已修改");
       } else {
-        await createDevice.mutateAsync(payload);
+        const createdDevice = await createDevice.mutateAsync(payload);
         setSelectedProjectId(form.project_id);
-        toast.success("考勤机绑定已新增");
+        if (isDeviceOnline(createdDevice)) {
+          setIssuingDeviceId(createdDevice.id);
+          try {
+            const summary = await issueWorkers.mutateAsync({
+              projectId: createdDevice.project_id,
+              deviceId: createdDevice.id,
+              action: "create",
+              remark: "新增考勤机后自动下发",
+            });
+            toast.success(formatIssueSummary("考勤机绑定已新增，已自动下发", summary));
+          } catch (error) {
+            toast.error(error instanceof Error ? error.message : "自动下发人员失败");
+          } finally {
+            setIssuingDeviceId(null);
+          }
+        } else {
+          toast.success("考勤机绑定已新增，设备在线后会自动下发一轮人员");
+        }
       }
       setFormOpen(false);
       setEditingDevice(null);
@@ -188,6 +219,43 @@ export function AttendanceDeviceBindingsPage() {
     }
   };
 
+  const handleIssueDevice = async (device: ConstructionAttendanceDevice) => {
+    setIssuingDeviceId(device.id);
+    try {
+      const summary = await issueWorkers.mutateAsync({
+        projectId: device.project_id,
+        deviceId: device.id,
+        action: "update",
+        remark: "手动重新下发",
+      });
+      toast.success(formatIssueSummary("已重新下发", summary));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "重新下发人员失败");
+    } finally {
+      setIssuingDeviceId(null);
+    }
+  };
+
+  const handleClearDeviceWorkers = async () => {
+    if (!devicePendingClear) return;
+
+    setClearingDeviceId(devicePendingClear.id);
+    try {
+      const summary = await issueWorkers.mutateAsync({
+        projectId: devicePendingClear.project_id,
+        deviceId: devicePendingClear.id,
+        action: "delete",
+        remark: "手动清空考勤机人员",
+      });
+      toast.success(formatIssueSummary("已发送清空人员指令", summary));
+      setDevicePendingClear(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "清空考勤机人员失败");
+    } finally {
+      setClearingDeviceId(null);
+    }
+  };
+
   return (
     <div className="space-y-4 text-slate-950 dark:text-foreground">
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-border dark:bg-card">
@@ -203,8 +271,9 @@ export function AttendanceDeviceBindingsPage() {
             </p>
           </div>
 
-          <div className="grid gap-2 sm:grid-cols-4">
+          <div className="grid gap-2 sm:grid-cols-5">
             <CompactStat label="绑定设备" value={total} helper={currentProject?.name || "请选择项目"} />
+            <CompactStat label="本页在线" value={onlineCount} helper="收到心跳" accent="teal" />
             <CompactStat label="本页进场" value={inboundCount} helper="方向为进场" accent="teal" />
             <CompactStat label="本页出场" value={outboundCount} helper="方向为出场" accent="amber" />
             <CompactStat label="本页通用" value={genericCount} helper="方向为通用" accent="blue" />
@@ -275,16 +344,17 @@ export function AttendanceDeviceBindingsPage() {
           )}
         </div>
 
-        <Table className="min-w-[980px]">
+        <Table className="min-w-[1360px]">
           <TableHeader>
             <TableRow className="bg-[#f8faf9] hover:bg-[#f8faf9] dark:bg-muted/30 dark:hover:bg-muted/30">
               <TableHead className="w-[230px] px-5 text-slate-500 dark:text-muted-foreground">设备名字</TableHead>
               <TableHead className="text-slate-500 dark:text-muted-foreground">选择项目</TableHead>
               <TableHead className="text-slate-500 dark:text-muted-foreground">考勤机类型</TableHead>
               <TableHead className="text-slate-500 dark:text-muted-foreground">序列号</TableHead>
+              <TableHead className="text-slate-500 dark:text-muted-foreground">在线状态</TableHead>
               <TableHead>进出方向</TableHead>
               <TableHead className="text-slate-500 dark:text-muted-foreground">备注信息</TableHead>
-              <TableHead className="text-right">操作</TableHead>
+              <TableHead className="w-[330px] text-right">操作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -315,6 +385,9 @@ export function AttendanceDeviceBindingsPage() {
                     </span>
                   </TableCell>
                   <TableCell>
+                    <DeviceStatusBadge device={device} />
+                  </TableCell>
+                  <TableCell>
                     <DirectionBadge value={device.direction} />
                   </TableCell>
                   <TableCell>
@@ -323,7 +396,60 @@ export function AttendanceDeviceBindingsPage() {
                     </div>
                   </TableCell>
                   <TableCell className="text-right">
-                    <div className="flex justify-end gap-1">
+                    <div className="flex flex-wrap justify-end gap-1">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        title={isDeviceOnline(device) ? "重新下发本项目人员" : "设备在线后可下发"}
+                        disabled={!isDeviceOnline(device) || issuingDeviceId === device.id || clearingDeviceId === device.id}
+                        className="gap-1 text-[#0f6b5d] hover:bg-emerald-50 hover:text-[#0b5148] disabled:text-slate-400 dark:text-primary dark:hover:bg-emerald-950/30"
+                        onClick={() => handleIssueDevice(device)}
+                      >
+                        {issuingDeviceId === device.id ? (
+                          <Loader2 className="size-4 animate-spin" />
+                        ) : (
+                          <Send className="size-4" />
+                        )}
+                        下发
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        title={isDeviceOnline(device) ? "清空该考勤机上的人员" : "设备在线后可清空人员"}
+                        disabled={!isDeviceOnline(device) || issuingDeviceId === device.id || clearingDeviceId === device.id}
+                        className="gap-1 text-amber-700 hover:bg-amber-50 hover:text-amber-800 disabled:text-slate-400 dark:text-amber-300 dark:hover:bg-amber-950/30"
+                        onClick={() => setDevicePendingClear(device)}
+                      >
+                        {clearingDeviceId === device.id ? (
+                          <Loader2 className="size-4 animate-spin" />
+                        ) : (
+                          <UserX className="size-4" />
+                        )}
+                        清空人员
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        asChild
+                        className="gap-1 text-blue-700 hover:bg-blue-50 hover:text-blue-800 dark:text-blue-300 dark:hover:bg-blue-950/30"
+                      >
+                        <Link
+                          to="/app/admin/attendance-device-issue-reports"
+                          search={{
+                            project_id: device.project_id,
+                            attendance_device_id: device.id,
+                            device_name: device.device_name || undefined,
+                            serial_number: device.serial_number || undefined,
+                            include_delete_actions: "1",
+                          }}
+                        >
+                          <FileClock className="size-4" />
+                          下发报告
+                        </Link>
+                      </Button>
                       <Button
                         type="button"
                         variant="ghost"
@@ -350,7 +476,7 @@ export function AttendanceDeviceBindingsPage() {
               ))
             ) : (
               <TableRow>
-                <TableCell colSpan={7} className="h-28 text-center text-sm text-slate-500 dark:text-muted-foreground">
+                <TableCell colSpan={8} className="h-28 text-center text-sm text-slate-500 dark:text-muted-foreground">
                   {devicesQuery.isLoading
                     ? "正在加载考勤机绑定"
                     : devicesQuery.isError
@@ -413,12 +539,17 @@ export function AttendanceDeviceBindingsPage() {
               </label>
 
               <Field label="考勤机类型">
-                <Input
+                <select
                   value={form.device_type}
                   onChange={(event) => setForm((current) => ({ ...current, device_type: event.target.value }))}
-                  placeholder="默认 A厂家"
-                  className="h-9"
-                />
+                  className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm outline-none focus:border-[#0f6b5d] focus:ring-2 focus:ring-[#0f6b5d]/15 dark:border-border dark:bg-background"
+                >
+                  {deviceTypeOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               </Field>
 
               <Field label="序列号" required>
@@ -513,6 +644,31 @@ export function AttendanceDeviceBindingsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={Boolean(devicePendingClear)} onOpenChange={(open) => !open && setDevicePendingClear(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>清空考勤机人员</DialogTitle>
+            <DialogDescription>
+              将向考勤机
+              {devicePendingClear ? `「${devicePendingClear.device_name || devicePendingClear.serial_number}」` : ""}
+              发送人员删除指令，清空设备端已下发人员；系统里的工人数据不会删除。确认继续？
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDevicePendingClear(null)}>
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleClearDeviceWorkers}
+              disabled={issueWorkers.isPending || !devicePendingClear || !isDeviceOnline(devicePendingClear)}
+            >
+              {devicePendingClear?.id === clearingDeviceId ? "清空中..." : "清空人员"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -589,6 +745,48 @@ function DirectionBadge({ value }: { value: number }) {
       {isOutbound ? "出场" : "进场"}
     </Badge>
   );
+}
+
+function DeviceStatusBadge({ device }: { device: ConstructionAttendanceDevice }) {
+  const online = isDeviceOnline(device);
+  const heartbeatText = device.last_heartbeat_at ? `心跳 ${formatDateTime(device.last_heartbeat_at)}` : "暂无心跳";
+
+  return (
+    <div className="space-y-1">
+      <Badge
+        variant="outline"
+        className={
+          online
+            ? "rounded-md border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300"
+            : "rounded-md border-slate-200 bg-slate-50 text-slate-600 dark:border-border dark:bg-muted/30 dark:text-muted-foreground"
+        }
+      >
+        {online ? "在线" : device.online_status === "offline" ? "离线" : "未连接"}
+      </Badge>
+      <div className="max-w-[180px] truncate text-xs text-slate-500 dark:text-muted-foreground">{heartbeatText}</div>
+    </div>
+  );
+}
+
+function isDeviceOnline(device: ConstructionAttendanceDevice) {
+  if (device.online_status === "offline") return false;
+  if (!device.last_heartbeat_at) return device.online_status === "online";
+
+  const heartbeatAt = new Date(device.last_heartbeat_at).getTime();
+  if (Number.isNaN(heartbeatAt)) return device.online_status === "online";
+
+  return Date.now() - heartbeatAt <= HEARTBEAT_ONLINE_WINDOW_MS;
+}
+
+function formatIssueSummary(prefix: string, summary: ConstructionAttendanceDeviceIssueWorkersSummary) {
+  const parts = [`${prefix} ${summary.queued} 人`];
+  if (summary.skipped_without_photo > 0) {
+    parts.push(`跳过无照片 ${summary.skipped_without_photo} 人`);
+  }
+  if (summary.failed > 0) {
+    parts.push(`失败 ${summary.failed} 人`);
+  }
+  return parts.join("，");
 }
 
 function formatDateTime(value: string) {
