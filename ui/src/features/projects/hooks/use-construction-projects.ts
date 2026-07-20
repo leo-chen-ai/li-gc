@@ -343,6 +343,19 @@ export function useDeleteTeamMutation(projectId: string) {
   });
 }
 
+export function useRepairTeamReportingMutation(projectId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => constructionProjectService.repairTeamReporting(projectId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: constructionProjectKeys.teamsRoot(projectId),
+      });
+    },
+  });
+}
+
 export function useProjectWorkersQuery(
   projectId: string,
   filters?: ConstructionResourceListFilters
@@ -351,6 +364,19 @@ export function useProjectWorkersQuery(
     queryKey: constructionProjectKeys.workers(projectId, filters),
     queryFn: () => constructionProjectService.listWorkers(projectId, filters),
     enabled: canQueryProject(projectId),
+  });
+}
+
+export function useRepairWorkerReportingMutation(projectId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => constructionProjectService.repairWorkerReporting(projectId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: constructionProjectKeys.workersRoot(projectId),
+      });
+    },
   });
 }
 

@@ -76,6 +76,7 @@ export type Worker = {
   workerType?: string;
   issuedDeviceSuccessCount?: number;
   issuedDeviceTotalCount?: number;
+  reportingPlatforms?: ConstructionEntityReportingPlatform[];
   status: "在场" | "离场";
   entryDate: string;
 };

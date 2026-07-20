@@ -10,6 +10,9 @@ use uuid::Uuid;
 
 use crate::{
     feature::auth::AuthUser,
+    infrastructure::image_compression::{
+        WORKER_AVATAR_MAX_BYTES, WORKER_ID_CARD_MAX_BYTES, compress_to_jpeg_below_async,
+    },
     infrastructure::web::{
         middleware::auth_middleware,
         response::{ApiError, ApiResult, ApiSuccess},
@@ -88,7 +91,7 @@ async fn upload_file(
         }
     }
 
-    let req = UploadRequest {
+    let mut req = UploadRequest {
         file: file.ok_or_else(|| {
             ApiError::default()
                 .with_code(StatusCode::BAD_REQUEST)
@@ -100,6 +103,20 @@ async fn upload_file(
         biz_id,
         field_key,
     };
+
+    if let Some(max_bytes) = worker_image_max_bytes(req.field_key.as_deref()) {
+        req.file = Bytes::from(
+            compress_to_jpeg_below_async(req.file.to_vec(), max_bytes)
+                .await
+                .map_err(|message| {
+                    ApiError::default()
+                        .with_code(StatusCode::BAD_REQUEST)
+                        .with_message(message)
+                })?,
+        );
+        req.content_type = "image/jpeg".to_string();
+        req.original_filename = req.original_filename.as_deref().map(jpeg_filename);
+    }
 
     let object_key = build_object_key(&req);
     let size_bytes = req.file.len() as i64;
@@ -152,6 +169,19 @@ async fn upload_file(
     Ok(ApiSuccess::default()
         .with_data(record)
         .with_message("File uploaded successfully"))
+}
+
+fn worker_image_max_bytes(field_key: Option<&str>) -> Option<usize> {
+    match field_key {
+        Some("avatar") => Some(WORKER_AVATAR_MAX_BYTES),
+        Some("ocr_photo" | "id_card_back_file") => Some(WORKER_ID_CARD_MAX_BYTES),
+        _ => None,
+    }
+}
+
+fn jpeg_filename(filename: &str) -> String {
+    let stem = filename.rsplit_once('.').map_or(filename, |(stem, _)| stem);
+    format!("{stem}.jpg")
 }
 
 async fn read_text_field(

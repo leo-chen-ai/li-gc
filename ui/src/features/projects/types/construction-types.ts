@@ -256,6 +256,7 @@ export type ConstructionWorker = {
   native_place: number | null;
   attendance_issue_success_device_count?: number | null;
   attendance_device_total_count?: number | null;
+  reporting_platforms?: ConstructionEntityReportingPlatform[];
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -489,6 +490,15 @@ export type ConstructionResourceListResponse<T> = {
 };
 
 export type ConstructionTeamListResponse = ConstructionResourceListResponse<ConstructionTeam> & {
+  reporting_summary: ConstructionTeamReportingSummary[];
+};
+
+export type ConstructionWorkerListResponse = ConstructionResourceListResponse<ConstructionWorker> & {
+  reporting_summary: ConstructionTeamReportingSummary[];
+};
+
+export type ConstructionTeamReportingRepairResult = {
+  attempted_count: number;
   reporting_summary: ConstructionTeamReportingSummary[];
 };
 

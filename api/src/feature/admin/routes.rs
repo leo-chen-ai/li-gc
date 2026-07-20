@@ -88,6 +88,10 @@ pub fn admin_routes() -> Router<AppState> {
             get(construction::handler::list_teams).post(construction::handler::create_team),
         )
         .route(
+            "/projects/{project_id}/teams/reporting/repair",
+            post(construction::handler::repair_team_reporting),
+        )
+        .route(
             "/projects/{project_id}/teams/{team_id}",
             get(construction::handler::get_team)
                 .put(construction::handler::update_team)
@@ -97,6 +101,10 @@ pub fn admin_routes() -> Router<AppState> {
         .route(
             "/projects/{project_id}/workers",
             get(construction::handler::list_workers).post(construction::handler::create_worker),
+        )
+        .route(
+            "/projects/{project_id}/workers/reporting/repair",
+            post(construction::handler::repair_worker_reporting),
         )
         .route(
             "/projects/{project_id}/workers/export",
@@ -404,6 +412,10 @@ pub fn management_routes() -> Router<AppState> {
             get(construction::handler::list_teams).post(construction::handler::create_team),
         )
         .route(
+            "/projects/{project_id}/teams/reporting/repair",
+            post(construction::handler::repair_team_reporting),
+        )
+        .route(
             "/projects/{project_id}/teams/{team_id}",
             get(construction::handler::get_team)
                 .put(construction::handler::update_team)
@@ -413,6 +425,10 @@ pub fn management_routes() -> Router<AppState> {
         .route(
             "/projects/{project_id}/workers",
             get(construction::handler::list_workers).post(construction::handler::create_worker),
+        )
+        .route(
+            "/projects/{project_id}/workers/reporting/repair",
+            post(construction::handler::repair_worker_reporting),
         )
         .route(
             "/projects/{project_id}/workers/export",

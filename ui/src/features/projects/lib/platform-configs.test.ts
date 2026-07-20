@@ -18,7 +18,7 @@ test("宁波市住建表单自动生成标准配置", () => {
     app_secret: " app-secret ",
     project_guid: " guid-1 ",
     external_project_id: "1206",
-    corp_code: "91330200TEST",
+    corp_code: "91330212062914115M",
     approval_number: "FGW-001",
   };
 
@@ -29,7 +29,7 @@ test("宁波市住建表单自动生成标准配置", () => {
     app_secret: "app-secret",
     project_guid: "guid-1",
     project_id: "1206",
-    corp_code: "91330200TEST",
+    corp_code: "91330212062914115M",
     approval_number: "FGW-001",
   });
 });
@@ -76,11 +76,45 @@ test("宁波平台项目 ID 只允许数字", () => {
     app_secret: "secret",
     project_guid: "guid",
     external_project_id: "NB-1",
-    corp_code: "corp",
+    corp_code: "91330212062914115M",
     approval_number: "approval",
   };
 
   assert.equal(validateNingboHousingConfig(form), "宁波平台项目 ID 必须为数字");
+});
+
+test("宁波平台项目 ID 不能超过 Int32 范围", () => {
+  const form = {
+    ...createNingboHousingConfigForm(),
+    project_id: "local-project",
+    platform_type: "ningbo_housing",
+    base_url: "http://183.136.157.18:7334",
+    app_key: "key",
+    app_secret: "secret",
+    project_guid: "guid",
+    external_project_id: "913302121440896573",
+    corp_code: "91330212062914115M",
+    approval_number: "approval",
+  };
+
+  assert.equal(validateNingboHousingConfig(form), "宁波平台项目 ID 必须在 1–2147483647 范围内");
+});
+
+test("宁波平台统一社会信用代码必须是 18 位", () => {
+  const form = {
+    ...createNingboHousingConfigForm(),
+    project_id: "local-project",
+    platform_type: "ningbo_housing",
+    base_url: "http://183.136.157.18:7334",
+    app_key: "key",
+    app_secret: "secret",
+    project_guid: "guid",
+    external_project_id: "185157",
+    corp_code: "91330212062914115M -",
+    approval_number: "approval",
+  };
+
+  assert.equal(validateNingboHousingConfig(form), "统一社会信用代码必须是 18 位大写字母或数字");
 });
 
 test("新增配置时必须先选择平台", () => {

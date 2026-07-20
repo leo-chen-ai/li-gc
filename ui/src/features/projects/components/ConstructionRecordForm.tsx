@@ -12,6 +12,10 @@ import {
   type ConstructionFormState,
 } from "../data/construction-form-fields";
 import { constructionProjectService } from "../services/construction-project-service";
+import {
+  compressWorkerImageBeforeUpload,
+  workerImageLimitLabel,
+} from "../lib/worker-image-compression";
 import type { IdCardOcrSide, UploadFileRecord } from "../types/construction-types";
 import addressData from "../data/china-address.json";
 
@@ -351,10 +355,12 @@ function UploadField({
   const items = isJsonField ? parseUploadRecords(value) : value ? [urlToUploadRecord(value)] : [];
   const accept = field.uploadKind === "image" ? "image/*" : undefined;
   const idCardSide = sideForIdCardField(field.key);
+  const imageLimitLabel = workerImageLimitLabel(field.key);
 
   const uploadFile = async (file: File) => {
-    const imageBase64 = field.uploadKind === "image" ? await fileToBase64Payload(file) : null;
-    const record = await constructionProjectService.uploadFile(file, {
+    const uploadFile = await compressWorkerImageBeforeUpload(file, field.key);
+    const imageBase64 = field.uploadKind === "image" ? await fileToBase64Payload(uploadFile) : null;
+    const record = await constructionProjectService.uploadFile(uploadFile, {
       bizType: uploadContext?.bizType,
       bizId: uploadContext?.bizId,
       fieldKey: field.key,
@@ -489,6 +495,9 @@ function UploadField({
             已上传 {items.length} 个
           </span>
         )}
+        {imageLimitLabel ? (
+          <span className="text-xs text-slate-500 dark:text-muted-foreground">{imageLimitLabel}</span>
+        ) : null}
         {idCardSide && items[0]?.public_url && (
           <Button
             type="button"

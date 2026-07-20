@@ -95,6 +95,7 @@ async fn admin_can_configure_project_attendance_alerts_and_write_missing_logs() 
             "name": "未打卡管理人员",
             "phone": "13900000001",
             "worker_type": 1001,
+            "work_type": 1001,
             "manager_type": "1",
             "work_status": 1
         }),
@@ -132,6 +133,7 @@ async fn admin_can_configure_project_attendance_alerts_and_write_missing_logs() 
             "name": "未打卡监理",
             "phone": "13900000003",
             "worker_type": 9,
+            "work_type": 1,
             "is_key_personnel": true,
             "work_status": 1
         }),

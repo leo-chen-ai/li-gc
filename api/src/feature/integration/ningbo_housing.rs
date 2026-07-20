@@ -16,7 +16,7 @@ const MAX_TEAM_LIST_PAGES: i64 = 100;
 pub enum NingboHousingError {
     #[error("宁波市住建平台配置缺少 {0}")]
     MissingConfig(&'static str),
-    #[error("宁波市住建平台项目 ID 必须为数字")]
+    #[error("宁波市住建平台项目 ID 必须是 1–2147483647 范围内的整数")]
     InvalidProjectId,
     #[error("宁波市住建平台接口地址不受信任")]
     UntrustedBaseUrl,
@@ -33,7 +33,8 @@ pub struct NingboHousingCredentials {
     pub base_url: Url,
     pub app_key: String,
     pub app_secret: String,
-    pub project_id: i64,
+    pub project_id: i32,
+    pub project_guid: String,
 }
 
 impl NingboHousingCredentials {
@@ -52,14 +53,23 @@ impl NingboHousingCredentials {
             &["project_id", "projectId", "ProjectApartmentId"],
             "平台项目 ID",
         )?
-        .parse::<i64>()
+        .parse::<i32>()
         .map_err(|_| NingboHousingError::InvalidProjectId)?;
+        if project_id <= 0 {
+            return Err(NingboHousingError::InvalidProjectId);
+        }
+        let project_guid = required_config_string(
+            config,
+            &["project_guid", "projectGuid", "ProjectGuid", "guid"],
+            "项目 GUID",
+        )?;
 
         Ok(Self {
             base_url,
             app_key,
             app_secret,
             project_id,
+            project_guid,
         })
     }
 
@@ -72,8 +82,98 @@ impl NingboHousingCredentials {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "PascalCase")]
+pub struct AddOrUpdateWorkerRequest {
+    pub worker_name: String,
+    pub identity_card: String,
+    pub address: String,
+    pub grant_org: String,
+    pub id_card_expire_date: Option<String>,
+    pub marital_status: Option<String>,
+    pub telephone: String,
+    pub national_name: String,
+    pub nation_name: String,
+    pub id_card_photo: String,
+    pub political_aff_name: String,
+    pub culture_level_type_name: String,
+    pub edu_level_name: Option<String>,
+    pub degree_name: Option<String>,
+    pub has_bad_medical_history: bool,
+    pub private_string_suit: Option<String>,
+    pub urgent_link_man: Option<String>,
+    pub urgent_link_man_phone: Option<String>,
+    pub worker_type: i32,
+    pub is_joined: bool,
+    pub joined_time: Option<String>,
+    pub temporary_residence_permit_card: Option<String>,
+    pub positive_id_card_file: Option<String>,
+    pub negative_id_card_file: Option<String>,
+    pub face_photo: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct AddEnterpriseWorkerRequest {
+    pub enterprise_name: String,
+    pub corp_code: String,
+    pub worker_code: String,
+    pub work_date: String,
+    pub current_work_type_name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct AddProjectWorkerRequest {
+    pub project_apartment_id: i32,
+    pub team_id: i64,
+    pub worker_code: String,
+    pub is_team_leader: bool,
+    pub work_type_name: String,
+    pub entry_time: String,
+    pub entry_attach_file: Option<String>,
+    pub entry_attach_file_extension: Option<String>,
+    pub issue_card_date: Option<String>,
+    pub issue_card_pic: Option<String>,
+    pub issue_card_pic_extension: Option<String>,
+    pub card_number: Option<String>,
+    pub pay_roll_bank_card_number: Option<String>,
+    pub bank_link_number: Option<String>,
+    pub pay_roll_top_bank_code: Option<String>,
+    pub has_buy_insurance: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct EditProjectWorkerRequest {
+    pub project_apartment_id: i32,
+    pub project_worker_id: i64,
+    pub is_team_leader: bool,
+    pub work_type_name: String,
+    pub entry_time: String,
+    pub entry_attach_file: Option<String>,
+    pub entry_attach_file_extension: Option<String>,
+    pub issue_card_date: Option<String>,
+    pub issue_card_pic: Option<String>,
+    pub issue_card_pic_extension: Option<String>,
+    pub card_number: Option<String>,
+    pub pay_roll_bank_card_number: Option<String>,
+    pub bank_link_number: Option<String>,
+    pub pay_roll_top_bank_code: Option<String>,
+    pub has_buy_insurance: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct ProjectWorkerExitRequest {
+    pub project_worker_id: String,
+    pub exit_time: String,
+    pub exit_file: Option<String>,
+    pub exit_file_extension: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct AddTeamRequest {
-    pub project_apartment_id: i64,
+    pub project_apartment_id: i32,
     pub corp_code: String,
     pub project_team_type_name: String,
     pub team_leader_name: String,
@@ -155,6 +255,13 @@ pub fn current_cur_time() -> i64 {
     Utc::now().timestamp() - UNIX_TO_2000_EPOCH_SECONDS
 }
 
+pub fn is_valid_social_credit_code(value: &str) -> bool {
+    value.len() == 18
+        && value
+            .bytes()
+            .all(|byte| b"0123456789ABCDEFGHJKLMNPQRTUWXY".contains(&byte))
+}
+
 pub fn checksum(app_secret: &str, cur_time: i64) -> String {
     let digest = Sha256::digest(format!("{app_secret}{cur_time}").as_bytes());
     hex::encode(digest)
@@ -169,6 +276,93 @@ pub async fn add_team(
         client
             .post(credentials.endpoint("Project/AddTeam")?)
             .json(team),
+        credentials,
+    )
+    .await
+}
+
+pub async fn get_worker_code(
+    client: &Client,
+    credentials: &NingboHousingCredentials,
+    identity_card: &str,
+) -> Result<PlatformResponse, NingboHousingError> {
+    send(
+        client
+            .get(credentials.endpoint("EnterpriseWorker/GetWorkerCode")?)
+            .query(&[
+                ("IdentityCard", identity_card),
+                ("ProjectGuid", credentials.project_guid.as_str()),
+            ]),
+        credentials,
+    )
+    .await
+}
+
+pub async fn add_or_update_worker(
+    client: &Client,
+    credentials: &NingboHousingCredentials,
+    request: &AddOrUpdateWorkerRequest,
+) -> Result<PlatformResponse, NingboHousingError> {
+    send(
+        client
+            .post(credentials.endpoint("EnterpriseWorker/AddOrUpdateWorker")?)
+            .json(request),
+        credentials,
+    )
+    .await
+}
+
+pub async fn add_enterprise_worker(
+    client: &Client,
+    credentials: &NingboHousingCredentials,
+    request: &AddEnterpriseWorkerRequest,
+) -> Result<PlatformResponse, NingboHousingError> {
+    send(
+        client
+            .post(credentials.endpoint("EnterpriseWorker/AddEnterpriseOfWorker")?)
+            .json(request),
+        credentials,
+    )
+    .await
+}
+
+pub async fn add_project_worker(
+    client: &Client,
+    credentials: &NingboHousingCredentials,
+    request: &AddProjectWorkerRequest,
+) -> Result<PlatformResponse, NingboHousingError> {
+    send(
+        client
+            .post(credentials.endpoint("Project/AddWorkerV2")?)
+            .json(request),
+        credentials,
+    )
+    .await
+}
+
+pub async fn edit_project_worker(
+    client: &Client,
+    credentials: &NingboHousingCredentials,
+    request: &EditProjectWorkerRequest,
+) -> Result<PlatformResponse, NingboHousingError> {
+    send(
+        client
+            .post(credentials.endpoint("Project/EditWorker")?)
+            .json(request),
+        credentials,
+    )
+    .await
+}
+
+pub async fn exit_project_worker(
+    client: &Client,
+    credentials: &NingboHousingCredentials,
+    request: &ProjectWorkerExitRequest,
+) -> Result<PlatformResponse, NingboHousingError> {
+    send(
+        client
+            .post(credentials.endpoint("Project/ProjectWorkerExit")?)
+            .json(request),
         credentials,
     )
     .await
@@ -238,6 +432,27 @@ pub fn extract_created_team_id(body: &Value) -> Option<i64> {
         .or_else(|| body.as_str().and_then(|value| value.parse().ok()))
 }
 
+pub fn extract_worker_code(body: &Value) -> Option<String> {
+    recursive_value(body, &["WorkerCode", "workerCode"])
+        .and_then(scalar_string)
+        .or_else(|| {
+            ["Data", "data", "Result", "result"]
+                .iter()
+                .find_map(|key| body.get(*key).and_then(scalar_string))
+        })
+        .or_else(|| scalar_string(body))
+}
+
+pub fn extract_project_worker_id(body: &Value) -> Option<i64> {
+    recursive_i64(body, &["ProjectWorkerId", "projectWorkerId"])
+        .or_else(|| {
+            ["Data", "data", "Result", "result"]
+                .iter()
+                .find_map(|key| body.get(*key).and_then(scalar_i64))
+        })
+        .or_else(|| scalar_i64(body))
+}
+
 pub fn response_indicates_team_exists(response: &PlatformResponse) -> bool {
     if response.status.is_success() && extract_created_team_id(&response.body).is_some() {
         return false;
@@ -247,6 +462,30 @@ pub fn response_indicates_team_exists(response: &PlatformResponse) -> bool {
         && (message.contains("已存在")
             || message.contains("已经存在")
             || message.contains("不能重复"))
+}
+
+pub fn response_indicates_worker_already_exited(response: &PlatformResponse) -> bool {
+    if response.status.is_success() {
+        return false;
+    }
+    let message = response_message(&response.body);
+    (message.contains("人员") || message.contains("工人"))
+        && (message.contains("已退场")
+            || message.contains("已经退场")
+            || message.contains("已离场")
+            || message.contains("已经离场"))
+}
+
+pub fn response_indicates_worker_already_employed(response: &PlatformResponse) -> bool {
+    if response.status.is_success() {
+        return false;
+    }
+    let message = response_message(&response.body);
+    (message.contains("人员") || message.contains("工人"))
+        && (message.contains("已在该企业任职")
+            || message.contains("已经在该企业任职")
+            || message.contains("已在企业任职")
+            || message.contains("已经在企业任职"))
 }
 
 pub fn match_existing_team<'a>(
@@ -369,6 +608,14 @@ fn recursive_i64(value: &Value, keys: &[&str]) -> Option<i64> {
 fn scalar_i64(item: &Value) -> Option<i64> {
     item.as_i64()
         .or_else(|| item.as_str().and_then(|raw| raw.parse().ok()))
+}
+
+fn scalar_string(item: &Value) -> Option<String> {
+    item.as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .or_else(|| item.as_i64().map(|number| number.to_string()))
 }
 
 fn validate_base_url(value: &str) -> Result<Url, NingboHousingError> {
@@ -504,6 +751,27 @@ mod tests {
     }
 
     #[test]
+    fn project_id_must_fit_the_documented_int_type() {
+        let config = json!({
+            "base_url": DEFAULT_BASE_URL,
+            "app_key": "key",
+            "app_secret": "secret",
+            "project_id": "913302121440896573"
+        });
+        assert!(matches!(
+            NingboHousingCredentials::from_config(&config),
+            Err(NingboHousingError::InvalidProjectId)
+        ));
+    }
+
+    #[test]
+    fn validates_unified_social_credit_code_shape() {
+        assert!(is_valid_social_credit_code("91330212062914115M"));
+        assert!(!is_valid_social_credit_code("91330212062914115M -"));
+        assert!(!is_valid_social_credit_code("91330200TEST"));
+    }
+
+    #[test]
     fn parses_created_team_id_from_common_wrappers() {
         assert_eq!(extract_created_team_id(&json!({"TeamId": 18})), Some(18));
         assert_eq!(
@@ -511,6 +779,79 @@ mod tests {
             Some(19)
         );
         assert_eq!(extract_created_team_id(&json!({"Data": 20})), Some(20));
+    }
+
+    #[test]
+    fn parses_worker_ids_from_common_wrappers() {
+        assert_eq!(
+            extract_worker_code(&json!({"Data": {"WorkerCode": "YJ-100"}})),
+            Some("YJ-100".to_owned())
+        );
+        assert_eq!(
+            extract_project_worker_id(&json!({"result": {"ProjectWorkerId": "808"}})),
+            Some(808)
+        );
+    }
+
+    #[test]
+    fn project_worker_request_uses_documented_field_names() {
+        let request = AddProjectWorkerRequest {
+            project_apartment_id: 185157,
+            team_id: 3510086,
+            worker_code: "YJ-100".to_owned(),
+            is_team_leader: false,
+            work_type_name: "通风工".to_owned(),
+            entry_time: "2026-07-19".to_owned(),
+            entry_attach_file: None,
+            entry_attach_file_extension: None,
+            issue_card_date: None,
+            issue_card_pic: None,
+            issue_card_pic_extension: None,
+            card_number: None,
+            pay_roll_bank_card_number: None,
+            bank_link_number: None,
+            pay_roll_top_bank_code: None,
+            has_buy_insurance: false,
+        };
+        let value = serde_json::to_value(request).expect("serialize AddWorkerV2 request");
+        assert_eq!(value["ProjectApartmentId"], 185157);
+        assert_eq!(value["TeamId"], 3510086);
+        assert_eq!(value["WorkerCode"], "YJ-100");
+        assert_eq!(value["WorkTypeName"], "通风工");
+        assert_eq!(value["EntryTime"], "2026-07-19");
+    }
+
+    #[test]
+    fn edit_and_exit_requests_use_project_worker_id() {
+        let edit = EditProjectWorkerRequest {
+            project_apartment_id: 185157,
+            project_worker_id: 808,
+            is_team_leader: false,
+            work_type_name: "通风工".to_owned(),
+            entry_time: "2026-07-19".to_owned(),
+            entry_attach_file: None,
+            entry_attach_file_extension: None,
+            issue_card_date: None,
+            issue_card_pic: None,
+            issue_card_pic_extension: None,
+            card_number: None,
+            pay_roll_bank_card_number: None,
+            bank_link_number: None,
+            pay_roll_top_bank_code: None,
+            has_buy_insurance: false,
+        };
+        let exit = ProjectWorkerExitRequest {
+            project_worker_id: "808".to_owned(),
+            exit_time: "2026-07-20".to_owned(),
+            exit_file: None,
+            exit_file_extension: None,
+        };
+
+        let edit_value = serde_json::to_value(edit).expect("serialize EditWorker request");
+        let exit_value = serde_json::to_value(exit).expect("serialize ProjectWorkerExit request");
+        assert_eq!(edit_value["ProjectWorkerId"], 808);
+        assert_eq!(exit_value["ProjectWorkerId"], "808");
+        assert_eq!(exit_value["ExitTime"], "2026-07-20");
     }
 
     #[test]
@@ -577,6 +918,24 @@ mod tests {
             body: json!({"Message": "班组录入验证不通过：同一个项目上的班组名称不能重复:石工"}),
         };
         assert!(response_indicates_team_exists(&duplicate_name_response));
+    }
+
+    #[test]
+    fn detects_worker_already_exited_message() {
+        let response = PlatformResponse {
+            status: StatusCode::BAD_REQUEST,
+            body: json!({"Message": "项目人员已退场，不能重复退场"}),
+        };
+        assert!(response_indicates_worker_already_exited(&response));
+    }
+
+    #[test]
+    fn detects_worker_already_employed_message() {
+        let response = PlatformResponse {
+            status: StatusCode::BAD_REQUEST,
+            body: json!({"Message": "人员已在该企业任职"}),
+        };
+        assert!(response_indicates_worker_already_employed(&response));
     }
 
     #[test]

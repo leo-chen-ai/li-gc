@@ -40,6 +40,7 @@ import type {
   ConstructionTeam,
   ConstructionTeamListResponse,
   ConstructionTeamPayload,
+  ConstructionTeamReportingRepairResult,
   ConstructionUnit,
   ConstructionUnitPayload,
   ConstructionWageBatch,
@@ -51,6 +52,7 @@ import type {
   ConstructionWorkHourConfigPayload,
   UploadFileRecord,
   ConstructionWorker,
+  ConstructionWorkerListResponse,
   ConstructionWorkerPayload,
 } from "../types/construction-types";
 
@@ -311,16 +313,36 @@ export const constructionProjectService = {
     );
   },
 
+  repairTeamReporting: async (
+    projectId: string
+  ): Promise<ConstructionTeamReportingRepairResult> => {
+    const response = await apiClient.post<ApiResponse<ConstructionTeamReportingRepairResult>>(
+      API_ENDPOINTS.MANAGEMENT.PROJECT_TEAMS_REPAIR_REPORTING(projectId)
+    );
+
+    return unwrapData(response.data, "修正班组上报失败");
+  },
+
   listWorkers: async (
     projectId: string,
     filters?: ConstructionResourceListFilters
-  ): Promise<ConstructionResourceListResponse<ConstructionWorker>> => {
-    const response = await apiClient.get<ApiResponse<ConstructionResourceListResponse<ConstructionWorker>>>(
+  ): Promise<ConstructionWorkerListResponse> => {
+    const response = await apiClient.get<ApiResponse<ConstructionWorkerListResponse>>(
       API_ENDPOINTS.MANAGEMENT.PROJECT_WORKERS(projectId),
       { params: filters }
     );
 
     return unwrapData(response.data, "获取项目工人失败");
+  },
+
+  repairWorkerReporting: async (
+    projectId: string
+  ): Promise<ConstructionTeamReportingRepairResult> => {
+    const response = await apiClient.post<ApiResponse<ConstructionTeamReportingRepairResult>>(
+      API_ENDPOINTS.MANAGEMENT.PROJECT_WORKERS_REPAIR_REPORTING(projectId)
+    );
+
+    return unwrapData(response.data, "修正工人上报失败");
   },
 
   listAllWorkers: async (projectId: string): Promise<ConstructionWorker[]> =>

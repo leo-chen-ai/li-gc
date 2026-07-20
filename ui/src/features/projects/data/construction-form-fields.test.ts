@@ -7,6 +7,7 @@ import {
   teamFormFields,
   unitFormFields,
   workerFormFields,
+  workerWorkTypeOptions,
 } from "./construction-form-fields.ts";
 
 const selectFieldExpectations = [
@@ -99,6 +100,17 @@ test("worker identity and employment fields are grouped with basic information",
   assert.equal(basicSection.fields.some((field) => field.key === "native_place"), true);
   assert.equal(basicSection.fields.some((field) => field.key === "work_type"), true);
   assert.equal(basicSection.fields.some((field) => field.key === "political_status"), true);
+  assert.equal(basicSection.fields.find((field) => field.key === "phone")?.required, true);
+});
+
+test("项目工人工种与宁波市住建文档字典一致", () => {
+  assert.deepEqual(workerWorkTypeOptions.map((option) => option.label), [
+    "砌筑工", "钢筋工", "架子工", "混凝土工", "模板工", "机械设备安装工", "通风工", "安装起重工", "安装钳工",
+    "电气设备安装调试工", "管道工", "变电安装工", "建筑电工", "司泵工", "挖掘铲运和桩工机械司机", "桩机操作工",
+    "起重信号工", "建筑起重机械安装拆卸工", "装饰装修工", "室内成套设施安装工", "建筑门窗幕墙安装工", "幕墙制作工", "防水工",
+    "木工", "石工", "电焊工", "除尘工", "爆破工", "测量放线工", "线路架设工", "古建筑传统石工", "古建筑传统瓦工",
+    "古建筑传统彩画工", "古建筑传统木工", "古建筑传统油工", "金属工", "杂工", "管理人员", "其它",
+  ]);
 });
 
 test("manager type only appears for manager workers", () => {

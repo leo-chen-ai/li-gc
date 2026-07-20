@@ -783,6 +783,13 @@ function PlatformLogPanel({ filters, setFilters, tabControls }: { filters: Const
   const [form, setForm] = useState({ project_id: "", platform_config_id: "", platform_name: "", operation: "人员上传", direction: "push", status: "success", request_count: "1", success_count: "1", failure_count: "0", message: "", payload: "{}" });
   const rows = query.data?.items ?? [];
   const summary = query.data?.summary;
+  const platformOptions = [
+    ...BUILT_IN_PLATFORM_OPTIONS,
+    ...(configsQuery.data?.items ?? []).map((config) => ({
+      value: config.platform_type,
+      label: config.platform_name || platformTypeLabel(config.platform_type),
+    })),
+  ].filter((option, index, options) => options.findIndex((item) => item.value === option.value) === index);
   const openCreate = () => { setEditing(null); setForm({ project_id: filters.project_id ?? "", platform_config_id: "", platform_name: "", operation: "人员上传", direction: "push", status: "success", request_count: "1", success_count: "1", failure_count: "0", message: "", payload: "{}" }); setDialogOpen(true); };
   const openEdit = (log: ConstructionPlatformLog) => { setEditing(log); setForm({ project_id: log.project_id, platform_config_id: log.platform_config_id ?? "", platform_name: log.platform_name ?? "", operation: log.operation, direction: log.direction, status: log.status, request_count: String(log.request_count), success_count: String(log.success_count), failure_count: String(log.failure_count), message: log.message ?? "", payload: JSON.stringify(log.payload ?? {}, null, 2) }); setDialogOpen(true); };
   const submit = async (event: FormEvent) => {
@@ -804,7 +811,7 @@ function PlatformLogPanel({ filters, setFilters, tabControls }: { filters: Const
         <Button onClick={openCreate} className="bg-[#0f6b5d] text-white hover:bg-[#0b5148]"><Plus className="mr-2 size-4" />新增平台日志</Button>
       </div>
       <div className="grid gap-3 md:grid-cols-4"><MetricCell label="今日请求" value={summary?.today_request_count ?? 0} helper="API 交互量" /><MetricCell label="今日成功" value={summary?.today_success_count ?? 0} helper="成功条数" /><MetricCell label="今日失败" value={summary?.today_failure_count ?? 0} helper="失败条数" /><MetricCell label="日志条数" value={summary?.today_log_count ?? 0} helper="今日记录" /></div>
-      <ModuleFilters filters={filters} setFilters={setFilters} placeholder="搜索项目、平台、操作、消息" />
+      <PlatformLogFilters filters={filters} setFilters={setFilters} platformOptions={platformOptions} />
       <DataTable loading={query.isLoading} colSpan={9} headers={["平台", "项目", "操作", "方向", "状态", "请求/成功/失败", "消息", "时间", "操作"]}>
         {rows.map((row) => (
           <TableRow key={row.id}><TableCell className="font-medium">{row.platform_name || "-"}</TableCell><TableCell className="max-w-[240px] truncate">{row.project_name || row.project_id}</TableCell><TableCell>{row.operation}</TableCell><TableCell>{row.direction}</TableCell><TableCell><PlatformStatusBadge status={row.status} /></TableCell><TableCell>{row.request_count}/{row.success_count}/{row.failure_count}</TableCell><TableCell className="max-w-[320px] truncate text-xs text-slate-500" title={row.message ?? undefined}>{row.message || "-"}</TableCell><TableCell>{formatDateTime(row.occurred_at)}</TableCell><TableCell className="text-right">{row.source === "system" ? <span className="text-xs text-slate-400">系统日志</span> : <RowActions onEdit={() => openEdit(row)} onDelete={() => void remove(row)} />}</TableCell></TableRow>
@@ -975,6 +982,46 @@ function ListToolbar({ keyword, onKeywordChange, placeholder }: { keyword: strin
 
 function ModuleFilters({ filters, setFilters, placeholder }: { filters: ConstructionModuleListFilters; setFilters: (updater: (current: ConstructionModuleListFilters) => ConstructionModuleListFilters) => void; placeholder: string }) {
   return <div className="grid gap-3 rounded-lg border bg-[#f8faf9] p-3 lg:grid-cols-[minmax(260px,1fr)_minmax(280px,1fr)_auto]"><div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={filters.keyword ?? ""} onChange={(event) => setFilters((current) => ({ ...current, keyword: event.target.value, page: 1 }))} placeholder={placeholder} className="pl-9" /></div><ProjectSearchSelect value={filters.project_id ?? ""} includeAllOption allOptionLabel="全部项目" onValueChange={(project_id) => setFilters((current) => ({ ...current, project_id: project_id || undefined, page: 1 }))} /><Button variant="outline" onClick={() => setFilters((current) => ({ page: 1, page_size: current.page_size ?? pageSize }))}>重置</Button></div>;
+}
+
+function PlatformLogFilters({
+  filters,
+  setFilters,
+  platformOptions,
+}: {
+  filters: ConstructionModuleListFilters;
+  setFilters: (updater: (current: ConstructionModuleListFilters) => ConstructionModuleListFilters) => void;
+  platformOptions: ReadonlyArray<{ value: string; label: string }>;
+}) {
+  return (
+    <div className="grid gap-3 rounded-lg border bg-[#f8faf9] p-3 lg:grid-cols-[minmax(260px,1fr)_minmax(240px,0.8fr)_minmax(200px,0.6fr)_auto]">
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={filters.keyword ?? ""}
+          onChange={(event) => setFilters((current) => ({ ...current, keyword: event.target.value, page: 1 }))}
+          placeholder="搜索项目、平台、操作、消息"
+          className="pl-9"
+        />
+      </div>
+      <ProjectSearchSelect
+        value={filters.project_id ?? ""}
+        includeAllOption
+        allOptionLabel="全部项目"
+        onValueChange={(project_id) => setFilters((current) => ({ ...current, project_id: project_id || undefined, page: 1 }))}
+      />
+      <select
+        aria-label="平台类型"
+        className="h-10 w-full rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-[#0f6b5d]/20"
+        value={filters.platform_type ?? ""}
+        onChange={(event) => setFilters((current) => ({ ...current, platform_type: event.target.value || undefined, page: 1 }))}
+      >
+        <option value="">全部平台</option>
+        {platformOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
+      <Button variant="outline" onClick={() => setFilters((current) => ({ page: 1, page_size: current.page_size ?? pageSize }))}>重置</Button>
+    </div>
+  );
 }
 
 function DataTable({ loading, headers, colSpan, children }: { loading: boolean; headers: string[]; colSpan: number; children: ReactNode }) {

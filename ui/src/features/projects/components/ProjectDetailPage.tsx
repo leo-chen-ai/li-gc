@@ -15,6 +15,7 @@ import {
   LogOut,
   MoreHorizontal,
   Pencil,
+  RefreshCw,
   RotateCcw,
   Search,
   SlidersHorizontal,
@@ -105,6 +106,8 @@ import {
   useProjectAttendanceDevicesQuery,
   useProjectAttendanceQuery,
   useProjectQuery,
+  useRepairTeamReportingMutation,
+  useRepairWorkerReportingMutation,
   useProjectTeamsQuery,
   useProjectUnitsQuery,
   useProjectWageBatchesQuery,
@@ -141,7 +144,7 @@ import {
   buildProjectOverviewAudit,
   type ProjectOverviewAudit,
 } from "../lib/project-overview-metrics";
-import { getProjectInfoCellClassName } from "../lib/project-detail-layout";
+import { DEFAULT_PROJECT_DETAIL_TAB, getProjectInfoCellClassName } from "../lib/project-detail-layout";
 import { formatProjectTitle } from "../lib/project-title";
 import { buildTeamLeaderPatch } from "../lib/team-leader-selection";
 import { resolveWorkerFormScopeDefaults } from "../lib/worker-form-scope";
@@ -515,6 +518,8 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const createTeam = useCreateTeamMutation(projectId);
   const updateTeam = useUpdateTeamMutation(projectId);
   const deleteTeam = useDeleteTeamMutation(projectId);
+  const repairTeamReporting = useRepairTeamReportingMutation(projectId);
+  const repairWorkerReporting = useRepairWorkerReportingMutation(projectId);
   const createWorker = useCreateWorkerMutation(projectId);
   const updateWorker = useUpdateWorkerMutation(projectId);
   const deleteWorker = useDeleteWorkerMutation(projectId);
@@ -666,7 +671,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       totalTargetCount,
     };
   }, [attendanceDevices, attendanceDevicesQuery.data?.total, projectWorkers]);
-  const [activeTab, setActiveTab] = useState<DetailTab>("项目基本信息");
+  const [activeTab, setActiveTab] = useState<DetailTab>(DEFAULT_PROJECT_DETAIL_TAB);
   const [dialogMode, setDialogMode] = useState<DetailDialogMode>("create");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formState, setFormState] = useState<DetailFormState>({});
@@ -839,7 +844,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     const deleteMessages: Record<string, string> = {
       建设单位: "确认删除这条参建单位记录？删除后将不再显示。",
       班组信息: "确认删除这个班组？如已上报市平台，将同步办理班组退场；平台退场失败时本地班组不会删除。",
-      项目工人: "确认删除这名工人？删除后相关人员信息将不再显示。",
+      项目工人: "确认删除这名工人？如已上报市平台，将先同步办理人员退场；平台退场失败时本地人员不会删除。",
       考勤记录: "确认删除这条考勤记录？删除后无法在列表中恢复。",
       工资统计: "确认删除这条工资记录？删除后无法在列表中恢复。",
     };
@@ -855,6 +860,60 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       toast.success("记录已删除");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "删除失败");
+    }
+  };
+
+  const handleRepairTeamReporting = async () => {
+    if (!window.confirm("确认修正失败和未传的班组上报？系统将重新调用已启用的宁波市住建接口。")) {
+      return;
+    }
+
+    try {
+      const result = await repairTeamReporting.mutateAsync();
+      const totals = result.reporting_summary.reduce(
+        (current, item) => ({
+          success: current.success + item.success_count,
+          failure: current.failure + item.failure_count,
+          notReported: current.notReported + item.not_reported_count,
+        }),
+        { success: 0, failure: 0, notReported: 0 }
+      );
+      if (result.attempted_count === 0) {
+        toast.info("当前没有需要修正的班组上报");
+      } else if (totals.failure > 0 || totals.notReported > 0) {
+        toast.warning(`已修正 ${result.attempted_count} 个班组，成功 ${totals.success}，仍失败 ${totals.failure}，未传 ${totals.notReported}`);
+      } else {
+        toast.success(`已修正 ${result.attempted_count} 个班组，当前成功 ${totals.success}`);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "修正班组上报失败");
+    }
+  };
+
+  const handleRepairWorkerReporting = async () => {
+    if (!window.confirm("确认修正失败和未传的工人上报？系统将按甬建码、任职信息、项目班组关系重新调用宁波市住建接口。")) {
+      return;
+    }
+
+    try {
+      const result = await repairWorkerReporting.mutateAsync();
+      const totals = result.reporting_summary.reduce(
+        (current, item) => ({
+          success: current.success + item.success_count,
+          failure: current.failure + item.failure_count,
+          notReported: current.notReported + item.not_reported_count,
+        }),
+        { success: 0, failure: 0, notReported: 0 }
+      );
+      if (result.attempted_count === 0) {
+        toast.info("当前没有需要修正的工人上报");
+      } else if (totals.failure > 0 || totals.notReported > 0) {
+        toast.warning(`已修正 ${result.attempted_count} 名工人，成功 ${totals.success}，仍失败 ${totals.failure}，未传 ${totals.notReported}`);
+      } else {
+        toast.success(`已修正 ${result.attempted_count} 名工人，当前成功 ${totals.success}`);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "修正工人上报失败");
     }
   };
 
@@ -935,10 +994,10 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       }
       if (activeTab === "项目工人") {
         const payload = buildPayloadFromForm(workerFormFields, formState) as ConstructionWorkerPayload;
+        validateWorkerCreatePayload(payload);
         if (dialogMode === "edit" && editingId) {
           await updateWorker.mutateAsync({ workerId: editingId, payload });
         } else {
-          validateWorkerCreatePayload(payload);
           await createWorker.mutateAsync(payload);
         }
       }
@@ -1191,8 +1250,13 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                 onUnitFiltersChange={(patch) => setUnitFilters((current) => ({ ...current, ...patch }))}
                 teamFilters={teamFilters}
                 teamReportingSummary={teamQuery.data?.reporting_summary ?? []}
+                onRepairTeamReporting={() => void handleRepairTeamReporting()}
+                isRepairingTeamReporting={repairTeamReporting.isPending}
                 onTeamFiltersChange={(patch) => setTeamFilters((current) => ({ ...current, ...patch }))}
                 workerFilters={workerFilters}
+                workerReportingSummary={workerQuery.data?.reporting_summary ?? []}
+                onRepairWorkerReporting={() => void handleRepairWorkerReporting()}
+                isRepairingWorkerReporting={repairWorkerReporting.isPending}
                 onWorkerFiltersChange={(patch) => setWorkerFilters((current) => ({ ...current, ...patch }))}
                 attendanceFilters={attendanceFilters}
                 onAttendanceFiltersChange={(patch) => setAttendanceFilters((current) => ({ ...current, ...patch }))}
@@ -1832,8 +1896,13 @@ function ModuleFilters({
   onUnitFiltersChange,
   teamFilters,
   teamReportingSummary,
+  onRepairTeamReporting,
+  isRepairingTeamReporting,
   onTeamFiltersChange,
   workerFilters,
+  workerReportingSummary,
+  onRepairWorkerReporting,
+  isRepairingWorkerReporting,
   onWorkerFiltersChange,
   attendanceFilters,
   onAttendanceFiltersChange,
@@ -1847,8 +1916,13 @@ function ModuleFilters({
   onUnitFiltersChange: (patch: Partial<UnitLedgerFilters>) => void;
   teamFilters: TeamLedgerFilters;
   teamReportingSummary: ConstructionTeamReportingSummary[];
+  onRepairTeamReporting: () => void;
+  isRepairingTeamReporting: boolean;
   onTeamFiltersChange: (patch: Partial<TeamLedgerFilters>) => void;
   workerFilters: WorkerLedgerFilters;
+  workerReportingSummary: ConstructionTeamReportingSummary[];
+  onRepairWorkerReporting: () => void;
+  isRepairingWorkerReporting: boolean;
   onWorkerFiltersChange: (patch: Partial<WorkerLedgerFilters>) => void;
   attendanceFilters: AttendanceLedgerFilters;
   onAttendanceFiltersChange: (patch: Partial<AttendanceLedgerFilters>) => void;
@@ -1876,7 +1950,11 @@ function ModuleFilters({
   if (activeTab === "班组信息") {
     return (
       <div className="grid gap-2 xl:grid-cols-[minmax(280px,0.8fr)_minmax(0,2.2fr)]">
-        <TeamReportingOverview summary={teamReportingSummary} />
+        <TeamReportingOverview
+          summary={teamReportingSummary}
+          onRepair={onRepairTeamReporting}
+          isRepairing={isRepairingTeamReporting}
+        />
         <FilterGrid compact onSearch={onSearch} onReset={onReset}>
           <FilterInput label="关键词" placeholder="班组名称、班组长" value={teamFilters.keyword} onChange={(event) => onTeamFiltersChange({ keyword: event.target.value })} />
           <FilterSelect label="参建单位" value={teamFilters.unitId} onValueChange={(unitId) => onTeamFiltersChange({ unitId })} options={[{ label: "全部单位", value: "all" }, ...units.map((unit) => ({ label: unit.name, value: unit.id }))]} />
@@ -1898,12 +1976,19 @@ function ModuleFilters({
 
   if (activeTab === "项目工人") {
     return (
-      <FilterGrid onSearch={onSearch} onReset={onReset}>
-        <FilterInput label="关键词" placeholder="姓名、身份证、手机号" value={workerFilters.keyword} onChange={(event) => onWorkerFiltersChange({ keyword: event.target.value })} />
-        <FilterSelect label="所属班组" value={workerFilters.teamId} onValueChange={(teamId) => onWorkerFiltersChange({ teamId })} options={[{ label: "全部班组", value: "all" }, ...teams.map((team) => ({ label: `${team.unitName} / ${team.name}`, value: team.id }))]} />
-        <FilterSelect label="工人状态" value={workerFilters.workStatus} onValueChange={(workStatus) => onWorkerFiltersChange({ workStatus })} options={selectOptionsFromField(workerFormFields, "work_status", "全部状态")} />
-        <FilterSelect label="工种" value={workerFilters.workType} onValueChange={(workType) => onWorkerFiltersChange({ workType })} options={selectOptionsFromField(workerFormFields, "work_type", "全部工种")} />
-      </FilterGrid>
+      <div className="grid gap-2 xl:grid-cols-[minmax(280px,0.8fr)_minmax(0,2.2fr)]">
+        <TeamReportingOverview
+          summary={workerReportingSummary}
+          onRepair={onRepairWorkerReporting}
+          isRepairing={isRepairingWorkerReporting}
+        />
+        <FilterGrid compact onSearch={onSearch} onReset={onReset}>
+          <FilterInput label="关键词" placeholder="姓名、身份证、手机号" value={workerFilters.keyword} onChange={(event) => onWorkerFiltersChange({ keyword: event.target.value })} />
+          <FilterSelect label="所属班组" value={workerFilters.teamId} onValueChange={(teamId) => onWorkerFiltersChange({ teamId })} options={[{ label: "全部班组", value: "all" }, ...teams.map((team) => ({ label: `${team.unitName} / ${team.name}`, value: team.id }))]} />
+          <FilterSelect label="工人状态" value={workerFilters.workStatus} onValueChange={(workStatus) => onWorkerFiltersChange({ workStatus })} options={selectOptionsFromField(workerFormFields, "work_status", "全部状态")} />
+          <FilterSelect label="工种" value={workerFilters.workType} onValueChange={(workType) => onWorkerFiltersChange({ workType })} options={selectOptionsFromField(workerFormFields, "work_type", "全部工种")} />
+        </FilterGrid>
+      </div>
     );
   }
 
@@ -2185,10 +2270,38 @@ function FilterGrid({
   );
 }
 
-function TeamReportingOverview({ summary }: { summary: ConstructionTeamReportingSummary[] }) {
+function TeamReportingOverview({
+  summary,
+  onRepair,
+  isRepairing,
+}: {
+  summary: ConstructionTeamReportingSummary[];
+  onRepair: () => void;
+  isRepairing: boolean;
+}) {
+  const repairableCount = summary.reduce(
+    (total, platform) => total + platform.failure_count + platform.not_reported_count,
+    0
+  );
+
   return (
     <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 dark:border-border dark:bg-background">
-      <div className="text-[11px] font-medium text-slate-500 dark:text-muted-foreground">上报平台</div>
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[11px] font-medium text-slate-500 dark:text-muted-foreground">上报平台</div>
+        {repairableCount > 0 && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 gap-1.5 px-2 text-xs text-[#0f6b5d]"
+            disabled={isRepairing}
+            onClick={onRepair}
+          >
+            <RefreshCw className={cn("size-3.5", isRepairing && "animate-spin")} />
+            {isRepairing ? "修正中" : `修正上报 ${repairableCount}`}
+          </Button>
+        )}
+      </div>
       {summary.length === 0 ? (
         <div className="mt-2 text-xs text-slate-400">未配置上报平台</div>
       ) : (
@@ -2198,7 +2311,6 @@ function TeamReportingOverview({ summary }: { summary: ConstructionTeamReporting
               <span className="font-medium text-slate-700 dark:text-foreground">{platform.platform_name}</span>
               <span className="text-emerald-600">成功 {platform.success_count}</span>
               <span className="text-red-600">失败 {platform.failure_count}</span>
-              {platform.pending_count > 0 && <span className="text-amber-600">上报中 {platform.pending_count}</span>}
               <span className="text-slate-400">未传 {platform.not_reported_count}</span>
               {platform.ignored_count > 0 && <span className="text-slate-400">跳过 {platform.ignored_count}</span>}
             </div>
@@ -2536,7 +2648,7 @@ function TeamsTab({
         </span>,
         <div key={`${team.id}-reporting`} className="min-w-[220px] space-y-1.5">
           <div className="font-medium text-slate-800 dark:text-foreground">{team.name}</div>
-          <TeamReportingPlatforms platforms={team.reportingPlatforms} />
+          <EntityReportingPlatforms platforms={team.reportingPlatforms} />
         </div>,
         team.unitName,
         team.type,
@@ -2552,26 +2664,33 @@ function TeamsTab({
   );
 }
 
-function TeamReportingPlatforms({ platforms }: { platforms: Team["reportingPlatforms"] }) {
+function EntityReportingPlatforms({
+  platforms,
+  showLabel = true,
+}: {
+  platforms: Team["reportingPlatforms"];
+  showLabel?: boolean;
+}) {
   if (!platforms?.length) {
-    return <div className="text-[11px] text-slate-400">上报平台：未配置</div>;
+    return (
+      <div className="text-[11px] text-slate-400">
+        {showLabel ? "上报平台：未配置" : "未配置"}
+      </div>
+    );
   }
 
   return (
     <div className="space-y-1 text-[11px]">
-      <div className="text-slate-400">上报平台</div>
+      {showLabel ? <div className="text-slate-400">上报平台</div> : null}
       {platforms.map((platform) => {
         const isSuccess = platform.status === "success";
-        const isFailed = platform.status === "failed";
-        const isPending = platform.status === "pending";
+        const isFailed = platform.status === "failed" || platform.status === "pending";
         const isIgnored = platform.status === "ignored";
         const statusText = isSuccess
           ? "成功"
           : isFailed
             ? `失败${platform.failure_reason ? `：${platform.failure_reason}` : ""}`
-            : isPending
-              ? "上报中"
-              : isIgnored
+            : isIgnored
                 ? "已跳过（项目管理部不推送）"
                 : "未传";
 
@@ -2584,9 +2703,7 @@ function TeamReportingPlatforms({ platforms }: { platforms: Team["reportingPlatf
                 ? "text-emerald-600"
                 : isFailed
                   ? "text-red-600"
-                  : isPending
-                    ? "text-amber-600"
-                    : "text-slate-400"
+                  : "text-slate-400"
             )}
             title={`${platform.platform_name}：${statusText}`}
           >
@@ -2851,16 +2968,29 @@ function WorkersTab({
         </div>
         <DataTable
           empty="暂无工人"
-          headers={editable ? ["头像", "姓名", "手机号", "班组", "参建单位", "工种", "下发成功", "状态", "进场日期", "操作"] : ["头像", "姓名", "手机号", "班组", "参建单位", "工种", "下发成功", "状态", "进场日期"]}
-          tableClassName={editable ? "min-w-[1120px]" : "min-w-[1000px]"}
-          cellClassNames={["w-16"]}
+          headers={editable ? ["上报平台", "头像", "姓名", "手机号", "班组", "工种", "下发成功", "状态", "进场日期", "操作"] : ["上报平台", "头像", "姓名", "手机号", "班组", "工种", "下发成功", "状态", "进场日期"]}
+          tableClassName={editable ? "min-w-[980px]" : "min-w-[900px]"}
+          cellClassNames={[
+            "w-[150px]",
+            "w-14",
+            "w-20",
+            "w-28",
+            "w-24",
+            "w-24",
+            "w-20",
+            "w-16",
+            "w-28",
+            ...(editable ? ["w-14"] : []),
+          ]}
           scrollX
           rows={scopedWorkers.map((worker) => [
+            <div key={`${worker.id}-reporting`} className="max-w-[150px]">
+              <EntityReportingPlatforms platforms={worker.reportingPlatforms} showLabel={false} />
+            </div>,
             <WorkerAvatar key={`${worker.id}-avatar`} src={worker.avatar} name={worker.name} />,
             worker.name,
             worker.phone,
             worker.team,
-            worker.unit,
             worker.workType,
             <WorkerIssueCountBadge
               key={`${worker.id}-issue-count`}
@@ -4138,6 +4268,7 @@ function apiWorkerToDetail(
     workerType: getFieldOptionLabel(workerFormFields, "worker_type", worker.worker_type),
     issuedDeviceSuccessCount: worker.attendance_issue_success_device_count ?? 0,
     issuedDeviceTotalCount: worker.attendance_device_total_count ?? 0,
+    reportingPlatforms: worker.reporting_platforms,
     status: worker.work_status === 2 ? "离场" : "在场",
     entryDate: worker.entry_time ?? "",
   };

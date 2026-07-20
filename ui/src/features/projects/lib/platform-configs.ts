@@ -61,7 +61,7 @@ export function buildNingboHousingConfig(form: NingboHousingConfigForm): JsonVal
     app_secret: form.app_secret.trim(),
     project_guid: form.project_guid.trim(),
     project_id: form.external_project_id.trim(),
-    corp_code: form.corp_code.trim(),
+    corp_code: form.corp_code.trim().toUpperCase(),
     approval_number: form.approval_number.trim(),
   };
 }
@@ -74,8 +74,15 @@ export function validateNingboHousingConfig(form: NingboHousingConfigForm): stri
   if (!form.app_key.trim()) return "请填写 AppKey";
   if (!form.app_secret.trim()) return "请填写 AppSecret";
   if (!form.project_guid.trim()) return "请填写项目 GUID";
-  if (!/^\d+$/.test(form.external_project_id.trim())) return "宁波平台项目 ID 必须为数字";
-  if (!form.corp_code.trim()) return "请填写统一社会信用代码";
+  const externalProjectId = form.external_project_id.trim();
+  if (!/^\d+$/.test(externalProjectId)) return "宁波平台项目 ID 必须为数字";
+  const numericProjectId = Number(externalProjectId);
+  if (!Number.isSafeInteger(numericProjectId) || numericProjectId < 1 || numericProjectId > 2_147_483_647) {
+    return "宁波平台项目 ID 必须在 1–2147483647 范围内";
+  }
+  if (!/^[0-9A-HJ-NPQRTUWXY]{18}$/.test(form.corp_code.trim().toUpperCase())) {
+    return "统一社会信用代码必须是 18 位大写字母或数字";
+  }
   if (!form.approval_number.trim()) return "请填写发改立项编号";
   return null;
 }

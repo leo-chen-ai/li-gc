@@ -379,6 +379,8 @@ async fn admin_can_manage_project_nested_resources_and_fake_attendance() {
             "name": "接口工人",
             "gender": 1,
             "phone": "13900000000",
+            "worker_type": 1,
+            "work_type": 10,
             "work_status": 1
         }),
     )
@@ -619,6 +621,8 @@ async fn admin_can_configure_generate_and_list_managed_attendance() {
             "name": "张三",
             "gender": 1,
             "phone": "13900000000",
+            "worker_type": 1,
+            "work_type": 10,
             "work_status": 1
         }),
     )
@@ -848,7 +852,7 @@ async fn admin_project_resource_lists_filter_paginate_and_summarize_attendance_o
                 "name": format!("分页工人{:02}", index),
                 "gender": 1,
                 "phone": format!("1393000{:04}", index),
-                "work_type": if index == 11 { 88 } else { 10 },
+                "work_type": if index == 11 { 16 } else { 10 },
                 "work_status": if index == 11 { 2 } else { 1 }
             }),
         )
@@ -872,7 +876,7 @@ async fn admin_project_resource_lists_filter_paginate_and_summarize_attendance_o
     let (status, body) = get_authed(
         app.clone(),
         &format!(
-            "/api/v1/admin/projects/{project_id}/workers?team_id={target_team_id}&keyword=13930000011&work_type=88&work_status=2"
+            "/api/v1/admin/projects/{project_id}/workers?team_id={target_team_id}&keyword=13930000011&work_type=16&work_status=2"
         ),
         &token,
     )
@@ -1178,23 +1182,20 @@ async fn enabled_ningbo_platform_requires_team_type_but_not_team_leader() {
     let team_id =
         Uuid::parse_str(body["data"]["id"].as_str().expect("team id")).expect("valid team id");
 
-    let job = sqlx::query_as::<_, (String, Option<String>)>(
+    let event = sqlx::query_as::<_, (String, String)>(
         r#"
-        SELECT status, last_error
-        FROM integration_jobs
-        WHERE local_entity_id = $1
-          AND platform_code = 'ningbo_housing'
+        SELECT event_type, status
+        FROM integration_outbox_events
+        WHERE aggregate_id = $1
+          AND aggregate_type = 'team'
         "#,
     )
     .bind(team_id)
     .fetch_one(&pool)
     .await
-    .expect("automatic Ningbo sync job");
-    assert_eq!(job.0, "failed");
-    assert!(
-        job.1.is_some_and(|error| error.contains("AppKey")),
-        "invalid platform config should be recorded without making a network request"
-    );
+    .expect("automatic Ningbo sync event");
+    assert_eq!(event.0, "ningbo.team.sync");
+    assert_eq!(event.1, "pending");
 
     let (status, body) = authed_json(
         app.clone(),
@@ -1242,7 +1243,7 @@ async fn enabled_ningbo_platform_requires_team_type_but_not_team_leader() {
     let summary = &body["data"]["reporting_summary"][0];
     assert_eq!(summary["total_count"], 1);
     assert_eq!(summary["ignored_count"], 1);
-    assert_eq!(summary["not_reported_count"], 0);
+    assert_eq!(summary["not_reported_count"], 1);
 }
 
 #[tokio::test]
@@ -1680,6 +1681,8 @@ async fn admin_can_crud_search_paginate_attendance_device_issue_reports() {
             "gender": 1,
             "phone": "13999990000",
             "avatar": "https://static.example.test/avatar.png",
+            "worker_type": 1,
+            "work_type": 10,
             "work_status": 1
         }),
     )
@@ -2260,7 +2263,8 @@ async fn admin_api_accepts_form_style_nulls_by_column_type() {
             "id_card": "320800199001016666",
             "gender": 1,
             "phone": "13800000002",
-            "worker_type": 1001
+            "worker_type": 1001,
+            "work_type": 1001
         }),
     )
     .await;
@@ -2279,6 +2283,8 @@ async fn admin_api_accepts_form_style_nulls_by_column_type() {
             "id_card": "320800199001019999",
             "gender": 1,
             "phone": "13800000000",
+            "worker_type": 1,
+            "work_type": 10,
             "work_status": 1
         }),
     )

@@ -27,6 +27,20 @@ test("requires work type for every worker", () => {
   );
 });
 
+test("拒绝宁波市住建字典之外的旧工种", () => {
+  assert.throws(
+    () =>
+      validateWorkerCreatePayload({
+        name: "张三",
+        phone: "13800000000",
+        worker_type: 1,
+        work_type: 12,
+        political_status: 1,
+      }),
+    /工种不在宁波市住建工人工种字典中/
+  );
+});
+
 test("requires manager type for manager worker", () => {
   assert.throws(
     () =>

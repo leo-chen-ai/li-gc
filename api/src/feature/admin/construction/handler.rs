@@ -2848,9 +2848,14 @@ pub async fn create_team(
         .and_then(|team| team.get("id"))
         .and_then(Value::as_str)
         .and_then(|id| Uuid::parse_str(id).ok())
-        && let Err(error) = sync_new_team_to_ningbo_platforms(state.db.pool(), team_id).await
+        && let Err(error) = crate::feature::integration::outbox_worker::enqueue_team_sync(
+            state.db.pool(),
+            project_id,
+            team_id,
+        )
+        .await
     {
-        tracing::error!(%team_id, message = %error.message, "Failed to record Ningbo team sync");
+        tracing::error!(%team_id, error = %error, "Failed to enqueue Ningbo team sync");
     }
 
     Ok(response)
@@ -2941,6 +2946,7 @@ async fn validate_team_type_for_enabled_platforms(
 
 struct TeamPlatformSyncSource {
     id: Uuid,
+    is_deleted: bool,
     project_id: Uuid,
     name: String,
     work_type: Option<i32>,
@@ -2951,7 +2957,7 @@ struct TeamPlatformSyncSource {
     created_at: chrono::DateTime<chrono::Utc>,
 }
 
-async fn sync_new_team_to_ningbo_platforms(
+pub(crate) async fn sync_new_team_to_ningbo_platforms(
     pool: &sqlx::PgPool,
     team_id: Uuid,
 ) -> Result<(), ApiError> {
@@ -2959,6 +2965,7 @@ async fn sync_new_team_to_ningbo_platforms(
         r#"
         SELECT
             team.id,
+            team.is_deleted,
             team.project_id,
             COALESCE(team.name, '') AS name,
             team.work_type,
@@ -2971,9 +2978,7 @@ async fn sync_new_team_to_ningbo_platforms(
         JOIN construction_units unit
           ON unit.id = team.unit_id
          AND unit.project_id = team.project_id
-         AND unit.is_deleted = FALSE
         WHERE team.id = $1
-          AND team.is_deleted = FALSE
         "#,
     )
     .bind(team_id)
@@ -2983,6 +2988,7 @@ async fn sync_new_team_to_ningbo_platforms(
     .ok_or_else(not_found)?;
     let source = TeamPlatformSyncSource {
         id: row.try_get("id").map_err(db_error)?,
+        is_deleted: row.try_get("is_deleted").map_err(db_error)?,
         project_id: row.try_get("project_id").map_err(db_error)?,
         name: row.try_get("name").map_err(db_error)?,
         work_type: row.try_get("work_type").map_err(db_error)?,
@@ -2993,7 +2999,7 @@ async fn sync_new_team_to_ningbo_platforms(
         created_at: row.try_get("created_at").map_err(db_error)?,
     };
 
-    if source.is_manage_team || source.work_type == Some(1001) {
+    if source.is_deleted || source.is_manage_team || source.work_type == Some(1001) {
         return Ok(());
     }
 
@@ -3045,6 +3051,10 @@ async fn sync_team_to_ningbo_config(
         Some("班组名称为空，无法上报宁波市住建平台".to_owned())
     } else if corp_code.is_empty() {
         Some("参建单位统一社会信用代码为空，无法上报宁波市住建平台".to_owned())
+    } else if !ningbo_housing::is_valid_social_credit_code(&corp_code) {
+        Some(format!(
+            "参建单位统一社会信用代码格式错误：{corp_code}（应为 18 位大写字母或数字）"
+        ))
     } else if team_type.is_empty() {
         Some("班组工种未配置，无法匹配宁波市住建班组类型".to_owned())
     } else {
@@ -3233,7 +3243,7 @@ async fn ensure_ningbo_project_binding(
             $3,
             $4,
             $5,
-            ARRAY['team.created']::text[],
+            ARRAY['team.created', 'worker.created', 'worker.updated', 'worker.exited']::text[],
             TRUE,
             FALSE,
             NULL
@@ -3558,6 +3568,52 @@ fn ningbo_team_type_label(work_type: Option<i32>) -> String {
     .to_owned()
 }
 
+fn ningbo_worker_type_label(work_type: Option<i32>) -> String {
+    match work_type {
+        Some(1) => "钢筋工",
+        Some(2) => "木工",
+        Some(3) => "机械设备安装工",
+        Some(4) => "架子工",
+        Some(5) => "混凝土工",
+        Some(6) => "砌筑工",
+        Some(7) => "建筑电工",
+        Some(8) => "电焊工",
+        Some(9) => "管道工",
+        Some(10) => "测量放线工",
+        Some(11) => "装饰装修工",
+        Some(13) => "防水工",
+        Some(14) => "挖掘铲运和桩工机械司机",
+        Some(15) => "模板工",
+        Some(16) => "通风工",
+        Some(17) => "安装起重工",
+        Some(18) => "安装钳工",
+        Some(19) => "电气设备安装调试工",
+        Some(20) => "变电安装工",
+        Some(21) => "司泵工",
+        Some(22) => "桩机操作工",
+        Some(23) => "起重信号工",
+        Some(24) => "建筑起重机械安装拆卸工",
+        Some(25) => "室内成套设施安装工",
+        Some(26) => "建筑门窗幕墙安装工",
+        Some(27) => "幕墙制作工",
+        Some(28) => "石工",
+        Some(29) => "除尘工",
+        Some(30) => "爆破工",
+        Some(31) => "线路架设工",
+        Some(32) => "古建筑传统石工",
+        Some(33) => "古建筑传统瓦工",
+        Some(34) => "古建筑传统彩画工",
+        Some(35) => "古建筑传统木工",
+        Some(36) => "古建筑传统油工",
+        Some(37) => "金属工",
+        Some(38) => "杂工",
+        Some(900) => "其它",
+        Some(1001) => "管理人员",
+        _ => "",
+    }
+    .to_owned()
+}
+
 pub async fn list_teams(
     State(state): State<AppState>,
     Extension(auth_user): Extension<AuthUser>,
@@ -3572,6 +3628,191 @@ pub async fn list_teams(
     }
 
     list_team_rows_page(state.db.pool(), project_id, &scoped_columns, &params).await
+}
+
+pub async fn repair_team_reporting(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Path(project_id): Path<Uuid>,
+) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+
+    let mut repair_guard = state.db.pool().begin().await.map_err(db_error)?;
+    let lock_acquired =
+        sqlx::query_scalar::<_, bool>("SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0))")
+            .bind(format!("team-reporting-repair:{project_id}"))
+            .fetch_one(&mut *repair_guard)
+            .await
+            .map_err(db_error)?;
+    if !lock_acquired {
+        return Err(invalid_input("当前项目的班组上报正在修正，请稍后刷新"));
+    }
+
+    let has_enabled_platform = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM construction_platform_configs
+            WHERE project_id = $1
+              AND is_deleted = FALSE
+              AND is_enabled = TRUE
+              AND (platform_type = 'ningbo_housing' OR platform_name = '宁波市住建')
+        )
+        "#,
+    )
+    .bind(project_id)
+    .fetch_one(state.db.pool())
+    .await
+    .map_err(db_error)?;
+    if !has_enabled_platform {
+        return Err(invalid_input("当前项目未启用宁波市住建上报配置"));
+    }
+
+    let team_ids = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT team.id
+        FROM construction_teams team
+        LEFT JOIN LATERAL (
+            SELECT job.status
+            FROM integration_jobs job
+            WHERE job.project_id = team.project_id
+              AND job.entity_type IN ('team', 'construction_team')
+              AND job.local_entity_id = team.id
+              AND job.platform_code IN ('ningbo_housing', 'zhenhai')
+            ORDER BY job.created_at DESC, job.id DESC
+            LIMIT 1
+        ) latest_job ON TRUE
+        WHERE team.project_id = $1
+          AND team.is_deleted = FALSE
+          AND team.is_manage_team = FALSE
+          AND COALESCE(team.work_type, 0) <> 1001
+          AND (
+              latest_job.status IS NULL
+              OR latest_job.status NOT IN ('success', 'completed')
+          )
+        ORDER BY team.created_at, team.id
+        LIMIT 20
+        "#,
+    )
+    .bind(project_id)
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(db_error)?;
+
+    for team_id in &team_ids {
+        crate::feature::integration::outbox_worker::enqueue_team_sync(
+            state.db.pool(),
+            project_id,
+            *team_id,
+        )
+        .await
+        .map_err(db_error)?;
+    }
+
+    let reporting_summary = team_reporting_summary(state.db.pool(), project_id).await?;
+    repair_guard.commit().await.map_err(db_error)?;
+    Ok(ApiSuccess::default().with_data(serde_json::json!({
+        "attempted_count": team_ids.len(),
+        "reporting_summary": reporting_summary,
+    })))
+}
+
+pub async fn repair_worker_reporting(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Path(project_id): Path<Uuid>,
+) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+
+    let mut repair_guard = state.db.pool().begin().await.map_err(db_error)?;
+    let lock_acquired =
+        sqlx::query_scalar::<_, bool>("SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0))")
+            .bind(format!("worker-reporting-repair:{project_id}"))
+            .fetch_one(&mut *repair_guard)
+            .await
+            .map_err(db_error)?;
+    if !lock_acquired {
+        return Err(invalid_input("当前项目的工人上报正在修正，请稍后刷新"));
+    }
+
+    let has_enabled_platform = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM construction_platform_configs
+            WHERE project_id = $1
+              AND is_deleted = FALSE
+              AND is_enabled = TRUE
+              AND (platform_type = 'ningbo_housing' OR platform_name = '宁波市住建')
+        )
+        "#,
+    )
+    .bind(project_id)
+    .fetch_one(state.db.pool())
+    .await
+    .map_err(db_error)?;
+    if !has_enabled_platform {
+        return Err(invalid_input("当前项目未启用宁波市住建上报配置"));
+    }
+
+    let worker_ids = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT worker.id
+        FROM construction_workers worker
+        LEFT JOIN LATERAL (
+            SELECT job.status
+            FROM integration_jobs job
+            WHERE job.project_id = worker.project_id
+              AND job.entity_type IN ('worker', 'construction_worker')
+              AND job.local_entity_id = worker.id
+              AND job.platform_code = 'ningbo_housing'
+            ORDER BY job.updated_at DESC, job.id DESC
+            LIMIT 1
+        ) latest_job ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT mapping.id
+            FROM integration_entity_mappings mapping
+            WHERE mapping.project_id = worker.project_id
+              AND mapping.entity_type = 'worker'
+              AND mapping.local_entity_id = worker.id
+              AND mapping.is_deleted = FALSE
+            LIMIT 1
+        ) active_mapping ON TRUE
+        WHERE worker.project_id = $1
+          AND worker.is_deleted = FALSE
+          AND COALESCE(worker.worker_type, 1) <> 1001
+          AND COALESCE(worker.work_type, 0) <> 1001
+          AND (
+              latest_job.status IS NULL
+              OR latest_job.status NOT IN ('success', 'completed')
+              OR (worker.work_status = 2 AND active_mapping.id IS NOT NULL)
+              OR (worker.work_status <> 2 AND active_mapping.id IS NULL)
+          )
+        ORDER BY worker.created_at, worker.id
+        LIMIT 20
+        "#,
+    )
+    .bind(project_id)
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(db_error)?;
+
+    for worker_id in &worker_ids {
+        crate::feature::integration::outbox_worker::enqueue_worker_reconcile(
+            state.db.pool(),
+            project_id,
+            *worker_id,
+            false,
+        )
+        .await
+        .map_err(db_error)?;
+    }
+    let reporting_summary = worker_reporting_summary(state.db.pool(), project_id).await?;
+    repair_guard.commit().await.map_err(db_error)?;
+    Ok(ApiSuccess::default().with_data(serde_json::json!({
+        "attempted_count": worker_ids.len(),
+        "reporting_summary": reporting_summary,
+    })))
 }
 
 pub async fn get_team(
@@ -3660,7 +3901,7 @@ async fn upsert_team_exit_job(
     .map_err(db_error)
 }
 
-async fn exit_team_from_ningbo_platforms(
+pub(crate) async fn exit_team_from_ningbo_platforms(
     pool: &sqlx::PgPool,
     project_id: Uuid,
     team_id: Uuid,
@@ -3671,7 +3912,6 @@ async fn exit_team_from_ningbo_platforms(
         FROM construction_teams
         WHERE project_id = $1
           AND id = $2
-          AND is_deleted = FALSE
         "#,
     )
     .bind(project_id)
@@ -3817,6 +4057,24 @@ async fn exit_team_from_ningbo_platforms(
             .execute(pool)
             .await
             .map_err(db_error)?;
+            sqlx::query(
+                r#"
+                UPDATE integration_entity_mappings
+                SET is_deleted = TRUE,
+                    deleted_at = NOW(),
+                    last_pushed_at = NOW(),
+                    updated_at = NOW()
+                WHERE binding_id = $1
+                  AND entity_type = 'team'
+                  AND local_entity_id = $2
+                  AND is_deleted = FALSE
+                "#,
+            )
+            .bind(target.binding_id)
+            .bind(team_id)
+            .execute(pool)
+            .await
+            .map_err(db_error)?;
             continue;
         }
 
@@ -3843,9 +4101,7 @@ async fn exit_team_from_ningbo_platforms(
 fn platform_exit_error(message: &str) -> ApiError {
     ApiError::default()
         .with_code(StatusCode::BAD_GATEWAY)
-        .with_message(format!(
-            "宁波市住建平台班组退场失败，本地班组未删除：{message}"
-        ))
+        .with_message(format!("宁波市住建平台班组退场失败：{message}"))
 }
 
 async fn normalize_team_update_type(
@@ -3902,30 +4158,21 @@ pub async fn delete_team(
     Path((project_id, team_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<()> {
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
-    exit_team_from_ningbo_platforms(state.db.pool(), project_id, team_id).await?;
     let response = delete_row(
         state.db.pool(),
         "construction_teams",
         &[("project_id", project_id), ("id", team_id)],
     )
     .await?;
-    sqlx::query(
-        r#"
-        UPDATE integration_entity_mappings
-        SET is_deleted = TRUE,
-            deleted_at = NOW(),
-            updated_at = NOW()
-        WHERE project_id = $1
-          AND entity_type = 'team'
-          AND local_entity_id = $2
-          AND is_deleted = FALSE
-        "#,
+    if let Err(error) = crate::feature::integration::outbox_worker::enqueue_team_exit(
+        state.db.pool(),
+        project_id,
+        team_id,
     )
-    .bind(project_id)
-    .bind(team_id)
-    .execute(state.db.pool())
     .await
-    .map_err(db_error)?;
+    {
+        tracing::error!(%team_id, %project_id, error = %error, "Failed to enqueue Ningbo team exit");
+    }
     Ok(response)
 }
 
@@ -3954,6 +4201,16 @@ pub async fn create_worker(
         .and_then(Value::as_str)
         .and_then(|value| Uuid::parse_str(value).ok())
     {
+        if let Err(error) = crate::feature::integration::outbox_worker::enqueue_worker_reconcile(
+            state.db.pool(),
+            project_id,
+            worker_id,
+            false,
+        )
+        .await
+        {
+            tracing::error!(%worker_id, error = %error, "Failed to enqueue Ningbo worker sync");
+        }
         trigger_worker_device_issue(
             &state,
             project_id,
@@ -3965,6 +4222,1342 @@ pub async fn create_worker(
     }
 
     Ok(response)
+}
+
+#[derive(Debug, Clone)]
+struct WorkerPlatformSyncSource {
+    id: Uuid,
+    is_deleted: bool,
+    project_id: Uuid,
+    team_id: Uuid,
+    name: String,
+    identity_card: String,
+    address: String,
+    grant_org: String,
+    validity_period: String,
+    validity_period_end: String,
+    telephone: String,
+    nation_name: String,
+    id_card_photo_url: String,
+    face_photo_url: String,
+    political_status: Option<i32>,
+    education: Option<i32>,
+    has_bad_medical_history: bool,
+    worker_type: Option<i32>,
+    work_type: Option<i32>,
+    work_status: i16,
+    is_team_leader: bool,
+    entry_time: chrono::NaiveDate,
+    exit_time: Option<chrono::NaiveDate>,
+    has_insurance: bool,
+    salary_bank_card: String,
+    enterprise_name: String,
+    corp_code: String,
+}
+
+#[derive(Debug, Clone)]
+struct WorkerPlatformMapping {
+    project_worker_id: i64,
+    external_team_id: Option<i64>,
+    worker_code: String,
+}
+
+pub(crate) async fn reconcile_worker_to_ningbo_platforms(
+    state: &AppState,
+    worker_id: Uuid,
+    strict_exit: bool,
+) -> Result<(), ApiError> {
+    let mut source = load_worker_platform_sync_source(state.db.pool(), worker_id).await?;
+    if strict_exit || source.is_deleted {
+        source.work_status = 2;
+        source
+            .exit_time
+            .get_or_insert_with(|| chrono::Local::now().date_naive());
+    }
+    if source.worker_type == Some(1001) || source.work_type == Some(1001) {
+        return Ok(());
+    }
+    let configs = sqlx::query(
+        r#"
+        SELECT id, config
+        FROM construction_platform_configs
+        WHERE project_id = $1
+          AND is_deleted = FALSE
+          AND is_enabled = TRUE
+          AND (platform_type = 'ningbo_housing' OR platform_name = '宁波市住建')
+        ORDER BY created_at, id
+        "#,
+    )
+    .bind(source.project_id)
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(db_error)?;
+
+    let mut failures = Vec::new();
+    for row in configs {
+        let config_id: Uuid = row.try_get("id").map_err(db_error)?;
+        let config: Value = row.try_get("config").map_err(db_error)?;
+        if let Some(error) =
+            reconcile_worker_to_ningbo_config(state, &source, config_id, &config).await?
+        {
+            failures.push(error);
+        }
+    }
+    if !failures.is_empty() {
+        return Err(invalid_input(format!(
+            "市平台人员同步失败：{}",
+            failures.join("；")
+        )));
+    }
+    Ok(())
+}
+
+async fn reconcile_worker_to_ningbo_config(
+    state: &AppState,
+    source: &WorkerPlatformSyncSource,
+    config_id: Uuid,
+    config: &Value,
+) -> Result<Option<String>, ApiError> {
+    let credentials = match ningbo_housing::NingboHousingCredentials::from_config(config) {
+        Ok(credentials) => credentials,
+        Err(error) => {
+            record_worker_action_failure(
+                state.db.pool(),
+                source,
+                config_id,
+                None,
+                if source.work_status == 2 {
+                    "Project/ProjectWorkerExit"
+                } else {
+                    "Project/EditWorker"
+                },
+                if source.work_status == 2 {
+                    "exit"
+                } else {
+                    "update"
+                },
+                &error.to_string(),
+            )
+            .await?;
+            return Ok(Some(error.to_string()));
+        }
+    };
+    let binding_id =
+        ensure_ningbo_project_binding(state.db.pool(), source.project_id, &credentials, config)
+            .await?;
+    let mapping = worker_platform_mapping(state.db.pool(), binding_id, source.id).await?;
+
+    if source.work_status == 2 {
+        return exit_worker_from_ningbo_config(
+            state,
+            source,
+            config_id,
+            binding_id,
+            &credentials,
+            mapping.as_ref(),
+        )
+        .await;
+    }
+
+    let Some(mapping) = mapping else {
+        sync_worker_to_ningbo_config(state, source, config_id, config).await?;
+        return Ok(None);
+    };
+    edit_worker_on_ningbo_config(
+        state,
+        source,
+        config_id,
+        binding_id,
+        config,
+        &credentials,
+        &mapping,
+    )
+    .await
+}
+
+async fn worker_platform_mapping(
+    pool: &sqlx::PgPool,
+    binding_id: Uuid,
+    worker_id: Uuid,
+) -> Result<Option<WorkerPlatformMapping>, ApiError> {
+    let row = sqlx::query(
+        r#"
+        SELECT external_entity_id, external_parent_id,
+               COALESCE(external_payload ->> 'worker_code', '') AS worker_code
+        FROM integration_entity_mappings
+        WHERE binding_id = $1
+          AND entity_type = 'worker'
+          AND local_entity_id = $2
+          AND is_deleted = FALSE
+        LIMIT 1
+        "#,
+    )
+    .bind(binding_id)
+    .bind(worker_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(db_error)?;
+    let Some(row) = row else { return Ok(None) };
+    let project_worker_id = row
+        .try_get::<String, _>("external_entity_id")
+        .map_err(db_error)?
+        .parse::<i64>()
+        .map_err(|_| invalid_input("已保存的宁波市住建项目人员 ID 格式错误"))?;
+    let external_team_id = row
+        .try_get::<Option<String>, _>("external_parent_id")
+        .map_err(db_error)?
+        .and_then(|value| value.parse::<i64>().ok());
+    Ok(Some(WorkerPlatformMapping {
+        project_worker_id,
+        external_team_id,
+        worker_code: row.try_get("worker_code").map_err(db_error)?,
+    }))
+}
+
+async fn load_worker_platform_sync_source(
+    pool: &sqlx::PgPool,
+    worker_id: Uuid,
+) -> Result<WorkerPlatformSyncSource, ApiError> {
+    let row = sqlx::query(
+        r#"
+        SELECT
+            worker.id,
+            worker.is_deleted,
+            worker.project_id,
+            worker.team_id,
+            COALESCE(worker.name, '') AS name,
+            COALESCE(worker.id_card, '') AS identity_card,
+            COALESCE(worker.address, '') AS address,
+            COALESCE(worker.visa_office, '') AS grant_org,
+            COALESCE(worker.validity_period, '') AS validity_period,
+            COALESCE(worker.validity_period_end, '') AS validity_period_end,
+            COALESCE(worker.phone, '') AS telephone,
+            COALESCE(worker.nation, '') AS nation_name,
+            COALESCE(worker.ocr_photo, '') AS id_card_photo_url,
+            COALESCE(worker.avatar, '') AS face_photo_url,
+            worker.political_status,
+            worker.education,
+            worker.has_major_medical_history,
+            worker.worker_type,
+            worker.work_type,
+            worker.work_status,
+            COALESCE(team.leader_id = worker.id, FALSE) AS is_team_leader,
+            COALESCE(worker.entry_time, worker.created_at::date) AS entry_time,
+            worker.exit_time,
+            worker.has_insurance,
+            COALESCE(worker.salary_bank_card, '') AS salary_bank_card,
+            COALESCE(unit.company_name, '') AS enterprise_name,
+            COALESCE(unit.company_credit_code, '') AS corp_code
+        FROM construction_workers worker
+        JOIN construction_units unit
+          ON unit.id = worker.unit_id
+         AND unit.project_id = worker.project_id
+        JOIN construction_teams team
+          ON team.id = worker.team_id
+         AND team.project_id = worker.project_id
+         AND team.unit_id = worker.unit_id
+        WHERE worker.id = $1
+        "#,
+    )
+    .bind(worker_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(db_error)?
+    .ok_or_else(not_found)?;
+
+    Ok(WorkerPlatformSyncSource {
+        id: row.try_get("id").map_err(db_error)?,
+        is_deleted: row.try_get("is_deleted").map_err(db_error)?,
+        project_id: row.try_get("project_id").map_err(db_error)?,
+        team_id: row.try_get("team_id").map_err(db_error)?,
+        name: row.try_get("name").map_err(db_error)?,
+        identity_card: row.try_get("identity_card").map_err(db_error)?,
+        address: row.try_get("address").map_err(db_error)?,
+        grant_org: row.try_get("grant_org").map_err(db_error)?,
+        validity_period: row.try_get("validity_period").map_err(db_error)?,
+        validity_period_end: row.try_get("validity_period_end").map_err(db_error)?,
+        telephone: row.try_get("telephone").map_err(db_error)?,
+        nation_name: row.try_get("nation_name").map_err(db_error)?,
+        id_card_photo_url: row.try_get("id_card_photo_url").map_err(db_error)?,
+        face_photo_url: row.try_get("face_photo_url").map_err(db_error)?,
+        political_status: row.try_get("political_status").map_err(db_error)?,
+        education: row.try_get("education").map_err(db_error)?,
+        has_bad_medical_history: row.try_get("has_major_medical_history").map_err(db_error)?,
+        worker_type: row.try_get("worker_type").map_err(db_error)?,
+        work_type: row.try_get("work_type").map_err(db_error)?,
+        work_status: row.try_get("work_status").map_err(db_error)?,
+        is_team_leader: row.try_get("is_team_leader").map_err(db_error)?,
+        entry_time: row.try_get("entry_time").map_err(db_error)?,
+        exit_time: row.try_get("exit_time").map_err(db_error)?,
+        has_insurance: row.try_get("has_insurance").map_err(db_error)?,
+        salary_bank_card: row.try_get("salary_bank_card").map_err(db_error)?,
+        enterprise_name: row.try_get("enterprise_name").map_err(db_error)?,
+        corp_code: row.try_get("corp_code").map_err(db_error)?,
+    })
+}
+
+async fn sync_worker_to_ningbo_config(
+    state: &AppState,
+    source: &WorkerPlatformSyncSource,
+    config_id: Uuid,
+    config: &Value,
+) -> Result<(), ApiError> {
+    let credentials = match ningbo_housing::NingboHousingCredentials::from_config(config) {
+        Ok(credentials) => credentials,
+        Err(error) => {
+            record_worker_sync_failure(
+                state.db.pool(),
+                source,
+                config_id,
+                None,
+                &error.to_string(),
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+    let binding_id =
+        ensure_ningbo_project_binding(state.db.pool(), source.project_id, &credentials, config)
+            .await?;
+    let job_id = upsert_worker_sync_job(
+        state.db.pool(),
+        source,
+        config_id,
+        Some(binding_id),
+        &serde_json::json!({
+            "IdentityCard": source.identity_card,
+            "WorkerName": source.name,
+            "TeamLocalId": source.team_id,
+        }),
+    )
+    .await?;
+
+    let work_type_name = ningbo_worker_type_label(source.work_type);
+    let validation_error = worker_sync_validation_error(source, &work_type_name);
+    if let Some(error) = validation_error {
+        finish_team_sync_job(state.db.pool(), job_id, "failed", None, Some(&error)).await?;
+        return Ok(());
+    }
+    let external_team_id = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT external_entity_id
+        FROM integration_entity_mappings
+        WHERE binding_id = $1
+          AND entity_type = 'team'
+          AND local_entity_id = $2
+          AND is_deleted = FALSE
+        LIMIT 1
+        "#,
+    )
+    .bind(binding_id)
+    .bind(source.team_id)
+    .fetch_optional(state.db.pool())
+    .await
+    .map_err(db_error)?
+    .and_then(|value| value.parse::<i64>().ok());
+    let Some(external_team_id) = external_team_id else {
+        finish_team_sync_job(
+            state.db.pool(),
+            job_id,
+            "failed",
+            None,
+            Some("所属班组尚未成功上报，缺少宁波市住建班组 ID"),
+        )
+        .await?;
+        return Ok(());
+    };
+
+    let client = match ningbo_housing::build_client() {
+        Ok(client) => client,
+        Err(error) => {
+            finish_team_sync_job(
+                state.db.pool(),
+                job_id,
+                "failed",
+                None,
+                Some(&error.to_string()),
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+
+    let platform_id = integration_binding_platform_id(state.db.pool(), binding_id).await?;
+    let mut worker_code =
+        cached_external_person_id(state.db.pool(), platform_id, source.identity_card.trim())
+            .await?;
+
+    if worker_code.is_none() {
+        let worker_code_response =
+            ningbo_housing::get_worker_code(&client, &credentials, source.identity_card.trim())
+                .await;
+        worker_code = worker_code_response
+            .as_ref()
+            .ok()
+            .filter(|response| response.status.is_success())
+            .and_then(|response| ningbo_housing::extract_worker_code(&response.body));
+    }
+
+    if worker_code.is_none() {
+        let basic_request = match build_ningbo_worker_basic_request(state, source).await {
+            Ok(request) => request,
+            Err(error) => {
+                finish_team_sync_job(state.db.pool(), job_id, "failed", None, Some(&error)).await?;
+                return Ok(());
+            }
+        };
+        let response =
+            match ningbo_housing::add_or_update_worker(&client, &credentials, &basic_request).await
+            {
+                Ok(response) => response,
+                Err(error) => {
+                    finish_team_sync_job(
+                        state.db.pool(),
+                        job_id,
+                        "failed",
+                        None,
+                        Some(&error.to_string()),
+                    )
+                    .await?;
+                    return Ok(());
+                }
+            };
+        if !response.status.is_success() {
+            let message = ningbo_housing::response_message(&response.body);
+            finish_team_sync_job(
+                state.db.pool(),
+                job_id,
+                "failed",
+                Some(&response.body),
+                Some(&message),
+            )
+            .await?;
+            return Ok(());
+        }
+        worker_code = ningbo_housing::extract_worker_code(&response.body);
+    }
+    let Some(worker_code) = worker_code else {
+        finish_team_sync_job(
+            state.db.pool(),
+            job_id,
+            "failed",
+            None,
+            Some("平台未返回甬建码"),
+        )
+        .await?;
+        return Ok(());
+    };
+    if let Err(error) = upsert_external_person_identity(
+        state.db.pool(),
+        platform_id,
+        source.identity_card.trim(),
+        &worker_code,
+        &serde_json::json!({
+            "worker_name": source.name,
+            "source": "ningbo_worker_sync",
+        }),
+    )
+    .await
+    {
+        let message = format!("保存甬建码身份缓存失败：{}", error.message);
+        finish_team_sync_job(state.db.pool(), job_id, "failed", None, Some(&message)).await?;
+        return Ok(());
+    }
+
+    let employment_request = ningbo_housing::AddEnterpriseWorkerRequest {
+        enterprise_name: source.enterprise_name.trim().to_owned(),
+        corp_code: source.corp_code.trim().to_owned(),
+        worker_code: worker_code.clone(),
+        work_date: source.entry_time.format("%Y-%m-%d").to_string(),
+        current_work_type_name: work_type_name.clone(),
+    };
+    let employment_response =
+        match ningbo_housing::add_enterprise_worker(&client, &credentials, &employment_request)
+            .await
+        {
+            Ok(response) => response,
+            Err(error) => {
+                finish_team_sync_job(
+                    state.db.pool(),
+                    job_id,
+                    "failed",
+                    None,
+                    Some(&error.to_string()),
+                )
+                .await?;
+                return Ok(());
+            }
+        };
+    if !employment_response.status.is_success()
+        && !ningbo_housing::response_indicates_worker_already_employed(&employment_response)
+    {
+        let message = ningbo_housing::response_message(&employment_response.body);
+        finish_team_sync_job(
+            state.db.pool(),
+            job_id,
+            "failed",
+            Some(&employment_response.body),
+            Some(&message),
+        )
+        .await?;
+        return Ok(());
+    }
+
+    let project_request = ningbo_housing::AddProjectWorkerRequest {
+        project_apartment_id: credentials.project_id,
+        team_id: external_team_id,
+        worker_code: worker_code.clone(),
+        is_team_leader: source.is_team_leader,
+        work_type_name,
+        entry_time: source.entry_time.format("%Y-%m-%d").to_string(),
+        entry_attach_file: None,
+        entry_attach_file_extension: None,
+        issue_card_date: None,
+        issue_card_pic: None,
+        issue_card_pic_extension: None,
+        card_number: None,
+        pay_roll_bank_card_number: nonempty_string(&source.salary_bank_card),
+        bank_link_number: None,
+        pay_roll_top_bank_code: None,
+        has_buy_insurance: source.has_insurance,
+    };
+    let request_payload = serde_json::to_value(&project_request).unwrap_or(Value::Null);
+    let response =
+        match ningbo_housing::add_project_worker(&client, &credentials, &project_request).await {
+            Ok(response) => response,
+            Err(error) => {
+                finish_team_sync_job(
+                    state.db.pool(),
+                    job_id,
+                    "failed",
+                    None,
+                    Some(&error.to_string()),
+                )
+                .await?;
+                return Ok(());
+            }
+        };
+    let Some(project_worker_id) = (response.status.is_success())
+        .then(|| ningbo_housing::extract_project_worker_id(&response.body))
+        .flatten()
+    else {
+        let message = if response.status.is_success() {
+            "平台未返回项目人员 ID".to_owned()
+        } else {
+            ningbo_housing::response_message(&response.body)
+        };
+        finish_team_sync_job(
+            state.db.pool(),
+            job_id,
+            "failed",
+            Some(&response.body),
+            Some(&message),
+        )
+        .await?;
+        return Ok(());
+    };
+
+    complete_worker_platform_mapping(
+        state.db.pool(),
+        source,
+        binding_id,
+        job_id,
+        project_worker_id,
+        external_team_id,
+        serde_json::json!({
+            "worker_code": worker_code,
+            "project_worker_id": project_worker_id,
+            "team_id": external_team_id,
+            "request": request_payload,
+            "platform_response": response.body,
+        }),
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn edit_worker_on_ningbo_config(
+    state: &AppState,
+    source: &WorkerPlatformSyncSource,
+    config_id: Uuid,
+    binding_id: Uuid,
+    config: &Value,
+    credentials: &ningbo_housing::NingboHousingCredentials,
+    mapping: &WorkerPlatformMapping,
+) -> Result<Option<String>, ApiError> {
+    let work_type_name = ningbo_worker_type_label(source.work_type);
+    let initial_payload = serde_json::json!({
+        "ProjectWorkerId": mapping.project_worker_id,
+        "WorkerName": source.name,
+        "TeamLocalId": source.team_id,
+    });
+    let job_id = upsert_worker_action_job(
+        state.db.pool(),
+        source,
+        config_id,
+        Some(binding_id),
+        "Project/EditWorker",
+        "update",
+        &initial_payload,
+    )
+    .await?;
+    if let Some(error) = worker_sync_validation_error(source, &work_type_name) {
+        finish_team_sync_job(state.db.pool(), job_id, "failed", None, Some(&error)).await?;
+        return Ok(Some(error));
+    }
+    let external_team_id =
+        current_external_team_id(state.db.pool(), binding_id, source.team_id).await?;
+    let Some(external_team_id) = external_team_id else {
+        let error = "所属班组尚未成功上报，缺少宁波市住建班组 ID".to_owned();
+        finish_team_sync_job(state.db.pool(), job_id, "failed", None, Some(&error)).await?;
+        return Ok(Some(error));
+    };
+
+    let basic_request = match build_ningbo_worker_basic_request(state, source).await {
+        Ok(request) => request,
+        Err(error) => {
+            finish_team_sync_job(state.db.pool(), job_id, "failed", None, Some(&error)).await?;
+            return Ok(Some(error));
+        }
+    };
+    let client = match ningbo_housing::build_client() {
+        Ok(client) => client,
+        Err(error) => {
+            let message = error.to_string();
+            finish_team_sync_job(state.db.pool(), job_id, "failed", None, Some(&message)).await?;
+            return Ok(Some(message));
+        }
+    };
+    let basic_response =
+        match ningbo_housing::add_or_update_worker(&client, credentials, &basic_request).await {
+            Ok(response) => response,
+            Err(error) => {
+                let message = error.to_string();
+                finish_team_sync_job(state.db.pool(), job_id, "failed", None, Some(&message))
+                    .await?;
+                return Ok(Some(message));
+            }
+        };
+    if !basic_response.status.is_success() {
+        let message = ningbo_housing::response_message(&basic_response.body);
+        finish_team_sync_job(
+            state.db.pool(),
+            job_id,
+            "failed",
+            Some(&basic_response.body),
+            Some(&message),
+        )
+        .await?;
+        return Ok(Some(message));
+    }
+    let worker_code = ningbo_housing::extract_worker_code(&basic_response.body)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| mapping.worker_code.clone());
+    if worker_code.trim().is_empty() {
+        let error = "平台未返回甬建码，且项目人员映射中没有甬建码".to_owned();
+        finish_team_sync_job(state.db.pool(), job_id, "failed", None, Some(&error)).await?;
+        return Ok(Some(error));
+    }
+    let platform_id = integration_binding_platform_id(state.db.pool(), binding_id).await?;
+    if let Err(error) = upsert_external_person_identity(
+        state.db.pool(),
+        platform_id,
+        source.identity_card.trim(),
+        &worker_code,
+        &serde_json::json!({ "worker_name": source.name, "source": "ningbo_worker_update" }),
+    )
+    .await
+    {
+        let message = format!("保存甬建码身份缓存失败：{}", error.message);
+        finish_team_sync_job(state.db.pool(), job_id, "failed", None, Some(&message)).await?;
+        return Ok(Some(message));
+    }
+
+    let employment_request = ningbo_housing::AddEnterpriseWorkerRequest {
+        enterprise_name: source.enterprise_name.trim().to_owned(),
+        corp_code: source.corp_code.trim().to_owned(),
+        worker_code: worker_code.clone(),
+        work_date: source.entry_time.format("%Y-%m-%d").to_string(),
+        current_work_type_name: work_type_name.clone(),
+    };
+    let employment_response = match ningbo_housing::add_enterprise_worker(
+        &client,
+        credentials,
+        &employment_request,
+    )
+    .await
+    {
+        Ok(response) => response,
+        Err(error) => {
+            let message = error.to_string();
+            finish_team_sync_job(state.db.pool(), job_id, "failed", None, Some(&message)).await?;
+            return Ok(Some(message));
+        }
+    };
+    if !employment_response.status.is_success()
+        && !ningbo_housing::response_indicates_worker_already_employed(&employment_response)
+    {
+        let message = ningbo_housing::response_message(&employment_response.body);
+        finish_team_sync_job(
+            state.db.pool(),
+            job_id,
+            "failed",
+            Some(&employment_response.body),
+            Some(&message),
+        )
+        .await?;
+        return Ok(Some(message));
+    }
+
+    if mapping.external_team_id != Some(external_team_id)
+        || (!mapping.worker_code.is_empty() && mapping.worker_code != worker_code)
+    {
+        if let Some(error) = exit_worker_from_ningbo_config(
+            state,
+            source,
+            config_id,
+            binding_id,
+            credentials,
+            Some(mapping),
+        )
+        .await?
+        {
+            finish_team_sync_job(state.db.pool(), job_id, "failed", None, Some(&error)).await?;
+            return Ok(Some(error));
+        }
+        sync_worker_to_ningbo_config(state, source, config_id, config).await?;
+        let rebound = worker_platform_mapping(state.db.pool(), binding_id, source.id)
+            .await?
+            .is_some();
+        if rebound {
+            finish_team_sync_job(
+                state.db.pool(),
+                job_id,
+                "success",
+                Some(&serde_json::json!({ "rebound": true })),
+                None,
+            )
+            .await?;
+            return Ok(None);
+        }
+        let error = "人员班组或身份变更后重新上报失败".to_owned();
+        finish_team_sync_job(state.db.pool(), job_id, "failed", None, Some(&error)).await?;
+        return Ok(Some(error));
+    }
+
+    let request = ningbo_housing::EditProjectWorkerRequest {
+        project_apartment_id: credentials.project_id,
+        project_worker_id: mapping.project_worker_id,
+        is_team_leader: source.is_team_leader,
+        work_type_name,
+        entry_time: source.entry_time.format("%Y-%m-%d").to_string(),
+        entry_attach_file: None,
+        entry_attach_file_extension: None,
+        issue_card_date: None,
+        issue_card_pic: None,
+        issue_card_pic_extension: None,
+        card_number: None,
+        pay_roll_bank_card_number: nonempty_string(&source.salary_bank_card),
+        bank_link_number: None,
+        pay_roll_top_bank_code: None,
+        has_buy_insurance: source.has_insurance,
+    };
+    let request_payload = serde_json::to_value(&request).unwrap_or(Value::Null);
+    let response = match ningbo_housing::edit_project_worker(&client, credentials, &request).await {
+        Ok(response) => response,
+        Err(error) => {
+            let message = error.to_string();
+            finish_team_sync_job(state.db.pool(), job_id, "failed", None, Some(&message)).await?;
+            return Ok(Some(message));
+        }
+    };
+    if !response.status.is_success() {
+        let message = ningbo_housing::response_message(&response.body);
+        finish_team_sync_job(
+            state.db.pool(),
+            job_id,
+            "failed",
+            Some(&response.body),
+            Some(&message),
+        )
+        .await?;
+        return Ok(Some(message));
+    }
+    let payload = serde_json::json!({
+        "worker_code": worker_code,
+        "project_worker_id": mapping.project_worker_id,
+        "team_id": external_team_id,
+        "request": request_payload,
+        "platform_response": response.body,
+    });
+    sqlx::query(
+        r#"
+        UPDATE integration_entity_mappings
+        SET external_parent_id = $3,
+            external_payload = $4,
+            last_pushed_at = NOW(),
+            updated_at = NOW()
+        WHERE binding_id = $1
+          AND entity_type = 'worker'
+          AND local_entity_id = $2
+          AND is_deleted = FALSE
+        "#,
+    )
+    .bind(binding_id)
+    .bind(source.id)
+    .bind(external_team_id.to_string())
+    .bind(&payload)
+    .execute(state.db.pool())
+    .await
+    .map_err(db_error)?;
+    finish_team_sync_job(state.db.pool(), job_id, "success", Some(&payload), None).await?;
+    Ok(None)
+}
+
+async fn current_external_team_id(
+    pool: &sqlx::PgPool,
+    binding_id: Uuid,
+    local_team_id: Uuid,
+) -> Result<Option<i64>, ApiError> {
+    sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT external_entity_id
+        FROM integration_entity_mappings
+        WHERE binding_id = $1
+          AND entity_type = 'team'
+          AND local_entity_id = $2
+          AND is_deleted = FALSE
+        LIMIT 1
+        "#,
+    )
+    .bind(binding_id)
+    .bind(local_team_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(db_error)
+    .map(|value| value.and_then(|value| value.parse::<i64>().ok()))
+}
+
+async fn exit_worker_from_ningbo_config(
+    state: &AppState,
+    source: &WorkerPlatformSyncSource,
+    config_id: Uuid,
+    binding_id: Uuid,
+    credentials: &ningbo_housing::NingboHousingCredentials,
+    mapping: Option<&WorkerPlatformMapping>,
+) -> Result<Option<String>, ApiError> {
+    let request_payload = mapping.map_or_else(
+        || serde_json::json!({ "skipped": true, "reason": "no_project_worker_mapping" }),
+        |mapping| {
+            serde_json::to_value(ningbo_housing::ProjectWorkerExitRequest {
+                project_worker_id: mapping.project_worker_id.to_string(),
+                exit_time: source
+                    .exit_time
+                    .unwrap_or_else(|| chrono::Local::now().date_naive())
+                    .format("%Y-%m-%d")
+                    .to_string(),
+                exit_file: None,
+                exit_file_extension: None,
+            })
+            .unwrap_or(Value::Null)
+        },
+    );
+    let job_id = upsert_worker_action_job(
+        state.db.pool(),
+        source,
+        config_id,
+        Some(binding_id),
+        "Project/ProjectWorkerExit",
+        "exit",
+        &request_payload,
+    )
+    .await?;
+    let Some(mapping) = mapping else {
+        finish_team_sync_job(
+            state.db.pool(),
+            job_id,
+            "success",
+            Some(&request_payload),
+            None,
+        )
+        .await?;
+        return Ok(None);
+    };
+    let request = ningbo_housing::ProjectWorkerExitRequest {
+        project_worker_id: mapping.project_worker_id.to_string(),
+        exit_time: source
+            .exit_time
+            .unwrap_or_else(|| chrono::Local::now().date_naive())
+            .format("%Y-%m-%d")
+            .to_string(),
+        exit_file: None,
+        exit_file_extension: None,
+    };
+    let client = match ningbo_housing::build_client() {
+        Ok(client) => client,
+        Err(error) => {
+            let message = error.to_string();
+            finish_team_sync_job(state.db.pool(), job_id, "failed", None, Some(&message)).await?;
+            return Ok(Some(message));
+        }
+    };
+    let response = match ningbo_housing::exit_project_worker(&client, credentials, &request).await {
+        Ok(response) => response,
+        Err(error) => {
+            let message = error.to_string();
+            finish_team_sync_job(state.db.pool(), job_id, "failed", None, Some(&message)).await?;
+            return Ok(Some(message));
+        }
+    };
+    if !response.status.is_success()
+        && !ningbo_housing::response_indicates_worker_already_exited(&response)
+    {
+        let message = ningbo_housing::response_message(&response.body);
+        finish_team_sync_job(
+            state.db.pool(),
+            job_id,
+            "failed",
+            Some(&response.body),
+            Some(&message),
+        )
+        .await?;
+        return Ok(Some(message));
+    }
+    sqlx::query(
+        r#"
+        UPDATE integration_entity_mappings
+        SET is_deleted = TRUE,
+            deleted_at = NOW(),
+            last_pushed_at = NOW(),
+            external_payload = external_payload || $3::jsonb,
+            updated_at = NOW()
+        WHERE binding_id = $1
+          AND entity_type = 'worker'
+          AND local_entity_id = $2
+          AND is_deleted = FALSE
+        "#,
+    )
+    .bind(binding_id)
+    .bind(source.id)
+    .bind(serde_json::json!({
+        "exit_request": request_payload,
+        "exit_response": response.body,
+    }))
+    .execute(state.db.pool())
+    .await
+    .map_err(db_error)?;
+    finish_team_sync_job(
+        state.db.pool(),
+        job_id,
+        "success",
+        Some(&serde_json::json!({ "platform_response": response.body })),
+        None,
+    )
+    .await?;
+    Ok(None)
+}
+
+fn worker_sync_validation_error(
+    source: &WorkerPlatformSyncSource,
+    work_type_name: &str,
+) -> Option<String> {
+    let required = [
+        (source.name.trim(), "姓名"),
+        (source.identity_card.trim(), "身份证号"),
+        (source.enterprise_name.trim(), "任职企业名称"),
+        (source.corp_code.trim(), "任职企业统一社会信用代码"),
+        (work_type_name, "工种"),
+    ];
+    if let Some((_, label)) = required.iter().find(|(value, _)| value.is_empty()) {
+        return Some(format!("{label}为空，无法上报宁波市住建平台"));
+    }
+    if !ningbo_housing::is_valid_social_credit_code(source.corp_code.trim()) {
+        return Some(format!(
+            "任职企业统一社会信用代码格式错误：{}（应为 18 位大写字母或数字）",
+            source.corp_code.trim()
+        ));
+    }
+    None
+}
+
+fn worker_basic_profile_validation_error(source: &WorkerPlatformSyncSource) -> Option<String> {
+    let required = [
+        (source.address.trim(), "身份证地址"),
+        (source.grant_org.trim(), "身份证签发机关"),
+        (source.telephone.trim(), "手机号"),
+        (source.nation_name.trim(), "民族"),
+    ];
+    required
+        .iter()
+        .find(|(value, _)| value.is_empty())
+        .map(|(_, label)| format!("{label}为空，无法创建甬建码"))
+}
+
+async fn build_ningbo_worker_basic_request(
+    state: &AppState,
+    source: &WorkerPlatformSyncSource,
+) -> Result<ningbo_housing::AddOrUpdateWorkerRequest, String> {
+    if let Some(error) = worker_basic_profile_validation_error(source) {
+        return Err(error);
+    }
+    let id_card_photo = load_worker_image_base64(
+        state,
+        &source.id_card_photo_url,
+        crate::infrastructure::image_compression::WORKER_ID_CARD_MAX_BYTES,
+        "身份证人像面",
+    )
+    .await?;
+    let face_photo = load_worker_image_base64(
+        state,
+        &source.face_photo_url,
+        crate::infrastructure::image_compression::WORKER_AVATAR_MAX_BYTES,
+        "人员头像",
+    )
+    .await?;
+    Ok(ningbo_housing::AddOrUpdateWorkerRequest {
+        worker_name: source.name.trim().to_owned(),
+        identity_card: source.identity_card.trim().to_owned(),
+        address: source.address.trim().to_owned(),
+        grant_org: source.grant_org.trim().to_owned(),
+        id_card_expire_date: ningbo_id_card_expire_date(source),
+        marital_status: None,
+        telephone: source.telephone.trim().to_owned(),
+        national_name: "中国".to_owned(),
+        nation_name: source.nation_name.trim().to_owned(),
+        id_card_photo: id_card_photo.clone(),
+        political_aff_name: ningbo_political_label(source.political_status).to_owned(),
+        culture_level_type_name: ningbo_education_label(source.education).to_owned(),
+        edu_level_name: None,
+        degree_name: None,
+        has_bad_medical_history: source.has_bad_medical_history,
+        private_string_suit: None,
+        urgent_link_man: None,
+        urgent_link_man_phone: None,
+        worker_type: if source.worker_type == Some(1001) {
+            2
+        } else {
+            1
+        },
+        is_joined: false,
+        joined_time: None,
+        temporary_residence_permit_card: None,
+        positive_id_card_file: Some(id_card_photo),
+        negative_id_card_file: None,
+        face_photo,
+    })
+}
+
+async fn load_worker_image_base64(
+    state: &AppState,
+    public_url: &str,
+    max_bytes: usize,
+    label: &str,
+) -> Result<String, String> {
+    let trimmed = public_url.trim();
+    if trimmed.is_empty() {
+        return Err(format!("{label}为空，无法创建甬建码"));
+    }
+    if let Some((metadata, encoded)) = trimmed.split_once(',')
+        && metadata.starts_with("data:image/")
+        && metadata.ends_with(";base64")
+    {
+        let bytes = general_purpose::STANDARD
+            .decode(encoded)
+            .map_err(|_| format!("{label} Base64 格式错误"))?;
+        let compressed = crate::infrastructure::image_compression::compress_to_jpeg_below_async(
+            bytes, max_bytes,
+        )
+        .await
+        .map_err(|error| format!("{label}{error}"))?;
+        return Ok(general_purpose::STANDARD.encode(compressed));
+    }
+
+    let object_key = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT object_key
+        FROM upload_files
+        WHERE public_url = $1
+          AND is_deleted = FALSE
+        ORDER BY created_at DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(trimmed)
+    .fetch_optional(state.db.pool())
+    .await
+    .map_err(|error| format!("读取{label}上传记录失败：{error}"))?
+    .ok_or_else(|| format!("{label}不是系统上传文件，无法安全读取原图"))?;
+    let bytes = state
+        .storage
+        .get(&object_key)
+        .await
+        .map_err(|error| format!("读取{label}失败：{error}"))?;
+    let compressed = crate::infrastructure::image_compression::compress_to_jpeg_below_async(
+        bytes.to_vec(),
+        max_bytes,
+    )
+    .await
+    .map_err(|error| format!("{label}{error}"))?;
+    Ok(general_purpose::STANDARD.encode(compressed))
+}
+
+fn ningbo_id_card_expire_date(source: &WorkerPlatformSyncSource) -> Option<String> {
+    let start = source.validity_period.trim().replace('-', "");
+    let end = source.validity_period_end.trim().replace('-', "");
+    (!start.is_empty() && !end.is_empty()).then(|| format!("{start} -{end}"))
+}
+
+fn ningbo_political_label(value: Option<i32>) -> &'static str {
+    match value {
+        Some(2) => "中共党员",
+        Some(3) => "中共预备党员",
+        Some(4) => "共青团员",
+        Some(5) => "民主人士",
+        _ => "群众",
+    }
+}
+
+fn ningbo_education_label(value: Option<i32>) -> &'static str {
+    match value {
+        Some(1) => "小学",
+        Some(2) => "初中",
+        Some(3) => "高中",
+        Some(4) => "中专",
+        Some(5) => "大专",
+        Some(6) => "本科",
+        Some(7) => "硕士",
+        _ => "其他",
+    }
+}
+
+fn nonempty_string(value: &str) -> Option<String> {
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_owned())
+}
+
+async fn upsert_worker_sync_job(
+    pool: &sqlx::PgPool,
+    source: &WorkerPlatformSyncSource,
+    config_id: Uuid,
+    binding_id: Option<Uuid>,
+    request_payload: &Value,
+) -> Result<Uuid, ApiError> {
+    upsert_worker_action_job(
+        pool,
+        source,
+        config_id,
+        binding_id,
+        "Project/AddWorkerV2",
+        "create",
+        request_payload,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn upsert_worker_action_job(
+    pool: &sqlx::PgPool,
+    source: &WorkerPlatformSyncSource,
+    config_id: Uuid,
+    binding_id: Option<Uuid>,
+    operation: &str,
+    action: &str,
+    request_payload: &Value,
+) -> Result<Uuid, ApiError> {
+    sqlx::query_scalar::<_, Uuid>(
+        r#"
+        INSERT INTO integration_jobs (
+            project_id, binding_id, platform_code, operation, entity_type,
+            local_entity_id, idempotency_key, request_payload, status,
+            attempt_count, next_attempt_at, last_error, completed_at
+        )
+        VALUES ($1, $2, 'ningbo_housing', $3, 'worker', $4, $5, $6, 'pending', 0, NOW(), NULL, NULL)
+        ON CONFLICT (idempotency_key)
+        DO UPDATE SET
+            binding_id = EXCLUDED.binding_id,
+            request_payload = EXCLUDED.request_payload,
+            response_payload = NULL,
+            status = 'pending',
+            attempt_count = 0,
+            next_attempt_at = NOW(),
+            last_error = NULL,
+            completed_at = NULL,
+            updated_at = NOW()
+        RETURNING id
+        "#,
+    )
+    .bind(source.project_id)
+    .bind(binding_id)
+    .bind(operation)
+    .bind(source.id)
+    .bind(format!(
+        "ningbo_housing:worker:{action}:{}:{config_id}",
+        source.id
+    ))
+    .bind(request_payload)
+    .fetch_one(pool)
+    .await
+    .map_err(db_error)
+}
+
+async fn record_worker_sync_failure(
+    pool: &sqlx::PgPool,
+    source: &WorkerPlatformSyncSource,
+    config_id: Uuid,
+    binding_id: Option<Uuid>,
+    error: &str,
+) -> Result<(), ApiError> {
+    let job_id = upsert_worker_sync_job(
+        pool,
+        source,
+        config_id,
+        binding_id,
+        &serde_json::json!({ "worker_name": source.name }),
+    )
+    .await?;
+    finish_team_sync_job(pool, job_id, "failed", None, Some(error)).await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn record_worker_action_failure(
+    pool: &sqlx::PgPool,
+    source: &WorkerPlatformSyncSource,
+    config_id: Uuid,
+    binding_id: Option<Uuid>,
+    operation: &str,
+    action: &str,
+    error: &str,
+) -> Result<(), ApiError> {
+    let job_id = upsert_worker_action_job(
+        pool,
+        source,
+        config_id,
+        binding_id,
+        operation,
+        action,
+        &serde_json::json!({ "worker_name": source.name }),
+    )
+    .await?;
+    finish_team_sync_job(pool, job_id, "failed", None, Some(error)).await
+}
+
+async fn complete_worker_platform_mapping(
+    pool: &sqlx::PgPool,
+    source: &WorkerPlatformSyncSource,
+    binding_id: Uuid,
+    job_id: Uuid,
+    external_worker_id: i64,
+    external_team_id: i64,
+    payload: Value,
+) -> Result<(), ApiError> {
+    let result = sqlx::query(
+        r#"
+        INSERT INTO integration_entity_mappings (
+            binding_id, project_id, entity_type, local_entity_id,
+            external_entity_id, external_parent_id, external_payload,
+            last_pushed_at, is_deleted, deleted_at
+        )
+        VALUES ($1, $2, 'worker', $3, $4, $5, $6, NOW(), FALSE, NULL)
+        ON CONFLICT (binding_id, entity_type, local_entity_id) WHERE is_deleted = FALSE
+        DO UPDATE SET
+            external_entity_id = EXCLUDED.external_entity_id,
+            external_parent_id = EXCLUDED.external_parent_id,
+            external_payload = EXCLUDED.external_payload,
+            last_pushed_at = NOW(),
+            updated_at = NOW()
+        "#,
+    )
+    .bind(binding_id)
+    .bind(source.project_id)
+    .bind(source.id)
+    .bind(external_worker_id.to_string())
+    .bind(external_team_id.to_string())
+    .bind(&payload)
+    .execute(pool)
+    .await;
+    if let Err(error) = result {
+        let message = format!("保存宁波市住建项目人员 ID 失败：{error}");
+        finish_team_sync_job(pool, job_id, "failed", Some(&payload), Some(&message)).await?;
+        return Ok(());
+    }
+    finish_team_sync_job(pool, job_id, "success", Some(&payload), None).await?;
+    sqlx::query(
+        "UPDATE integration_project_bindings SET last_sync_at = NOW(), updated_at = NOW() WHERE id = $1",
+    )
+    .bind(binding_id)
+    .execute(pool)
+    .await
+    .map_err(db_error)?;
+    Ok(())
+}
+
+async fn integration_binding_platform_id(
+    pool: &sqlx::PgPool,
+    binding_id: Uuid,
+) -> Result<Uuid, ApiError> {
+    sqlx::query_scalar::<_, Uuid>(
+        "SELECT platform_id FROM integration_project_bindings WHERE id = $1 AND is_deleted = FALSE",
+    )
+    .bind(binding_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(db_error)?
+    .ok_or_else(|| invalid_input("宁波市住建项目绑定不存在"))
+}
+
+async fn cached_external_person_id(
+    pool: &sqlx::PgPool,
+    platform_id: Uuid,
+    identity_card: &str,
+) -> Result<Option<String>, ApiError> {
+    sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT external_person_id
+        FROM integration_person_identities
+        WHERE platform_id = $1
+          AND identity_type = 'id_card'
+          AND identity_value = UPPER(BTRIM($2))
+          AND is_deleted = FALSE
+        LIMIT 1
+        "#,
+    )
+    .bind(platform_id)
+    .bind(identity_card)
+    .fetch_optional(pool)
+    .await
+    .map_err(db_error)
+}
+
+async fn upsert_external_person_identity(
+    pool: &sqlx::PgPool,
+    platform_id: Uuid,
+    identity_card: &str,
+    external_person_id: &str,
+    payload: &Value,
+) -> Result<(), ApiError> {
+    sqlx::query(
+        r#"
+        INSERT INTO integration_person_identities (
+            platform_id, identity_type, identity_value, external_person_id,
+            external_payload, last_verified_at, is_deleted, deleted_at
+        )
+        VALUES ($1, 'id_card', UPPER(BTRIM($2)), $3, $4, NOW(), FALSE, NULL)
+        ON CONFLICT (platform_id, identity_type, identity_value) WHERE is_deleted = FALSE
+        DO UPDATE SET
+            external_person_id = EXCLUDED.external_person_id,
+            external_payload = EXCLUDED.external_payload,
+            last_verified_at = NOW(),
+            updated_at = NOW()
+        "#,
+    )
+    .bind(platform_id)
+    .bind(identity_card)
+    .bind(external_person_id)
+    .bind(payload)
+    .execute(pool)
+    .await
+    .map_err(db_error)?;
+    Ok(())
 }
 
 pub async fn list_workers(
@@ -3985,6 +5578,7 @@ pub async fn list_workers(
 
     list_workers_page(
         state.db.pool(),
+        project_id,
         &[("project_id", project_id)],
         &scoped_columns,
         &params,
@@ -3994,6 +5588,7 @@ pub async fn list_workers(
 
 async fn list_workers_page(
     pool: &sqlx::PgPool,
+    project_id: Uuid,
     where_uuid_columns: &[(&'static str, Uuid)],
     scoped_uuid_columns: &[(&'static str, Uuid)],
     params: &ResourceListParams,
@@ -4014,7 +5609,50 @@ async fn list_workers_page(
             SELECT
                 r.*,
                 COALESCE(issue_stats.success_device_count, 0)::int AS attendance_issue_success_device_count,
-                COALESCE(device_stats.total_device_count, 0)::int AS attendance_device_total_count
+                COALESCE(device_stats.total_device_count, 0)::int AS attendance_device_total_count,
+                COALESCE((
+                    SELECT jsonb_agg(
+                        jsonb_build_object(
+                            'platform_name', config.platform_name,
+                            'platform_type', config.platform_type,
+                            'is_enabled', config.is_enabled,
+                            'status', CASE
+                                WHEN r.worker_type = 1001 OR r.work_type = 1001 THEN 'ignored'
+                                WHEN latest_job.id IS NULL THEN 'not_reported'
+                                WHEN latest_job.status IN ('success', 'completed') THEN 'success'
+                                ELSE 'failed'
+                            END,
+                            'failure_reason', CASE
+                                WHEN latest_job.id IS NOT NULL
+                                     AND latest_job.status NOT IN ('success', 'completed')
+                                    THEN COALESCE(
+                                        NULLIF(latest_job.last_error, ''),
+                                        latest_job.response_payload ->> 'message',
+                                        latest_job.response_payload ->> 'msg',
+                                        '上报未完成，请修正上报'
+                                    )
+                                ELSE NULL
+                            END,
+                            'reported_at', latest_job.updated_at
+                        )
+                        ORDER BY config.created_at, config.platform_name
+                    )
+                    FROM construction_platform_configs config
+                    LEFT JOIN LATERAL (
+                        SELECT job.id, job.status, job.last_error, job.response_payload, job.updated_at
+                        FROM integration_jobs job
+                        WHERE job.project_id = r.project_id
+                          AND job.entity_type IN ('worker', 'construction_worker')
+                          AND job.local_entity_id = r.id
+                          AND job.platform_code = config.platform_type
+                          AND job.status NOT IN ('pending', 'processing')
+                        ORDER BY job.updated_at DESC, job.id DESC
+                        LIMIT 1
+                    ) latest_job ON TRUE
+                    WHERE config.project_id = r.project_id
+                      AND config.is_deleted = FALSE
+                      AND config.is_enabled = TRUE
+                ), '[]'::jsonb) AS reporting_platforms
             FROM construction_workers r
             LEFT JOIN (
                 SELECT
@@ -4067,13 +5705,91 @@ async fn list_workers_page(
         .fetch_one(pool)
         .await
         .map_err(db_error)?;
+    let reporting_summary = worker_reporting_summary(pool, project_id).await?;
 
     Ok(ApiSuccess::default().with_data(serde_json::json!({
         "items": items,
         "total": total,
         "page": params.page,
         "page_size": params.page_size,
+        "reporting_summary": reporting_summary,
     })))
+}
+
+async fn worker_reporting_summary(
+    pool: &sqlx::PgPool,
+    project_id: Uuid,
+) -> Result<Value, ApiError> {
+    sqlx::query_scalar::<_, Value>(
+        r#"
+        WITH worker_platform_statuses AS (
+            SELECT
+                config.id AS platform_config_id,
+                config.platform_name,
+                config.platform_type,
+                config.created_at AS platform_created_at,
+                worker.id AS worker_id,
+                CASE
+                    WHEN worker.worker_type = 1001 OR worker.work_type = 1001 THEN 'ignored'
+                    WHEN worker.id IS NULL OR latest_job.id IS NULL THEN 'not_reported'
+                    WHEN latest_job.status IN ('success', 'completed') THEN 'success'
+                    ELSE 'failed'
+                END AS reporting_status
+            FROM construction_platform_configs config
+            LEFT JOIN construction_workers worker
+              ON worker.project_id = config.project_id
+             AND worker.is_deleted = FALSE
+            LEFT JOIN LATERAL (
+                SELECT job.id, job.status
+                FROM integration_jobs job
+                WHERE job.project_id = config.project_id
+                  AND job.entity_type IN ('worker', 'construction_worker')
+                  AND job.local_entity_id = worker.id
+                  AND job.platform_code = config.platform_type
+                  AND job.status NOT IN ('pending', 'processing')
+                ORDER BY job.updated_at DESC, job.id DESC
+                LIMIT 1
+            ) latest_job ON TRUE
+            WHERE config.project_id = $1
+              AND config.is_deleted = FALSE
+              AND config.is_enabled = TRUE
+        ), platform_summary AS (
+            SELECT
+                platform_config_id,
+                platform_name,
+                platform_type,
+                platform_created_at,
+                COUNT(*) FILTER (WHERE worker_id IS NOT NULL AND reporting_status <> 'ignored')::int AS total_count,
+                COUNT(*) FILTER (WHERE worker_id IS NOT NULL AND reporting_status = 'success')::int AS success_count,
+                COUNT(*) FILTER (WHERE worker_id IS NOT NULL AND reporting_status = 'failed')::int AS failure_count,
+                COUNT(*) FILTER (WHERE worker_id IS NOT NULL AND reporting_status = 'pending')::int AS pending_count,
+                COUNT(*) FILTER (WHERE worker_id IS NOT NULL AND reporting_status = 'not_reported')::int AS not_reported_count,
+                COUNT(*) FILTER (WHERE worker_id IS NOT NULL AND reporting_status = 'ignored')::int AS ignored_count
+            FROM worker_platform_statuses
+            GROUP BY platform_config_id, platform_name, platform_type, platform_created_at
+        )
+        SELECT COALESCE(
+            jsonb_agg(
+                jsonb_build_object(
+                    'platform_name', platform_name,
+                    'platform_type', platform_type,
+                    'total_count', total_count,
+                    'success_count', success_count,
+                    'failure_count', failure_count,
+                    'pending_count', pending_count,
+                    'not_reported_count', not_reported_count,
+                    'ignored_count', ignored_count
+                ) ORDER BY platform_created_at, platform_name
+            ),
+            '[]'::jsonb
+        )
+        FROM platform_summary
+        "#,
+    )
+    .bind(project_id)
+    .fetch_one(pool)
+    .await
+    .map_err(db_error)
 }
 
 pub async fn list_personnel_workers(
@@ -4165,6 +5881,17 @@ pub async fn update_worker(
     )
     .await?;
 
+    if let Err(error) = crate::feature::integration::outbox_worker::enqueue_worker_reconcile(
+        state.db.pool(),
+        project_id,
+        worker_id,
+        false,
+    )
+    .await
+    {
+        tracing::error!(%worker_id, error = %error, "Failed to enqueue Ningbo worker update");
+    }
+
     let after_issue_fields =
         fetch_worker_issue_fields(state.db.pool(), project_id, worker_id).await?;
     if let (Some(before), Some(after)) = (before_issue_fields, after_issue_fields) {
@@ -4197,7 +5924,7 @@ impl WorkerIssueFields {
 
     fn issue_action_after_change(&self, other: &Self) -> Option<&'static str> {
         if !other.active_on_device() {
-            return None;
+            return self.active_on_device().then_some("delete");
         }
 
         if !self.active_on_device() || self.device_payload_changed(other) {
@@ -4365,12 +6092,31 @@ pub async fn delete_worker(
     Path((project_id, worker_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<()> {
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
-    delete_row(
+    trigger_worker_device_issue(
+        &state,
+        project_id,
+        worker_id,
+        "delete",
+        "人员删除前自动从考勤机删除",
+    )
+    .await;
+    let response = delete_row(
         state.db.pool(),
         "construction_workers",
         &[("project_id", project_id), ("id", worker_id)],
     )
+    .await?;
+    if let Err(error) = crate::feature::integration::outbox_worker::enqueue_worker_reconcile(
+        state.db.pool(),
+        project_id,
+        worker_id,
+        true,
+    )
     .await
+    {
+        tracing::error!(%worker_id, %project_id, error = %error, "Failed to enqueue Ningbo worker exit");
+    }
+    Ok(response)
 }
 
 pub async fn list_attendance(
@@ -5938,8 +7684,10 @@ pub async fn delete_work_hour_config(
 
 pub async fn create_platform_config(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
+    ensure_body_project_access(state.db.pool(), &auth_user, &body).await?;
     ensure_json_object_if_present(&body, "config")?;
     create_row(
         state.db.pool(),
@@ -5952,15 +7700,33 @@ pub async fn create_platform_config(
     .await
 }
 
-pub async fn list_platform_configs(State(state): State<AppState>, uri: Uri) -> ApiResult<Value> {
+pub async fn list_platform_configs(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    uri: Uri,
+) -> ApiResult<Value> {
     let params = module_list_params(&uri)?;
-    list_module_rows(state.db.pool(), "construction_platform_configs", &params).await
+    list_module_rows_scoped(
+        state.db.pool(),
+        "construction_platform_configs",
+        &params,
+        &auth_user,
+    )
+    .await
 }
 
 pub async fn get_platform_config(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(config_id): Path<Uuid>,
 ) -> ApiResult<Value> {
+    ensure_row_project_access(
+        state.db.pool(),
+        &auth_user,
+        "construction_platform_configs",
+        config_id,
+    )
+    .await?;
     get_row(
         state.db.pool(),
         "construction_platform_configs",
@@ -5971,9 +7737,18 @@ pub async fn get_platform_config(
 
 pub async fn update_platform_config(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(config_id): Path<Uuid>,
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
+    ensure_row_project_access(
+        state.db.pool(),
+        &auth_user,
+        "construction_platform_configs",
+        config_id,
+    )
+    .await?;
+    ensure_optional_body_project_access(state.db.pool(), &auth_user, &body).await?;
     ensure_json_object_if_present(&body, "config")?;
     update_row(
         state.db.pool(),
@@ -5987,8 +7762,16 @@ pub async fn update_platform_config(
 
 pub async fn delete_platform_config(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(config_id): Path<Uuid>,
 ) -> ApiResult<()> {
+    ensure_row_project_access(
+        state.db.pool(),
+        &auth_user,
+        "construction_platform_configs",
+        config_id,
+    )
+    .await?;
     soft_delete_row(
         state.db.pool(),
         "construction_platform_configs",
@@ -5999,8 +7782,10 @@ pub async fn delete_platform_config(
 
 pub async fn create_platform_log(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
+    ensure_body_project_access(state.db.pool(), &auth_user, &body).await?;
     ensure_json_object_if_present(&body, "payload")?;
     create_row(
         state.db.pool(),
@@ -6013,14 +7798,19 @@ pub async fn create_platform_log(
     .await
 }
 
-pub async fn list_platform_logs(State(state): State<AppState>, uri: Uri) -> ApiResult<Value> {
+pub async fn list_platform_logs(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    uri: Uri,
+) -> ApiResult<Value> {
     let params = module_list_params(&uri)?;
-    let data = list_unified_platform_logs(state.db.pool(), &params).await?;
+    let data = list_unified_platform_logs(state.db.pool(), &auth_user, &params).await?;
     Ok(ApiSuccess::default().with_data(data))
 }
 
 async fn list_unified_platform_logs(
     pool: &sqlx::PgPool,
+    auth_user: &AuthUser,
     params: &ModuleListParams,
 ) -> Result<Value, ApiError> {
     let offset = (params.page - 1) * params.page_size;
@@ -6072,24 +7862,32 @@ async fn list_unified_platform_logs(
                 CASE
                     WHEN job.entity_type IN ('team', 'construction_team')
                          AND job.operation IN ('Project/AddTeam', 'addTeam') THEN '班组新增'
+                    WHEN job.entity_type IN ('worker', 'construction_worker')
+                         AND job.operation = 'Project/AddWorkerV2' THEN '工人新增'
+                    WHEN job.entity_type IN ('worker', 'construction_worker')
+                         AND job.operation = 'Project/EditWorker' THEN '工人编辑'
+                    WHEN job.entity_type IN ('worker', 'construction_worker')
+                         AND job.operation = 'Project/ProjectWorkerExit' THEN '工人退场'
                     ELSE job.operation
                 END AS operation,
                 'push'::text AS direction,
-                job.status,
+                CASE
+                    WHEN job.status IN ('success', 'completed') THEN 'success'
+                    ELSE 'failed'
+                END AS status,
                 GREATEST(
                     job.attempt_count,
                     (SELECT COUNT(*)::int FROM integration_attempts attempt WHERE attempt.job_id = job.id),
-                    CASE WHEN job.status = 'pending' THEN 0 ELSE 1 END
+                    1
                 )::int AS request_count,
                 CASE WHEN job.status IN ('success', 'completed') THEN 1 ELSE 0 END::int AS success_count,
-                CASE WHEN job.status IN ('failed', 'dead_letter', 'cancelled') THEN 1 ELSE 0 END::int AS failure_count,
+                CASE WHEN job.status IN ('success', 'completed') THEN 0 ELSE 1 END::int AS failure_count,
                 COALESCE(
                     NULLIF(job.last_error, ''),
                     CASE
                         WHEN job.response_payload ->> 'recovered_existing' = 'true'
                             THEN '平台提示班组重复，已查询并绑定现有平台班组 ID'
                         WHEN job.status IN ('success', 'completed') THEN '上报成功'
-                        WHEN job.status = 'pending' THEN '等待上报'
                         ELSE NULL
                     END
                 ) AS message,
@@ -6129,12 +7927,14 @@ async fn list_unified_platform_logs(
                 ORDER BY config.is_enabled DESC, config.created_at, config.id
                 LIMIT 1
             ) config ON TRUE
+            WHERE job.status NOT IN ('pending', 'processing')
         ), filtered_logs AS (
             SELECT *
             FROM unified_logs log
             WHERE TRUE
         "#,
     );
+    push_accessible_project_scope(&mut query, auth_user, "log.project_id");
     if let Some(project_id) = params.project_id {
         query.push(" AND log.project_id = ").push_bind(project_id);
     }
@@ -6208,8 +8008,16 @@ async fn list_unified_platform_logs(
 
 pub async fn get_platform_log(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(log_id): Path<Uuid>,
 ) -> ApiResult<Value> {
+    ensure_row_project_access(
+        state.db.pool(),
+        &auth_user,
+        "construction_platform_logs",
+        log_id,
+    )
+    .await?;
     get_row(
         state.db.pool(),
         "construction_platform_logs",
@@ -6220,9 +8028,18 @@ pub async fn get_platform_log(
 
 pub async fn update_platform_log(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(log_id): Path<Uuid>,
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
+    ensure_row_project_access(
+        state.db.pool(),
+        &auth_user,
+        "construction_platform_logs",
+        log_id,
+    )
+    .await?;
+    ensure_optional_body_project_access(state.db.pool(), &auth_user, &body).await?;
     ensure_json_object_if_present(&body, "payload")?;
     update_row(
         state.db.pool(),
@@ -6236,8 +8053,16 @@ pub async fn update_platform_log(
 
 pub async fn delete_platform_log(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(log_id): Path<Uuid>,
 ) -> ApiResult<()> {
+    ensure_row_project_access(
+        state.db.pool(),
+        &auth_user,
+        "construction_platform_logs",
+        log_id,
+    )
+    .await?;
     soft_delete_row(
         state.db.pool(),
         "construction_platform_logs",
@@ -8574,6 +10399,61 @@ fn push_accessible_project_scope(
         .push(")");
 }
 
+async fn ensure_body_project_access(
+    pool: &sqlx::PgPool,
+    auth_user: &AuthUser,
+    body: &Value,
+) -> Result<Uuid, ApiError> {
+    let object = body
+        .as_object()
+        .ok_or_else(|| invalid_input("Request body must be a JSON object"))?;
+    let project_id = required_uuid_from_object(object, "project_id")?;
+    ensure_project_access(pool, auth_user, project_id).await?;
+    Ok(project_id)
+}
+
+async fn ensure_optional_body_project_access(
+    pool: &sqlx::PgPool,
+    auth_user: &AuthUser,
+    body: &Value,
+) -> Result<(), ApiError> {
+    let Some(object) = body.as_object() else {
+        return Err(invalid_input("Request body must be a JSON object"));
+    };
+    if object.contains_key("project_id") {
+        let project_id = required_uuid_from_object(object, "project_id")?;
+        ensure_project_access(pool, auth_user, project_id).await?;
+    }
+    Ok(())
+}
+
+async fn ensure_row_project_access(
+    pool: &sqlx::PgPool,
+    auth_user: &AuthUser,
+    table: &'static str,
+    id: Uuid,
+) -> Result<Uuid, ApiError> {
+    let table = match table {
+        "construction_platform_configs" => "construction_platform_configs",
+        "construction_platform_logs" => "construction_platform_logs",
+        _ => return Err(not_found()),
+    };
+    let mut query = QueryBuilder::<Postgres>::new("SELECT project_id FROM ");
+    query
+        .push(table)
+        .push(" WHERE id = ")
+        .push_bind(id)
+        .push(" AND is_deleted = FALSE");
+    let project_id = query
+        .build_query_scalar::<Uuid>()
+        .fetch_optional(pool)
+        .await
+        .map_err(db_error)?
+        .ok_or_else(not_found)?;
+    ensure_project_access(pool, auth_user, project_id).await?;
+    Ok(project_id)
+}
+
 async fn ensure_project_access(
     pool: &sqlx::PgPool,
     auth_user: &AuthUser,
@@ -8740,16 +10620,17 @@ async fn list_team_rows_page(
                                 WHEN r.is_manage_team OR r.work_type = 1001 THEN 'ignored'
                                 WHEN latest_job.id IS NULL THEN 'not_reported'
                                 WHEN latest_job.status IN ('success', 'completed') THEN 'success'
-                                WHEN latest_job.status IN ('failed', 'dead_letter', 'cancelled') THEN 'failed'
-                                ELSE 'pending'
+                                ELSE 'failed'
                             END,
                             'failure_reason', CASE
                                 WHEN r.is_manage_team OR r.work_type = 1001 THEN NULL
-                                WHEN latest_job.status IN ('failed', 'dead_letter', 'cancelled')
+                                WHEN latest_job.id IS NOT NULL
+                                     AND latest_job.status NOT IN ('success', 'completed')
                                     THEN COALESCE(
                                         NULLIF(latest_job.last_error, ''),
                                         latest_job.response_payload ->> 'message',
-                                        latest_job.response_payload ->> 'msg'
+                                        latest_job.response_payload ->> 'msg',
+                                        '上报未完成，请修正上报'
                                     )
                                 ELSE NULL
                             END,
@@ -8773,6 +10654,7 @@ async fn list_team_rows_page(
                               job.platform_code = config.platform_type
                               OR (config.platform_type = 'ningbo_housing' AND job.platform_code = 'zhenhai')
                           )
+                          AND job.status NOT IN ('pending', 'processing')
                         ORDER BY job.created_at DESC, job.id DESC
                         LIMIT 1
                     ) latest_job ON TRUE
@@ -8824,8 +10706,7 @@ async fn team_reporting_summary(pool: &sqlx::PgPool, project_id: Uuid) -> Result
                     WHEN team.is_manage_team OR team.work_type = 1001 THEN 'ignored'
                     WHEN team.id IS NULL OR latest_job.id IS NULL THEN 'not_reported'
                     WHEN latest_job.status IN ('success', 'completed') THEN 'success'
-                    WHEN latest_job.status IN ('failed', 'dead_letter', 'cancelled') THEN 'failed'
-                    ELSE 'pending'
+                    ELSE 'failed'
                 END AS reporting_status
             FROM construction_platform_configs config
             LEFT JOIN construction_teams team
@@ -8841,6 +10722,7 @@ async fn team_reporting_summary(pool: &sqlx::PgPool, project_id: Uuid) -> Result
                       job.platform_code = config.platform_type
                       OR (config.platform_type = 'ningbo_housing' AND job.platform_code = 'zhenhai')
                   )
+                  AND job.status NOT IN ('pending', 'processing')
                 ORDER BY job.created_at DESC, job.id DESC
                 LIMIT 1
             ) latest_job ON TRUE
@@ -9187,6 +11069,10 @@ fn normalize_worker_body(body: Value, default_entry_time: bool) -> Result<Value,
         .cloned()
         .ok_or_else(|| invalid_input("Request body must be a JSON object"))?;
 
+    if default_entry_time || object.contains_key("phone") {
+        validate_worker_phone(&object)?;
+    }
+    validate_worker_work_type(&object, default_entry_time)?;
     if default_entry_time {
         validate_worker_create_body(&object)?;
     }
@@ -9204,20 +11090,46 @@ fn normalize_worker_body(body: Value, default_entry_time: bool) -> Result<Value,
     Ok(Value::Object(object))
 }
 
-fn validate_worker_create_body(object: &serde_json::Map<String, Value>) -> Result<(), ApiError> {
+fn validate_worker_phone(object: &serde_json::Map<String, Value>) -> Result<(), ApiError> {
     if is_blank_json_value(object.get("phone")) {
         return Err(invalid_input("请填写手机号"));
     }
+    Ok(())
+}
 
+fn validate_worker_work_type(
+    object: &serde_json::Map<String, Value>,
+    required: bool,
+) -> Result<(), ApiError> {
+    if is_blank_json_value(object.get("work_type")) {
+        return if required {
+            Err(invalid_input("请选择工种"))
+        } else {
+            Ok(())
+        };
+    }
+    let work_type = object
+        .get("work_type")
+        .map(|value| value_to_optional_i64("work_type", value))
+        .transpose()?
+        .flatten()
+        .ok_or_else(|| invalid_input("请选择工种"))?;
+    if !is_official_ningbo_worker_work_type(work_type) {
+        return Err(invalid_input("工种不在宁波市住建工人工种字典中"));
+    }
+    Ok(())
+}
+
+fn is_official_ningbo_worker_work_type(value: i64) -> bool {
+    matches!(value, 1..=11 | 13..=38 | 900 | 1001)
+}
+
+fn validate_worker_create_body(object: &serde_json::Map<String, Value>) -> Result<(), ApiError> {
     let worker_type = object
         .get("worker_type")
         .map(|value| value_to_optional_i64("worker_type", value))
         .transpose()?
         .flatten();
-
-    if worker_type == Some(1) && is_blank_json_value(object.get("work_type")) {
-        return Err(invalid_input("请选择工种"));
-    }
 
     if worker_type == Some(1001) && is_blank_json_value(object.get("manager_type")) {
         return Err(invalid_input("请选择人员类型"));
@@ -9589,6 +11501,20 @@ mod tests {
     }
 
     #[test]
+    fn ningbo_worker_types_reject_legacy_non_dictionary_value() {
+        for value in [1, 6, 11, 13, 38, 900, 1001] {
+            assert!(is_official_ningbo_worker_work_type(value));
+        }
+        assert!(!is_official_ningbo_worker_work_type(12));
+        assert!(!is_official_ningbo_worker_work_type(0));
+    }
+
+    #[test]
+    fn worker_update_cannot_clear_required_phone() {
+        assert!(normalize_worker_body(serde_json::json!({ "phone": "" }), false).is_err());
+    }
+
+    #[test]
     fn trusted_docx_image_base_restricts_origin_and_path() {
         let trusted = TrustedImageBase::parse("https://cdn.example.test/wx").unwrap();
 
@@ -9688,6 +11614,17 @@ mod tests {
     }
 
     #[test]
+    fn module_list_params_accepts_platform_type_filter() {
+        let uri: Uri = "/api/v1/admin/platform-logs?platform_type=ningbo_housing"
+            .parse()
+            .expect("valid uri");
+
+        let params = module_list_params(&uri).expect("valid params");
+
+        assert_eq!(params.platform_type.as_deref(), Some("ningbo_housing"));
+    }
+
+    #[test]
     fn worker_issue_fields_compare_normalized_device_payload_fields() {
         let before = WorkerIssueFields {
             name: Some(" leo ".to_string()),
@@ -9713,7 +11650,7 @@ mod tests {
 
         assert_eq!(before.issue_action_after_change(&same), None);
         assert_eq!(before.issue_action_after_change(&changed), Some("update"));
-        assert_eq!(before.issue_action_after_change(&left_site), None);
+        assert_eq!(before.issue_action_after_change(&left_site), Some("delete"));
         assert_eq!(
             left_site.issue_action_after_change(&changed),
             Some("update")

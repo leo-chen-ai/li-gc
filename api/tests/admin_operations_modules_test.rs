@@ -147,6 +147,8 @@ async fn create_project_unit_team_worker(
             "name": "洪林飞",
             "gender": 1,
             "phone": "13900001111",
+            "worker_type": 1,
+            "work_type": 10,
             "work_status": 1
         }),
     )

@@ -43,6 +43,7 @@ async fn main() -> eyre::Result<()> {
     // 8. Start attendance device MQTT worker when MQTT_BROKER_URL is configured
     quax::feature::device_mqtt::worker::spawn_device_mqtt_worker(state.clone());
     quax::feature::device_mqtt::retry::spawn_device_issue_retry_worker(state.clone());
+    quax::feature::integration::outbox_worker::spawn_integration_outbox_workers(state.clone());
 
     // 9. Start server (dual-stack, graceful shutdown)
     server::serve(state).await

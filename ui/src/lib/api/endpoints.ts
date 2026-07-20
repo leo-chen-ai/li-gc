@@ -30,9 +30,13 @@ export const API_ENDPOINTS = {
     PROJECT_UNIT: (projectId: string, unitId: string) =>
       `/management/projects/${projectId}/units/${unitId}`,
     PROJECT_TEAMS: (projectId: string) => `/management/projects/${projectId}/teams`,
+    PROJECT_TEAMS_REPAIR_REPORTING: (projectId: string) =>
+      `/management/projects/${projectId}/teams/reporting/repair`,
     PROJECT_TEAM: (projectId: string, teamId: string) =>
       `/management/projects/${projectId}/teams/${teamId}`,
     PROJECT_WORKERS: (projectId: string) => `/management/projects/${projectId}/workers`,
+    PROJECT_WORKERS_REPAIR_REPORTING: (projectId: string) =>
+      `/management/projects/${projectId}/workers/reporting/repair`,
     PROJECT_WORKERS_EXPORT: (projectId: string) =>
       `/management/projects/${projectId}/workers/export`,
     PROJECT_WORKER: (projectId: string, workerId: string) =>
@@ -89,9 +93,13 @@ export const API_ENDPOINTS = {
     PROJECT_UNIT: (projectId: string, unitId: string) =>
       `/admin/projects/${projectId}/units/${unitId}`,
     PROJECT_TEAMS: (projectId: string) => `/admin/projects/${projectId}/teams`,
+    PROJECT_TEAMS_REPAIR_REPORTING: (projectId: string) =>
+      `/admin/projects/${projectId}/teams/reporting/repair`,
     PROJECT_TEAM: (projectId: string, teamId: string) =>
       `/admin/projects/${projectId}/teams/${teamId}`,
     PROJECT_WORKERS: (projectId: string) => `/admin/projects/${projectId}/workers`,
+    PROJECT_WORKERS_REPAIR_REPORTING: (projectId: string) =>
+      `/admin/projects/${projectId}/workers/reporting/repair`,
     PROJECT_WORKERS_EXPORT: (projectId: string) =>
       `/admin/projects/${projectId}/workers/export`,
     PROJECT_WORKER: (projectId: string, workerId: string) =>
