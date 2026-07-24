@@ -35,13 +35,17 @@ import { useCreateUser } from "@/features/admin/hooks/use-create-user";
 import { useUpdateUserRole } from "@/features/admin/hooks/use-update-user-role";
 import { useUpdateUserProjects } from "@/features/admin/hooks/use-update-user-projects";
 import { useDeleteUser, useResetUserPassword } from "@/features/admin/hooks/use-user-actions";
+import { useRolesList } from "@/features/admin/hooks/use-roles";
 import { useProjectOptionsQuery } from "@/features/projects/hooks/use-construction-projects";
 import { toast } from "sonner";
-import type { ManagedProject, UserWithTimestamps } from "@/features/admin/types/admin-types";
+import type { AdminRole, ManagedProject, UserWithTimestamps } from "@/features/admin/types/admin-types";
 import { UsersTable, type DialogType } from "./UsersTable";
 
-const roleLabel = (role: "admin" | "user" | null) =>
-  role === "admin" ? "系统管理员" : "普通用户";
+const roleLabel = (role: string | null, roles: AdminRole[]) => {
+  if (!role) return "未选择角色";
+  return roles.find((item) => item.code === role)?.name
+    ?? (role === "admin" ? "系统管理员" : role === "user" ? "普通用户" : role);
+};
 
 const DEFAULT_NEW_USER_PASSWORD = "888888";
 
@@ -53,6 +57,7 @@ interface CreatedUserCredential {
 
 export function UsersManagement() {
   const { data: users, isLoading } = useUsersList();
+  const { data: roles = [], isLoading: areRolesLoading } = useRolesList();
   const { mutate: updateRole } = useUpdateUserRole();
   const createUser = useCreateUser();
   const updateProjects = useUpdateUserProjects();
@@ -61,12 +66,12 @@ export function UsersManagement() {
 
   const [dialogType, setDialogType] = useState<DialogType>(null);
   const [selectedUser, setSelectedUser] = useState<UserWithTimestamps | null>(null);
-  const [newRole, setNewRole] = useState<"admin" | "user" | null>(null);
+  const [newRole, setNewRole] = useState<string | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [newUserForm, setNewUserForm] = useState({
     name: "",
     username: "",
-    role: "user" as "admin" | "user",
+    role: "user",
     projectIds: [] as string[],
   });
   const [createdCredential, setCreatedCredential] = useState<CreatedUserCredential | null>(null);
@@ -76,7 +81,7 @@ export function UsersManagement() {
 
   const displayedUsers = users || [];
 
-  const handleRoleChange = (user: UserWithTimestamps, role: "admin" | "user") => {
+  const handleRoleChange = (user: UserWithTimestamps, role: string) => {
     setSelectedUser(user);
     setNewRole(role);
     setDialogType("role");
@@ -105,7 +110,7 @@ export function UsersManagement() {
       { userId: selectedUser.id, role: newRole },
       {
         onSuccess: () => {
-          toast.success(`已将 ${selectedUser.name} 调整为${roleLabel(newRole)}`);
+          toast.success(`已将 ${selectedUser.name} 调整为${roleLabel(newRole, roles)}`);
           setDialogType(null);
           setSelectedUser(null);
           setNewRole(null);
@@ -246,7 +251,7 @@ export function UsersManagement() {
           description: (
             <>
               确定将 <strong>{selectedUser?.name}</strong> 的角色调整为{" "}
-              <Badge variant={newRole === "admin" ? "destructive" : "default"}>{roleLabel(newRole)}</Badge> 吗？
+              <Badge variant={newRole === "admin" ? "destructive" : "default"}>{roleLabel(newRole, roles)}</Badge> 吗？
             </>
           ),
           action: handleConfirmRoleChange,
@@ -312,6 +317,7 @@ export function UsersManagement() {
 
       <UsersTable
         users={displayedUsers}
+        roles={roles}
         isLoading={isLoading}
         onRoleChange={handleRoleChange}
         onResetPassword={handleResetPassword}
@@ -352,15 +358,21 @@ export function UsersManagement() {
               <Select
                 value={newUserForm.role}
                 onValueChange={(value) =>
-                  setNewUserForm((form) => ({ ...form, role: value as "admin" | "user" }))
+                  setNewUserForm((form) => ({ ...form, role: value }))
                 }
               >
                 <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="user">普通用户</SelectItem>
-                  <SelectItem value="admin">系统管理员</SelectItem>
+                  {roles.map((role) => (
+                    <SelectItem key={role.id} value={role.code}>
+                      {role.name}
+                    </SelectItem>
+                  ))}
+                  {areRolesLoading ? (
+                    <SelectItem value="__loading" disabled>角色加载中...</SelectItem>
+                  ) : null}
                 </SelectContent>
               </Select>
             </div>

@@ -16,7 +16,7 @@ export interface CreateAdminUserRequest {
   name: string;
   email?: string;
   username?: string;
-  role: "admin" | "user";
+  role: string;
   password: string;
   project_ids: string[];
 }

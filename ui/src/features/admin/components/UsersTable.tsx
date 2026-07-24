@@ -42,6 +42,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
   DropdownMenuCheckboxItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
   Table,
@@ -52,11 +55,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useAuthUser } from "@/stores/use-auth-store";
-import type { UserWithTimestamps } from "@/features/admin/types/admin-types";
+import type { AdminRole, UserWithTimestamps } from "@/features/admin/types/admin-types";
 
 export type DialogType = "role" | "block" | "reset" | "delete" | null;
 
-const roleLabel = (role: string) => (role === "admin" ? "系统管理员" : "普通用户");
+const roleLabel = (role: string, roles: AdminRole[]) =>
+  roles.find((item) => item.code === role)?.name
+  ?? (role === "admin" ? "系统管理员" : role === "user" ? "普通用户" : role);
 
 const columnLabels: Record<string, string> = {
   name: "用户",
@@ -67,8 +72,9 @@ const columnLabels: Record<string, string> = {
 
 interface UsersTableProps {
   users: UserWithTimestamps[] | undefined;
+  roles: AdminRole[];
   isLoading: boolean;
-  onRoleChange: (user: UserWithTimestamps, newRole: "admin" | "user") => void;
+  onRoleChange: (user: UserWithTimestamps, newRole: string) => void;
   onResetPassword: (user: UserWithTimestamps) => void;
   onBlockAccount: (user: UserWithTimestamps) => void;
   onDeleteAccount: (user: UserWithTimestamps) => void;
@@ -79,6 +85,7 @@ interface UsersTableProps {
 
 export function UsersTable({
   users,
+  roles,
   isLoading,
   onRoleChange,
   onResetPassword,
@@ -178,7 +185,7 @@ export function UsersTable({
         return (
           <Badge variant={role === "admin" ? "destructive" : "default"} className="gap-1">
             {role === "admin" ? <Shield className="h-3 w-3" /> : <User className="h-3 w-3" />}
-            {roleLabel(role)}
+            {roleLabel(role, roles)}
           </Badge>
         );
       },
@@ -238,22 +245,23 @@ export function UsersTable({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
-              {user.role !== "admin" ? (
-                <DropdownMenuItem
-                  onClick={() => onRoleChange(user, "admin")}
-                >
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger disabled={isSelf}>
                   <Shield className="mr-2 h-4 w-4" />
-                  设为系统管理员
-                </DropdownMenuItem>
-              ) : (
-                <DropdownMenuItem
-                  onClick={() => onRoleChange(user, "user")}
-                  disabled={isSelf}
-                >
-                  <User className="mr-2 h-4 w-4" />
-                  {isSelf ? "不能调整自己" : "设为普通用户"}
-                </DropdownMenuItem>
-              )}
+                  {isSelf ? "不能调整自己" : "调整角色"}
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="max-h-72 min-w-44 overflow-y-auto">
+                  {roles.map((role) => (
+                    <DropdownMenuItem
+                      key={role.id}
+                      disabled={role.code === user.role}
+                      onClick={() => onRoleChange(user, role.code)}
+                    >
+                      {role.name}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => onManageProjects(user)}>
                 <FolderKanban className="mr-2 h-4 w-4" />
