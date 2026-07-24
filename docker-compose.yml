@@ -128,12 +128,18 @@ services:
     env_file:
       - ./api/.env
     environment:
+      RUST_ENV: production
       DATABASE_URL: ${DATABASE_URL:-postgres://quax:secret@postgres:5432/quax_db}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       NATS_URL: ${NATS_URL:-nats://nats:4222}
       MQTT_BROKER_URL: ${MQTT_BROKER_URL:-mqtt://emqx:1883}
+      REPORT_FORWARD_CREDENTIAL_KEY: ${REPORT_FORWARD_CREDENTIAL_KEY:-local-report-forward-key-change-me-32-chars}
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
+      UPLOAD_DIR: ${UPLOAD_DIR:-/data/artifacts}
     ports:
       - "8080:8080"
+    volumes:
+      - report_worker_data:/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
@@ -155,6 +161,35 @@ services:
         required: false
     networks:
       - quax_net
+    profiles:
+      - full
+
+  # ===========================================================================
+  # Data Reporting Browser Worker
+  # ===========================================================================
+  # Run one local browser worker with:
+  #   docker compose --profile full up -d report-worker
+  # The database advisory lock enforces the global maximum of one job.
+  report-worker:
+    build:
+      context: ./report-worker
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgres://quax:secret@postgres:5432/quax_db}
+      REPORT_FORWARD_CREDENTIAL_KEY: ${REPORT_FORWARD_CREDENTIAL_KEY:-local-report-forward-key-change-me-32-chars}
+      REPORT_FORWARD_POLL_SECONDS: "5"
+      REPORT_FORWARD_HEARTBEAT_SECONDS: "30"
+    volumes:
+      - report_worker_data:/data
+    shm_size: 256mb
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - quax_net
+    profiles:
+      - full
 
   # ===========================================================================
   # Frontend (Production Build)
@@ -262,6 +297,7 @@ volumes:
   emqx_data:
   emqx_log:
   pgadmin_data:
+  report_worker_data:
   caddy_data:
   caddy_config:
 

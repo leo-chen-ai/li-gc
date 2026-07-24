@@ -223,3 +223,11 @@ Review 重点：
 - 是否有漏测场景。
 - 是否有安全、并发、兼容性、回滚风险。
 - 是否引入不必要复杂度。
+## 数据报送模块本地验证与发布规则
+
+- 开发、排障和测试“新中源 → 浙江政务网”数据报送模块时，默认先在本机 Docker 中运行 API、UI 和 `report-worker`；数据库按当前联调约定连接 K3s PostgreSQL，不要直接用 K3s Worker 反复试错。
+- 本地 API 创建的任务必须带 `worker_target=local`，由设置了 `REPORT_FORWARD_WORKER_TARGET=local` 的本地 Docker worker 领取；K3s worker 使用 `worker_target=k3s`。两边可以同时运行但不能互相领取任务，数据库仍保证全局最多执行 1 个 Chromium 任务。
+- 本地 API 必须设置 `BACKGROUND_WORKERS_ENABLED=false`，避免本地进程消费考勤、MQTT、宁波同步等与数据报送无关的生产队列；K3s 正式 API 保持默认启用。
+- 每次改动先在本地完成对应单元测试/构建，并实际跑通所改阶段（登录、下载、转换、目标站登录或上传）。确认日志和结果无误后，才执行 `deploy/k3s/deploy-local.sh --auto` 更新 K3s。
+- 发布 K3s 后必须检查 Deployment/Pod 状态、API 健康检查和一条关键流程；不要把 K3s 当作日常调试环境。
+- 排查运行缓慢时，先按任务事件时间戳拆分排队、Chromium 启动、源站登录、项目检索、文件下载、OSS 留存、转换、短信验证码等待、目标站上传各阶段，再依据明确瓶颈修改。

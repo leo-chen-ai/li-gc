@@ -1,6 +1,7 @@
 export type MenuPermissionKey =
   | "admin_overview"
   | "projects"
+  | "data_reporting"
   | "enterprise_customers"
   | "enterprise_own_entities"
   | "enterprise_projects"
@@ -37,7 +38,7 @@ export type MenuPermissionKey =
 export interface MenuPermission {
   key: MenuPermissionKey;
   name: string;
-  group: "工作台" | "劳务管理" | "施工管理" | "人员管理" | "企业经营管理" | "系统";
+  group: "工作台" | "数据报送" | "劳务管理" | "施工管理" | "人员管理" | "企业经营管理" | "系统";
   path: string;
   description: string;
 }
@@ -61,6 +62,13 @@ export const menuPermissions: MenuPermission[] = [
     group: "劳务管理",
     path: "/app/admin/projects",
     description: "查看项目台账、单位、班组、人员和考勤",
+  },
+  {
+    key: "data_reporting",
+    name: "数据报送中心",
+    group: "数据报送",
+    path: "/app/admin/data-reporting",
+    description: "配置新中源下载、转换和浙江政务网上报任务，查看测试与运行数据",
   },
   {
     key: "enterprise_customers",
@@ -295,6 +303,7 @@ export function getMenuKeysForUserRole(
   const adminDefaults: MenuPermissionKey[] = [
     "admin_overview",
     "projects",
+    "data_reporting",
     "enterprise_customers",
     "enterprise_own_entities",
     "enterprise_projects",

@@ -1,0 +1,90 @@
+name: shanhuai-report-local
+
+services:
+  shanhuai-api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    image: shanhuai-report-local-api
+    environment:
+      # The Docker image contains the release binary, which deliberately requires
+      # production mode even though the stack is only bound to localhost.
+      RUST_ENV: production
+      SERVER_PORT: "8080"
+      DATABASE_URL: ${REPORT_LOCAL_DATABASE_URL}
+      REDIS_URL: ${REPORT_LOCAL_REDIS_URL}
+      NATS_URL: ${REPORT_LOCAL_NATS_URL}
+      MQTT_BROKER_URL: ${REPORT_LOCAL_MQTT_URL}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      REPORT_FORWARD_CREDENTIAL_KEY: ${REPORT_FORWARD_CREDENTIAL_KEY}
+      REPORT_FORWARD_RUN_TARGET: local
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-jdcloud_oss}
+      UPLOAD_DIR: /data/artifacts
+      UPLOAD_BASE_URL: ${UPLOAD_BASE_URL:-/api/uploads}
+      JD_OSS_ACCESS_KEY_ID: ${JD_OSS_ACCESS_KEY_ID}
+      JD_OSS_ACCESS_KEY_SECRET: ${JD_OSS_ACCESS_KEY_SECRET}
+      JD_OSS_BUCKET: ${JD_OSS_BUCKET}
+      JD_OSS_ENDPOINT: ${JD_OSS_ENDPOINT}
+      JD_OSS_PUBLIC_BASE_URL: ${JD_OSS_PUBLIC_BASE_URL}
+      JD_OSS_REGION: ${JD_OSS_REGION}
+      COOKIE_SECURE: "false"
+      COOKIE_SAMESITE: Lax
+      CORS_ALLOWED_ORIGINS: http://localhost:8073,http://127.0.0.1:8073
+      BOOTSTRAP_ENABLED: "false"
+      BACKGROUND_WORKERS_ENABLED: "false"
+    ports:
+      - "8080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - report_local_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  report-worker:
+    build:
+      context: ./report-worker
+      dockerfile: Dockerfile
+    image: shanhuai-report-local-worker
+    environment:
+      DATABASE_URL: ${REPORT_LOCAL_DATABASE_URL}
+      REPORT_FORWARD_CREDENTIAL_KEY: ${REPORT_FORWARD_CREDENTIAL_KEY}
+      REPORT_FORWARD_WORKER_TARGET: local
+      REPORT_FORWARD_POLL_SECONDS: "2"
+      REPORT_FORWARD_HEARTBEAT_SECONDS: "15"
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-jdcloud_oss}
+      JD_OSS_ACCESS_KEY_ID: ${JD_OSS_ACCESS_KEY_ID}
+      JD_OSS_ACCESS_KEY_SECRET: ${JD_OSS_ACCESS_KEY_SECRET}
+      JD_OSS_BUCKET: ${JD_OSS_BUCKET}
+      JD_OSS_ENDPOINT: ${JD_OSS_ENDPOINT}
+      JD_OSS_PUBLIC_BASE_URL: ${JD_OSS_PUBLIC_BASE_URL}
+      JD_OSS_REGION: ${JD_OSS_REGION}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - report_local_data:/data
+    shm_size: 256mb
+    restart: unless-stopped
+    depends_on:
+      shanhuai-api:
+        condition: service_healthy
+
+  ui:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+    image: shanhuai-report-local-ui
+    ports:
+      - "8073:80"
+    restart: unless-stopped
+    depends_on:
+      shanhuai-api:
+        condition: service_healthy
+
+volumes:
+  report_local_data:

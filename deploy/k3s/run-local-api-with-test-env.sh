@@ -46,6 +46,7 @@ export REDIS_URL="$(secret REDIS_URL | sed -E "s/@?[^/@:]+:6379/@127.0.0.1:$REDI
 export MQTT_BROKER_URL="mqtt://127.0.0.1:$MQTT_PORT"
 export JWT_ACCESS_SECRET="$(secret JWT_ACCESS_SECRET)"
 export JWT_REFRESH_SECRET="$(secret JWT_REFRESH_SECRET)"
+export REPORT_FORWARD_CREDENTIAL_KEY="$(secret REPORT_FORWARD_CREDENTIAL_KEY)"
 export SERVER_PORT="${SERVER_PORT:-8080}"
 
 echo "Starting local API on http://127.0.0.1:$SERVER_PORT with K3s test database, Redis, and MQTT"

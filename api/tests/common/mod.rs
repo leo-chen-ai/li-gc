@@ -31,6 +31,10 @@ fn setup_env() {
             std::env::set_var("JWT_ACCESS_SECRET", "test-access-secret-min-32-chars-ok!!");
             std::env::set_var("JWT_REFRESH_SECRET", "test-refresh-secret-min-32-chars-ok!");
             std::env::set_var("CORS_ALLOWED_ORIGINS", "*");
+            std::env::set_var(
+                "REPORT_FORWARD_CREDENTIAL_KEY",
+                "test-report-forward-credential-key-32-chars",
+            );
             // Placeholder — Config::load() requires it, but we use from_pool() instead
             std::env::set_var("DATABASE_URL", "postgres://test:test@localhost/placeholder");
         }

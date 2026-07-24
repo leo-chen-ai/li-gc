@@ -11629,13 +11629,13 @@ mod tests {
         let before = WorkerIssueFields {
             name: Some(" leo ".to_string()),
             id_card: None,
-            phone: Some(" 15852906247 ".to_string()),
+            phone: Some(" 13245234123 ".to_string()),
             avatar: Some(" https://example.test/a.jpg ".to_string()),
             work_status: Some(1),
         };
         let same = WorkerIssueFields {
             name: Some("leo".to_string()),
-            phone: Some("15852906247".to_string()),
+            phone: Some("13245234123".to_string()),
             avatar: Some("https://example.test/a.jpg".to_string()),
             ..before.clone()
         };

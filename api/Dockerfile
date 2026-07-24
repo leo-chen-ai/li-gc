@@ -32,7 +32,13 @@ RUN cargo chef prepare --recipe-path recipe.json
 FROM chef AS builder
 ARG CARGO_BUILD_JOBS=1
 ENV CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS
-RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+RUN sed -i \
+      -e 's|deb.debian.org/debian|mirrors.aliyun.com/debian|g' \
+      -e 's|security.debian.org/debian-security|mirrors.aliyun.com/debian-security|g' \
+      /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
+    && apt-get install -y pkg-config libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 # Restore deps from cache — only re-runs when Cargo.toml/Cargo.lock changes
 COPY --from=planner /app/recipe.json recipe.json
@@ -49,7 +55,11 @@ FROM debian:bookworm-slim AS runtime
 
 WORKDIR /app
 
-RUN apt-get update \
+RUN sed -i \
+      -e 's|deb.debian.org/debian|mirrors.aliyun.com/debian|g' \
+      -e 's|security.debian.org/debian-security|mirrors.aliyun.com/debian-security|g' \
+      /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
     && apt-get install -y ca-certificates libssl3 curl \
     && rm -rf /var/lib/apt/lists/*
 

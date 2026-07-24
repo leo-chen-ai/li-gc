@@ -1,0 +1,8 @@
+psycopg[binary]>=3.2,<4
+boto3>=1.35,<2
+openpyxl>=3.1,<4
+selenium>=4.20,<5
+ddddocr>=1.5,<2
+pyyaml>=6,<7
+Pillow>=10,<13
+lark-oapi>=1.4,<2

@@ -1,0 +1,278 @@
+import hashlib
+import sys
+from datetime import date, timedelta
+from pathlib import Path
+
+import openpyxl
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import report_worker.executor as executor_module
+import converter
+import target_login
+import uploader
+from report_worker.executor import RunExecutor, limit_converted_file_rows, parse_converted_items, redact
+from report_worker.storage import ArtifactStorage
+
+
+def test_parse_converted_items(tmp_path):
+    path = tmp_path / "converted.xlsx"
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "sheet1"
+    sheet.append(["模板"])
+    sheet.append(["姓名", "性别", "户籍", "证件", "号码", "手机号", "地址"])
+    sheet.append(["张三", "男", "省外农村户口", "居民身份证", "330203199001011234", "13800000000", "宁波"])
+    workbook.save(path)
+
+    items = parse_converted_items(path)
+
+    assert len(items) == 1
+    assert items[0]["name"] == "张三"
+    assert items[0]["fingerprint"] == hashlib.sha256(b"330203199001011234").hexdigest()
+
+
+def test_converter_filters_by_latest_entry_days(monkeypatch, tmp_path):
+    source = tmp_path / "测试项目工人花名册.xlsx"
+    template = tmp_path / "template.xlsx"
+    output = tmp_path / "output"
+    output.mkdir()
+    today = date.today()
+
+    source_book = openpyxl.Workbook()
+    source_sheet = source_book.active
+    source_sheet.title = "花名册"
+    source_sheet.append(["标题"])
+    source_sheet.append(["项目"])
+    source_sheet.append(["序号", "姓名", "工种", "性别", "班组", "身份证号码", "地址", "银行", "账号", "开户地", "电话", "工资", "进场时间", "最新进场时间"])
+    source_sheet.append([1, "张三", "工人", "男", "一组", "330203199001011234", "宁波", "", "", "", "13800000000", "", "", today.strftime("%Y-%m-%d 08:00")])
+    source_sheet.append([2, "李四", "工人", "男", "一组", "330203199001011235", "宁波", "", "", "", "13800000001", "", "", (today - timedelta(days=31)).strftime("%Y-%m-%d 08:00")])
+    source_sheet.append([3, "王五", "工人", "男", "一组", "330203199001011236", "宁波", "", "", "", "13800000002", "", "", ""])
+    source_book.save(source)
+
+    template_book = openpyxl.Workbook()
+    template_book.active.title = "sheet1"
+    template_book.save(template)
+
+    converted = converter.convert_file(source, template, output, latest_entry_days=30)
+    result_book = openpyxl.load_workbook(converted, data_only=True)
+    try:
+        result_sheet = result_book["sheet1"]
+        assert result_sheet.cell(3, 1).value == "张三"
+        assert result_sheet.cell(4, 1).value is None
+    finally:
+        result_book.close()
+
+
+def test_downloaded_source_file_is_filtered_in_place(tmp_path):
+    source = tmp_path / "测试项目工人花名册.xlsx"
+    today = date.today()
+    source_book = openpyxl.Workbook()
+    source_sheet = source_book.active
+    source_sheet.title = "花名册"
+    source_sheet.append(["标题"])
+    source_sheet.append(["项目"])
+    source_sheet.append(["序号", "姓名", "工种", "性别", "班组", "身份证号码", "地址", "银行", "账号", "开户地", "电话", "工资", "进场时间", "最新进场时间"])
+    source_sheet.append([1, "张三", "", "", "", "", "", "", "", "", "", "", "", today.strftime("%Y-%m-%d %H:%M")])
+    source_sheet.append([2, "李四", "", "", "", "", "", "", "", "", "", "", "", (today - timedelta(days=31)).strftime("%Y-%m-%d %H:%M")])
+    source_sheet.append([3, "王五", "", "", "", "", "", "", "", "", "", "", "", ""])
+    source_book.save(source)
+
+    stats = converter.filter_source_file(source, latest_entry_days=30)
+
+    assert stats == {"retained_count": 1, "filtered_count": 2}
+    filtered_book = openpyxl.load_workbook(source, data_only=True)
+    try:
+        filtered_sheet = filtered_book["花名册"]
+        assert filtered_sheet.max_row == 4
+        assert filtered_sheet.cell(4, 2).value == "张三"
+    finally:
+        filtered_book.close()
+
+
+def test_test_upload_workbook_is_limited_to_one_person(tmp_path):
+    path = tmp_path / "converted.xlsx"
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "sheet1"
+    sheet.append(["模板"])
+    sheet.append(["姓名", "性别", "户籍", "证件", "号码", "手机号", "地址"])
+    sheet.append(["张三", "男", "", "", "330203199001011234", "", ""])
+    sheet.append(["李四", "男", "", "", "330203199001011235", "", ""])
+    workbook.save(path)
+
+    retained = limit_converted_file_rows(path, 1)
+
+    assert retained == 1
+    assert [item["name"] for item in parse_converted_items(path)] == ["张三"]
+
+
+def test_batch_result_does_not_collapse_when_one_error_says_existing():
+    result = uploader.normalize_upload_result("177", "1", "部分人员已存在")
+
+    assert result == {
+        "total_rows": 177,
+        "success_rows": 1,
+        "failure_rows": 176,
+        "already_exists": False,
+        "person_details_available": False,
+    }
+
+
+def test_single_existing_person_is_counted_as_success():
+    result = uploader.normalize_upload_result("1", "0", "该人员已存在")
+
+    assert result["success_rows"] == 1
+    assert result["failure_rows"] == 0
+    assert result["already_exists"] is True
+
+
+def test_redact_sensitive_values():
+    value = redact("手机号 13800000000 身份证 330203199001011234 验证码: 123456 code=654321 chat_id: oc_private")
+    assert "13800000000" not in value
+    assert "330203199001011234" not in value
+    assert "123456" not in value
+    assert "654321" not in value
+    assert "oc_private" not in value
+    assert "2026-07-23" in redact("验证码接收时间: 2026-07-23")
+
+
+def test_target_login_propagates_failed_post_login_check(monkeypatch):
+    login = target_login.TargetLogin({
+        "credentials": {"target_site": {"username": "account", "password": "secret"}},
+        "browser": {"headless": True},
+    })
+    for method in (
+        "_init_driver", "_click_login_entry", "_switch_to_login_popup",
+        "_click_legal_person_login", "_click_account_login", "_fill_credentials",
+        "_fill_sms_code", "_confirm_login",
+    ):
+        monkeypatch.setattr(login, method, lambda *args, **kwargs: None)
+    monkeypatch.setattr(login, "_solve_image_captcha", lambda: "abcd")
+    monkeypatch.setattr(login, "_click_login_button", lambda: True)
+    monkeypatch.setattr(login, "_check_captcha_error", lambda: False)
+    monkeypatch.setattr(login, "_check_sms_popup_appeared", lambda: True)
+    monkeypatch.setattr(login, "_wait_for_sms_code", lambda **kwargs: "123456")
+    monkeypatch.setattr(login, "_check_sms_code_error", lambda: False)
+    monkeypatch.setattr(login, "_check_login_success", lambda: False)
+    monkeypatch.setattr(target_login.time, "sleep", lambda *_args: None)
+
+    assert login.login() is False
+
+
+def test_oss_storage_refuses_incomplete_credentials(monkeypatch):
+    monkeypatch.setenv("STORAGE_DRIVER", "jdcloud_oss")
+    for name in (
+        "JD_OSS_BUCKET", "JD_OSS_ENDPOINT", "JD_OSS_ACCESS_KEY_ID",
+        "JD_OSS_ACCESS_KEY_SECRET",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    try:
+        ArtifactStorage()
+    except RuntimeError as error:
+        assert "JD_OSS_BUCKET" in str(error)
+        assert "JD_OSS_ACCESS_KEY_SECRET" in str(error)
+    else:
+        raise AssertionError("incomplete OSS configuration must fail closed")
+
+
+def test_oss_storage_uses_bucket_subdomain(monkeypatch):
+    monkeypatch.setenv("STORAGE_DRIVER", "jdcloud_oss")
+    monkeypatch.setenv("JD_OSS_BUCKET", "shanhuai-gc")
+    monkeypatch.setenv("JD_OSS_ENDPOINT", "s3.cn-east-2.jdcloud-oss.com")
+    monkeypatch.setenv("JD_OSS_ACCESS_KEY_ID", "test-key")
+    monkeypatch.setenv("JD_OSS_ACCESS_KEY_SECRET", "test-secret")
+
+    storage = ArtifactStorage()
+    url = storage.client.generate_presigned_url(
+        "put_object",
+        Params={"Bucket": storage.bucket, "Key": "report-forward/test.xlsx"},
+    )
+
+    assert url.startswith("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/")
+    assert storage.client.meta.config.request_checksum_calculation == "when_required"
+    assert storage.client.meta.config.response_checksum_validation == "when_required"
+
+
+def test_project_filter_only_keeps_exact_configured_names():
+    downloader = executor_module.Downloader.__new__(executor_module.Downloader)
+    downloader.download_settings = {
+        "include_projects": ["测试项目"],
+        "exclude_projects": [],
+    }
+
+    assert downloader._filter_projects(["测试项目", "测试项目二期", "其他项目"]) == ["测试项目"]
+
+
+def test_selected_projects_stop_pagination_after_all_are_processed():
+    downloader = executor_module.Downloader.__new__(executor_module.Downloader)
+    downloader.download_settings = {
+        "include_projects": ["项目甲", "项目乙", "已排除项目"],
+        "exclude_projects": ["已排除项目"],
+    }
+
+    assert downloader._selected_projects_complete({"项目甲"}) is False
+    assert downloader._selected_projects_complete({"项目甲", "项目乙"}) is True
+
+
+def test_login_feedback_does_not_wait_for_absent_optional_messages():
+    class FakeDriver:
+        def __init__(self):
+            self.waits = []
+
+        def implicitly_wait(self, seconds):
+            self.waits.append(seconds)
+
+        def find_elements(self, *_args):
+            return []
+
+    downloader = executor_module.Downloader.__new__(executor_module.Downloader)
+    downloader.driver = FakeDriver()
+
+    assert downloader._login_feedback() == ""
+    assert downloader.driver.waits == [0, 5]
+
+
+def test_upload_with_row_failures_is_partial_success(monkeypatch, tmp_path):
+    class FakeUploader:
+        def __init__(self, _config):
+            pass
+
+        def run(self):
+            return [{
+                "project_name": "测试项目", "status": "validated",
+                "total_rows": 10, "success_rows": 8, "failure_rows": 2,
+            }]
+
+    class FakeRepository:
+        def __init__(self):
+            self.project_update = None
+            self.item_status = None
+
+        def update_project(self, _project_id, **fields):
+            self.project_update = fields
+
+        def mark_project_items(self, _project_id, status, *_args):
+            self.item_status = status
+
+        def upsert_project(self, *_args):
+            return "project-id"
+
+    monkeypatch.setattr(executor_module, "Uploader", FakeUploader)
+    executor = RunExecutor.__new__(RunExecutor)
+    executor.config = {"browser": {"error_dir": str(tmp_path / "errors")}}
+    executor.config_id = "config-id"
+    executor.run_id = "run-id"
+    executor.project_ids = {"测试项目": "project-id"}
+    executor.successful_projects = 0
+    executor.failed_projects = 0
+    executor.repo = FakeRepository()
+    executor.stage = lambda *_args, **_kwargs: None
+
+    executor._upload()
+
+    assert executor.successful_projects == 1
+    assert executor.failed_projects == 1
+    assert executor.repo.project_update["status"] == "partial_success"
+    assert executor.repo.item_status == "result_unknown"

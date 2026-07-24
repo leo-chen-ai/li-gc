@@ -7,17 +7,18 @@ ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env.deploy}"
 usage() {
   cat <<'EOF'
 Usage:
-  deploy/k3s/deploy-local.sh [--auto|--all|--api|--ui] [--skip-migrate] [--tag TAG] [--apply-manifest] [--dry-run]
+  deploy/k3s/deploy-local.sh [--auto|--all|--api|--ui|--worker] [--skip-migrate] [--tag TAG] [--apply-manifest] [--dry-run]
 
 Default:
   --auto  Compare current Git HEAD with the image tag deployed in K3s, then build
-          and roll out only changed API/UI parts.
+          and roll out only changed API/UI/report-worker parts.
 
 Examples:
   deploy/k3s/setup-local-ssh.sh
   deploy/k3s/deploy-local.sh --auto
   deploy/k3s/deploy-local.sh --api
   deploy/k3s/deploy-local.sh --ui
+  deploy/k3s/deploy-local.sh --worker
   deploy/k3s/deploy-local.sh --all --skip-migrate
   deploy/k3s/deploy-local.sh --auto --dry-run
 
@@ -59,6 +60,7 @@ DEPLOYED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 AUTO=true
 DEPLOY_API=false
 DEPLOY_UI=false
+DEPLOY_WORKER=false
 SKIP_MIGRATE=false
 APPLY_MANIFEST=false
 DRY_RUN=false
@@ -73,6 +75,7 @@ while [ "$#" -gt 0 ]; do
       AUTO=false
       DEPLOY_API=true
       DEPLOY_UI=true
+      DEPLOY_WORKER=true
       ;;
     --api)
       AUTO=false
@@ -82,6 +85,10 @@ while [ "$#" -gt 0 ]; do
       AUTO=false
       DEPLOY_UI=true
       ;;
+    --worker)
+      AUTO=false
+      DEPLOY_WORKER=true
+      ;;
     --skip-migrate)
       SKIP_MIGRATE=true
       ;;
@@ -89,6 +96,7 @@ while [ "$#" -gt 0 ]; do
       APPLY_MANIFEST=true
       DEPLOY_API=true
       DEPLOY_UI=true
+      DEPLOY_WORKER=true
       ;;
     --dry-run)
       DRY_RUN=true
@@ -167,7 +175,7 @@ fi
 if [ -z "$TAG" ]; then
   GIT_SHA="$(git -C "$ROOT_DIR" rev-parse --short=12 HEAD)"
   TAG="$GIT_SHA"
-  if [ -n "$(git -C "$ROOT_DIR" status --porcelain -- api ui deploy/k3s/shanhuai-app.yaml)" ]; then
+  if [ -n "$(git -C "$ROOT_DIR" status --porcelain -- api ui report-worker deploy/k3s/shanhuai-app.yaml)" ]; then
     TAG="$TAG-dirty-$(date +%Y%m%d%H%M%S)"
   fi
 else
@@ -177,6 +185,7 @@ fi
 API_IMAGE="shanhuai-api:local-$TAG"
 MIGRATE_IMAGE="shanhuai-migrate:local-$TAG"
 UI_IMAGE="shanhuai-ui:local-$TAG"
+WORKER_IMAGE="shanhuai-report-worker:local-$TAG"
 
 deployment_exists() {
   ssh_remote "k3s kubectl -n '$NAMESPACE' get deployment/$1 >/dev/null 2>&1"
@@ -227,17 +236,20 @@ has_changes_since() {
 }
 
 select_changed_parts() {
-  if ! deployment_exists shanhuai-api || ! deployment_exists shanhuai-ui; then
+  if ! deployment_exists shanhuai-api || ! deployment_exists shanhuai-ui || ! deployment_exists shanhuai-report-worker; then
     APPLY_MANIFEST=true
     DEPLOY_API=true
     DEPLOY_UI=true
+    DEPLOY_WORKER=true
     return
   fi
 
   local api_base
   local ui_base
+  local worker_base
   api_base="$(image_git_sha "$(deployment_image shanhuai-api)")"
   ui_base="$(image_git_sha "$(deployment_image shanhuai-ui)")"
+  worker_base="$(image_git_sha "$(deployment_image shanhuai-report-worker)")"
 
   if has_changes_since "$api_base" api deploy/k3s/shanhuai-app.yaml; then
     DEPLOY_API=true
@@ -247,10 +259,15 @@ select_changed_parts() {
     DEPLOY_UI=true
   fi
 
+  if has_changes_since "$worker_base" report-worker deploy/k3s/shanhuai-app.yaml; then
+    DEPLOY_WORKER=true
+  fi
+
   if has_changes_since "$api_base" deploy/k3s/shanhuai-app.yaml || has_changes_since "$ui_base" deploy/k3s/shanhuai-app.yaml; then
     APPLY_MANIFEST=true
     DEPLOY_API=true
     DEPLOY_UI=true
+    DEPLOY_WORKER=true
   fi
 }
 
@@ -313,18 +330,24 @@ import_image() {
 }
 
 ensure_manifests() {
-  if [ "$APPLY_MANIFEST" = true ] || ! ssh_remote "k3s kubectl -n '$NAMESPACE' get deployment/shanhuai-api deployment/shanhuai-ui >/dev/null 2>&1"; then
+  if [ "$APPLY_MANIFEST" = true ] || ! ssh_remote "k3s kubectl -n '$NAMESPACE' get deployment/shanhuai-api deployment/shanhuai-ui deployment/shanhuai-report-worker >/dev/null 2>&1"; then
     echo "Applying K3s app manifest..."
     scp "${SCP_OPTS[@]}" "$ROOT_DIR/deploy/k3s/shanhuai-app.yaml" "$REMOTE:/tmp/shanhuai-app.yaml" >/dev/null
     ssh_remote "k3s kubectl apply -f /tmp/shanhuai-app.yaml"
     DEPLOY_API=true
     DEPLOY_UI=true
+    DEPLOY_WORKER=true
   fi
 
   if ! ssh_remote "k3s kubectl -n '$NAMESPACE' get secret/shanhuai-app-secret >/dev/null 2>&1"; then
     echo "Missing Kubernetes secret: $NAMESPACE/shanhuai-app-secret" >&2
     echo "Create it from the server-side /srv/shanhuai/secrets/infra.env before deploying the app." >&2
     exit 1
+  fi
+
+  if ! ssh_remote "test -n \"\$(k3s kubectl -n '$NAMESPACE' get secret/shanhuai-app-secret -o jsonpath='{.data.REPORT_FORWARD_CREDENTIAL_KEY}' 2>/dev/null)\""; then
+    echo "Generating REPORT_FORWARD_CREDENTIAL_KEY in $NAMESPACE/shanhuai-app-secret..."
+    ssh_remote "key=\$(openssl rand -hex 32) && k3s kubectl -n '$NAMESPACE' patch secret shanhuai-app-secret --type merge -p \"{\\\"stringData\\\":{\\\"REPORT_FORWARD_CREDENTIAL_KEY\\\":\\\"\$key\\\"}}\" >/dev/null"
   fi
 }
 
@@ -488,6 +511,13 @@ rollout_ui() {
   ssh_remote "k3s kubectl -n '$NAMESPACE' rollout status deployment/shanhuai-ui --timeout=5m"
 }
 
+rollout_worker() {
+  echo "Rolling out report Worker: $WORKER_IMAGE"
+  ssh_remote "k3s kubectl -n '$NAMESPACE' set image deployment/shanhuai-report-worker worker='$WORKER_IMAGE'"
+  annotate_deployment shanhuai-report-worker "$WORKER_IMAGE"
+  ssh_remote "k3s kubectl -n '$NAMESPACE' rollout status deployment/shanhuai-report-worker --timeout=10m"
+}
+
 verify_public_endpoint() {
   echo "Verifying $VERIFY_WEB_URL ..."
   curl -fsS --connect-timeout 10 "$VERIFY_WEB_URL/" >/dev/null
@@ -499,14 +529,15 @@ if [ "$AUTO" = true ]; then
   select_changed_parts
 fi
 
-if [ "$DEPLOY_API" = false ] && [ "$DEPLOY_UI" = false ]; then
-  echo "No API/UI changes detected. Nothing to deploy."
+if [ "$DEPLOY_API" = false ] && [ "$DEPLOY_UI" = false ] && [ "$DEPLOY_WORKER" = false ]; then
+  echo "No API/UI/report-worker changes detected. Nothing to deploy."
   exit 0
 fi
 
 echo "Target: $REMOTE / namespace=$NAMESPACE / platform=$DEPLOY_PLATFORM / tag=$TAG"
 echo "Deploy API: $DEPLOY_API"
 echo "Deploy UI : $DEPLOY_UI"
+echo "Deploy Worker: $DEPLOY_WORKER"
 
 if [ "$DRY_RUN" = true ]; then
   echo "Dry run only. No build/import/rollout was performed."
@@ -539,6 +570,14 @@ if [ "$DEPLOY_UI" = true ]; then
     "$ROOT_DIR/ui"
   import_image "$UI_IMAGE"
   rollout_ui
+fi
+
+
+if [ "$DEPLOY_WORKER" = true ]; then
+  build_image "$WORKER_IMAGE" report-worker \
+    "$ROOT_DIR/report-worker"
+  import_image "$WORKER_IMAGE"
+  rollout_worker
 fi
 
 verify_public_endpoint

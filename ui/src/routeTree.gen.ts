@@ -49,6 +49,7 @@ import { Route as AppAdminEnterpriseIssuedInvoicesRouteImport } from './routes/a
 import { Route as AppAdminEnterpriseCustomersRouteImport } from './routes/app/admin/enterprise-customers'
 import { Route as AppAdminEnterpriseCollectionsRouteImport } from './routes/app/admin/enterprise-collections'
 import { Route as AppAdminEmergencyManagementRouteImport } from './routes/app/admin/emergency-management'
+import { Route as AppAdminDataReportingRouteImport } from './routes/app/admin/data-reporting'
 import { Route as AppAdminContractTemplatesRouteImport } from './routes/app/admin/contract-templates'
 import { Route as AppAdminConstructionSiteRouteImport } from './routes/app/admin/construction-site'
 import { Route as AppAdminAttendanceDevicesRouteImport } from './routes/app/admin/attendance-devices'
@@ -279,6 +280,11 @@ const AppAdminEmergencyManagementRoute =
     path: '/emergency-management',
     getParentRoute: () => AppAdminRoute,
   } as any)
+const AppAdminDataReportingRoute = AppAdminDataReportingRouteImport.update({
+  id: '/data-reporting',
+  path: '/data-reporting',
+  getParentRoute: () => AppAdminRoute,
+} as any)
 const AppAdminContractTemplatesRoute =
   AppAdminContractTemplatesRouteImport.update({
     id: '/contract-templates',
@@ -347,6 +353,7 @@ export interface FileRoutesByFullPath {
   '/app/admin/attendance-devices': typeof AppAdminAttendanceDevicesRoute
   '/app/admin/construction-site': typeof AppAdminConstructionSiteRoute
   '/app/admin/contract-templates': typeof AppAdminContractTemplatesRoute
+  '/app/admin/data-reporting': typeof AppAdminDataReportingRoute
   '/app/admin/emergency-management': typeof AppAdminEmergencyManagementRoute
   '/app/admin/enterprise-collections': typeof AppAdminEnterpriseCollectionsRoute
   '/app/admin/enterprise-customers': typeof AppAdminEnterpriseCustomersRouteWithChildren
@@ -395,6 +402,7 @@ export interface FileRoutesByTo {
   '/app/admin/attendance-devices': typeof AppAdminAttendanceDevicesRoute
   '/app/admin/construction-site': typeof AppAdminConstructionSiteRoute
   '/app/admin/contract-templates': typeof AppAdminContractTemplatesRoute
+  '/app/admin/data-reporting': typeof AppAdminDataReportingRoute
   '/app/admin/emergency-management': typeof AppAdminEmergencyManagementRoute
   '/app/admin/enterprise-collections': typeof AppAdminEnterpriseCollectionsRoute
   '/app/admin/enterprise-customers': typeof AppAdminEnterpriseCustomersRouteWithChildren
@@ -447,6 +455,7 @@ export interface FileRoutesById {
   '/app/admin/attendance-devices': typeof AppAdminAttendanceDevicesRoute
   '/app/admin/construction-site': typeof AppAdminConstructionSiteRoute
   '/app/admin/contract-templates': typeof AppAdminContractTemplatesRoute
+  '/app/admin/data-reporting': typeof AppAdminDataReportingRoute
   '/app/admin/emergency-management': typeof AppAdminEmergencyManagementRoute
   '/app/admin/enterprise-collections': typeof AppAdminEnterpriseCollectionsRoute
   '/app/admin/enterprise-customers': typeof AppAdminEnterpriseCustomersRouteWithChildren
@@ -500,6 +509,7 @@ export interface FileRouteTypes {
     | '/app/admin/attendance-devices'
     | '/app/admin/construction-site'
     | '/app/admin/contract-templates'
+    | '/app/admin/data-reporting'
     | '/app/admin/emergency-management'
     | '/app/admin/enterprise-collections'
     | '/app/admin/enterprise-customers'
@@ -548,6 +558,7 @@ export interface FileRouteTypes {
     | '/app/admin/attendance-devices'
     | '/app/admin/construction-site'
     | '/app/admin/contract-templates'
+    | '/app/admin/data-reporting'
     | '/app/admin/emergency-management'
     | '/app/admin/enterprise-collections'
     | '/app/admin/enterprise-customers'
@@ -599,6 +610,7 @@ export interface FileRouteTypes {
     | '/app/admin/attendance-devices'
     | '/app/admin/construction-site'
     | '/app/admin/contract-templates'
+    | '/app/admin/data-reporting'
     | '/app/admin/emergency-management'
     | '/app/admin/enterprise-collections'
     | '/app/admin/enterprise-customers'
@@ -924,6 +936,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdminEmergencyManagementRouteImport
       parentRoute: typeof AppAdminRoute
     }
+    '/app/admin/data-reporting': {
+      id: '/app/admin/data-reporting'
+      path: '/data-reporting'
+      fullPath: '/app/admin/data-reporting'
+      preLoaderRoute: typeof AppAdminDataReportingRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
     '/app/admin/contract-templates': {
       id: '/app/admin/contract-templates'
       path: '/contract-templates'
@@ -1038,6 +1057,7 @@ interface AppAdminRouteChildren {
   AppAdminAttendanceDevicesRoute: typeof AppAdminAttendanceDevicesRoute
   AppAdminConstructionSiteRoute: typeof AppAdminConstructionSiteRoute
   AppAdminContractTemplatesRoute: typeof AppAdminContractTemplatesRoute
+  AppAdminDataReportingRoute: typeof AppAdminDataReportingRoute
   AppAdminEmergencyManagementRoute: typeof AppAdminEmergencyManagementRoute
   AppAdminEnterpriseCollectionsRoute: typeof AppAdminEnterpriseCollectionsRoute
   AppAdminEnterpriseCustomersRoute: typeof AppAdminEnterpriseCustomersRouteWithChildren
@@ -1077,6 +1097,7 @@ const AppAdminRouteChildren: AppAdminRouteChildren = {
   AppAdminAttendanceDevicesRoute: AppAdminAttendanceDevicesRoute,
   AppAdminConstructionSiteRoute: AppAdminConstructionSiteRoute,
   AppAdminContractTemplatesRoute: AppAdminContractTemplatesRoute,
+  AppAdminDataReportingRoute: AppAdminDataReportingRoute,
   AppAdminEmergencyManagementRoute: AppAdminEmergencyManagementRoute,
   AppAdminEnterpriseCollectionsRoute: AppAdminEnterpriseCollectionsRoute,
   AppAdminEnterpriseCustomersRoute:

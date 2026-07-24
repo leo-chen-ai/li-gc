@@ -86,6 +86,7 @@ async fn test_admin_can_list_seeded_roles_with_menu_permissions() {
         admin["menu_keys"],
         json!([
             "projects",
+            "data_reporting",
             "users",
             "roles",
             "attendance_devices",

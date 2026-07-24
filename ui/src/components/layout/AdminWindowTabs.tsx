@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 const staticTitles: Record<string, string> = {
   "/app/admin": "首页总览",
   "/app/admin/projects": "项目列表",
+  "/app/admin/data-reporting": "数据报送中心",
   "/app/admin/contract-templates": "劳务分包合同模板",
   "/app/admin/work-hour-configs": "工时配置",
   "/app/admin/platform-integrations": "平台对接管理",

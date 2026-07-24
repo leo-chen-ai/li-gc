@@ -20,6 +20,7 @@ import {
   Link2,
   Package,
   ReceiptText,
+  Send,
   ShieldAlert,
   ShieldCheck,
   Siren,
@@ -77,6 +78,12 @@ export function AppSidebar() {
       title: "工作台",
       items: [
         { key: "admin_overview", title: "首页总览", href: "/app/admin", icon: BarChart3, enabled: isAdmin },
+      ],
+    },
+    {
+      title: "数据报送",
+      items: [
+        { key: "data_reporting", title: "数据报送中心", href: "/app/admin/data-reporting", icon: Send, enabled: isAdmin },
       ],
     },
     {

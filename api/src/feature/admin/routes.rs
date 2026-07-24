@@ -9,7 +9,8 @@ use crate::{
 };
 
 use super::{
-    attendance_alert, construction, enterprise, log, registration_lead, role, stats, upload, user,
+    attendance_alert, construction, enterprise, log, registration_lead, report_forwarding, role,
+    stats, upload, user,
 };
 
 pub fn admin_routes() -> Router<AppState> {
@@ -27,6 +28,44 @@ pub fn admin_routes() -> Router<AppState> {
         )
         .route("/attendance-alert-logs", get(attendance_alert::list_logs))
         .route("/attendance-alerts/run", post(attendance_alert::run_alerts))
+        .route("/report-forward/summary", get(report_forwarding::summary))
+        .route(
+            "/report-forward/configs",
+            get(report_forwarding::list_configs).post(report_forwarding::create_config),
+        )
+        .route(
+            "/report-forward/configs/{config_id}",
+            get(report_forwarding::get_config)
+                .put(report_forwarding::update_config)
+                .patch(report_forwarding::update_config)
+                .delete(report_forwarding::delete_config),
+        )
+        .route(
+            "/report-forward/configs/{config_id}/runs",
+            post(report_forwarding::create_run),
+        )
+        .route("/report-forward/runs", get(report_forwarding::list_runs))
+        .route(
+            "/report-forward/runs/{run_id}",
+            get(report_forwarding::get_run),
+        )
+        .route(
+            "/report-forward/runs/{run_id}/cancel",
+            post(report_forwarding::cancel_run),
+        )
+        .route(
+            "/report-forward/runs/{run_id}/retry",
+            post(report_forwarding::retry_run),
+        )
+        .route("/report-forward/items", get(report_forwarding::list_items))
+        .route(
+            "/report-forward/runs/{run_id}/items/export",
+            get(report_forwarding::export_items),
+        )
+        .route(
+            "/report-forward/artifacts/{artifact_id}/download",
+            get(report_forwarding::download_artifact),
+        )
         .route(
             "/managed-attendance/photo-groups",
             get(construction::handler::list_managed_attendance_photo_groups)

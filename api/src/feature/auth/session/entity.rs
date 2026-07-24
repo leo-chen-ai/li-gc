@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use std::net::{IpAddr, Ipv4Addr};
 use uuid::Uuid;
 
 /// User session entity for device tracking
@@ -41,7 +42,16 @@ impl DeviceInfo {
             name,
             device_type,
             user_agent: user_agent.to_string(),
-            ip_address: ip.to_string(),
+            // Proxies append addresses to X-Forwarded-For. PostgreSQL's inet
+            // type accepts one address, not the full comma-separated chain.
+            // Keep the first valid hop (the original client) and use an
+            // explicit safe fallback for malformed or missing headers.
+            ip_address: ip
+                .split(',')
+                .filter_map(|value| value.trim().parse::<IpAddr>().ok())
+                .next()
+                .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
+                .to_string(),
         }
     }
 
@@ -88,6 +98,23 @@ impl DeviceInfo {
 
         let name = format!("{} on {}", browser, os);
         (name, device_type)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DeviceInfo;
+
+    #[test]
+    fn forwarded_for_chain_uses_first_valid_address() {
+        let info = DeviceInfo::from_user_agent("Mozilla/5.0", "203.0.113.8, 10.42.0.9");
+        assert_eq!(info.ip_address, "203.0.113.8");
+    }
+
+    #[test]
+    fn malformed_address_falls_back_to_unspecified() {
+        let info = DeviceInfo::from_user_agent("Mozilla/5.0", "unknown");
+        assert_eq!(info.ip_address, "0.0.0.0");
     }
 }
 

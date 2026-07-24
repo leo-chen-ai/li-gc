@@ -217,6 +217,7 @@ const ROLE_SELECT_BASE_SQL: &str = r#"
                     CASE rmp.menu_key
                         WHEN 'admin_overview' THEN 5
                         WHEN 'projects' THEN 10
+                        WHEN 'data_reporting' THEN 15
                         WHEN 'enterprise_customers' THEN 20
                         WHEN 'enterprise_own_entities' THEN 21
                         WHEN 'enterprise_projects' THEN 22

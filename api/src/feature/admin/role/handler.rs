@@ -13,6 +13,7 @@ use crate::{
 const ALLOWED_MENU_KEYS: &[&str] = &[
     "admin_overview",
     "projects",
+    "data_reporting",
     "enterprise_customers",
     "enterprise_own_entities",
     "enterprise_projects",

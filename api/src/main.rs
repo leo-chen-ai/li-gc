@@ -37,14 +37,27 @@ async fn main() -> eyre::Result<()> {
     // 6. Bootstrap (create initial admin if needed)
     bootstrap::bootstrap(&state.db, &config).await?;
 
-    // 7. Start attendance alert scheduler (daily 14:00 Asia/Shanghai)
-    quax::feature::admin::attendance_alert::spawn_attendance_alert_scheduler(state.clone());
+    // 7. Local report-forwarding development shares the K3s database but must
+    // not consume unrelated production queues or subscribe to production MQTT.
+    let background_workers_enabled = std::env::var("BACKGROUND_WORKERS_ENABLED")
+        .map(|value| {
+            !matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "0" | "false" | "off"
+            )
+        })
+        .unwrap_or(true);
+    if background_workers_enabled {
+        // Attendance alert scheduler (daily 14:00 Asia/Shanghai).
+        quax::feature::admin::attendance_alert::spawn_attendance_alert_scheduler(state.clone());
+        // Attendance device MQTT consumers and integration outbox consumers.
+        quax::feature::device_mqtt::worker::spawn_device_mqtt_worker(state.clone());
+        quax::feature::device_mqtt::retry::spawn_device_issue_retry_worker(state.clone());
+        quax::feature::integration::outbox_worker::spawn_integration_outbox_workers(state.clone());
+    } else {
+        info!("background workers disabled for this API process");
+    }
 
-    // 8. Start attendance device MQTT worker when MQTT_BROKER_URL is configured
-    quax::feature::device_mqtt::worker::spawn_device_mqtt_worker(state.clone());
-    quax::feature::device_mqtt::retry::spawn_device_issue_retry_worker(state.clone());
-    quax::feature::integration::outbox_worker::spawn_integration_outbox_workers(state.clone());
-
-    // 9. Start server (dual-stack, graceful shutdown)
+    // 8. Start server (dual-stack, graceful shutdown)
     server::serve(state).await
 }
