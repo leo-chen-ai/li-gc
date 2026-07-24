@@ -324,3 +324,39 @@ class Repository:
                 """,
                 (status, status, error, run_id),
             )
+
+    def schedule_retry(self, run_id, error, max_retries):
+        with self.connection() as conn, conn.transaction():
+            row = conn.execute(
+                """SELECT attempt_count,cancel_requested FROM report_forward_runs
+                   WHERE id=%s FOR UPDATE""",
+                (run_id,),
+            ).fetchone()
+            if (
+                not row
+                or row["cancel_requested"]
+                or row["attempt_count"] > max_retries
+            ):
+                return False
+            retry_number = row["attempt_count"]
+            conn.execute(
+                """UPDATE report_forward_runs SET status='pending',current_stage='retry_wait',
+                   error_summary=%s,claimed_by=NULL,lease_expires_at=NULL,completed_at=NULL,
+                   updated_at=NOW() WHERE id=%s""",
+                (error, run_id),
+            )
+            conn.execute(
+                """INSERT INTO report_forward_events
+                   (run_id,stage,level,message,context)
+                   VALUES (%s,'retry_wait','warning',%s,%s)""",
+                (
+                    run_id,
+                    f"执行异常，准备自动重试 {retry_number}/{max_retries}",
+                    Jsonb({
+                        "retry_number": retry_number,
+                        "max_retries": max_retries,
+                        "error": error,
+                    }),
+                ),
+            )
+            return True

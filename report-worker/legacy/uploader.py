@@ -189,6 +189,12 @@ class Uploader:
 
         timeout_minutes = config['browser'].get('upload_timeout', 15)
         self.upload_timeout = int(timeout_minutes) * 60
+        configured_retries = config.get('runtime', {}).get('max_execution_retries', 3)
+        try:
+            configured_retries = int(configured_retries)
+        except (TypeError, ValueError):
+            configured_retries = 3
+        self.max_execution_retries = min(max(configured_retries, 0), 3)
 
     def _init_driver(self):
         if self.driver is not None:
@@ -263,21 +269,59 @@ class Uploader:
         for f in xlsx_files:
             logger.info(f"  - {f}")
 
+        session_needs_restart = False
         for idx, filename in enumerate(xlsx_files):
             file_path = os.path.join(self.output_dir, filename)
             project_name = extract_project_name(file_path)
             logger.info(f"[{idx + 1}/{len(xlsx_files)}] 开始上传: {project_name}")
 
-            try:
-                result = self._upload_single_file(file_path, project_name, is_first=(idx == 0))
-                self.results.append(result)
-            except Exception as e:
-                self._log_page_state("上传失败现场")
-                logger.error(f"上传失败 {project_name}: {e}", exc_info=True)
-                self.results.append({'project_name': project_name, 'status': 'failed', 'error': str(e)})
+            for attempt in range(self.max_execution_retries + 1):
+                try:
+                    restarted = False
+                    if session_needs_restart:
+                        self._restart_session()
+                        session_needs_restart = False
+                        restarted = True
+                    result = self._upload_single_file(
+                        file_path,
+                        project_name,
+                        is_first=(idx == 0 or attempt > 0 or restarted),
+                    )
+                    self.results.append(result)
+                    break
+                except Exception as e:
+                    self._log_page_state("上传失败现场")
+                    session_needs_restart = True
+                    if attempt < self.max_execution_retries:
+                        logger.warning(
+                            "上传执行异常 %s，准备自动重试 %s/%s: %s",
+                            project_name,
+                            attempt + 1,
+                            self.max_execution_retries,
+                            e,
+                            exc_info=True,
+                        )
+                        continue
+                    logger.error(f"上传失败 {project_name}: {e}", exc_info=True)
+                    self.results.append({
+                        'project_name': project_name,
+                        'status': 'failed',
+                        'error': str(e),
+                    })
 
         logger.info(f"全部上传完成，失败/错误文件: {len(self.error_files)}")
         return self.results
+
+    def _restart_session(self):
+        if not self.own_driver:
+            raise RuntimeError("外部浏览器会话无法自动重启")
+        self.close()
+        self.driver = None
+        self.long_wait = None
+        self.short_wait = None
+        self.target = None
+        self._init_driver()
+        self._login()
 
     def _upload_single_file(self, file_path, project_name, is_first=False):
         if is_first:

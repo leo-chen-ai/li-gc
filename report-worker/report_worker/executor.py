@@ -31,6 +31,14 @@ class CancelledError(RuntimeError):
     pass
 
 
+def max_execution_retries():
+    try:
+        configured = int(os.environ.get("REPORT_FORWARD_MAX_RETRIES", "3"))
+    except ValueError:
+        configured = 3
+    return min(max(configured, 0), 3)
+
+
 def redact(value):
     value = str(value)
     value = re.sub(r"(?<!\d)1\d{10}(?!\d)", lambda m: m.group(0)[:3] + "****" + m.group(0)[-4:], value)
@@ -123,7 +131,10 @@ class RunExecutor:
             },
             "feishu": verification,
             "email": {"enabled": False},
-            "runtime": {"validate_only": self.mode == "test_upload_validate"},
+            "runtime": {
+                "validate_only": self.mode == "test_upload_validate",
+                "max_execution_retries": max_execution_retries(),
+            },
         }
         config_path = self.work_dir / "runtime-config.yaml"
         config_path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
@@ -178,7 +189,12 @@ class RunExecutor:
             return "cancelled"
         except Exception as error:
             logging.exception("任务执行失败")
-            self.repo.complete(self.run_id, "failed", redact(error))
+            safe_error = redact(error)
+            if self.repo.schedule_retry(
+                self.run_id, safe_error, max_execution_retries()
+            ):
+                return "retrying"
+            self.repo.complete(self.run_id, "failed", safe_error)
             return "failed"
         finally:
             self.temp.cleanup()

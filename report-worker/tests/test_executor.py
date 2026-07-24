@@ -1,5 +1,6 @@
 import hashlib
 import sys
+from contextlib import contextmanager, nullcontext
 from datetime import date, timedelta
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -12,7 +13,14 @@ import report_worker.executor as executor_module
 import converter
 import target_login
 import uploader
-from report_worker.executor import RunExecutor, limit_converted_file_rows, parse_converted_items, redact
+from report_worker.executor import (
+    RunExecutor,
+    limit_converted_file_rows,
+    max_execution_retries,
+    parse_converted_items,
+    redact,
+)
+from report_worker.repository import Repository
 from report_worker.storage import ArtifactStorage
 
 
@@ -389,3 +397,156 @@ def test_upload_maps_error_detail_people_and_infers_success(monkeypatch, tmp_pat
         "person_name": None,
         "error": "身份证 330203********1234 校验失败",
     }]
+
+
+def test_max_execution_retries_defaults_to_three_and_is_capped(monkeypatch):
+    monkeypatch.delenv("REPORT_FORWARD_MAX_RETRIES", raising=False)
+    assert max_execution_retries() == 3
+    monkeypatch.setenv("REPORT_FORWARD_MAX_RETRIES", "99")
+    assert max_execution_retries() == 3
+    monkeypatch.setenv("REPORT_FORWARD_MAX_RETRIES", "1")
+    assert max_execution_retries() == 1
+    monkeypatch.setenv("REPORT_FORWARD_MAX_RETRIES", "invalid")
+    assert max_execution_retries() == 3
+
+
+def test_executor_requeues_mid_run_exception(monkeypatch):
+    class FakeRepository:
+        def __init__(self):
+            self.retry = None
+
+        def event(self, *_args, **_kwargs):
+            pass
+
+        def schedule_retry(self, run_id, error, max_retries):
+            self.retry = (run_id, error, max_retries)
+            return True
+
+        def complete(self, *_args):
+            raise AssertionError("a retryable run must not be completed as failed")
+
+    class FakeTemp:
+        def cleanup(self):
+            pass
+
+    monkeypatch.setenv("REPORT_FORWARD_MAX_RETRIES", "3")
+    executor = RunExecutor.__new__(RunExecutor)
+    executor.repo = FakeRepository()
+    executor.run_id = "run-id"
+    executor.mode = "production"
+    executor.context = {"stage": "download", "project_id": None}
+    executor.temp = FakeTemp()
+    executor._download = lambda: (_ for _ in ()).throw(RuntimeError("network error"))
+
+    assert executor.execute() == "retrying"
+    assert executor.repo.retry == ("run-id", "network error", 3)
+
+
+def test_executor_finishes_failed_after_retry_limit(monkeypatch):
+    class FakeRepository:
+        def __init__(self):
+            self.completed = None
+
+        def event(self, *_args, **_kwargs):
+            pass
+
+        def schedule_retry(self, *_args):
+            return False
+
+        def complete(self, run_id, status, error):
+            self.completed = (run_id, status, error)
+
+    class FakeTemp:
+        def cleanup(self):
+            pass
+
+    executor = RunExecutor.__new__(RunExecutor)
+    executor.repo = FakeRepository()
+    executor.run_id = "run-id"
+    executor.mode = "production"
+    executor.context = {"stage": "download", "project_id": None}
+    executor.temp = FakeTemp()
+    executor._download = lambda: (_ for _ in ()).throw(RuntimeError("still failing"))
+
+    assert executor.execute() == "failed"
+    assert executor.repo.completed == ("run-id", "failed", "still failing")
+
+
+def test_repository_only_schedules_three_retries():
+    class FakeResult:
+        def __init__(self, row=None):
+            self.row = row
+
+        def fetchone(self):
+            return self.row
+
+    class FakeConnection:
+        def __init__(self, attempt_count):
+            self.attempt_count = attempt_count
+            self.calls = []
+
+        def transaction(self):
+            return nullcontext()
+
+        def execute(self, sql, params):
+            self.calls.append((sql, params))
+            if "SELECT attempt_count" in sql:
+                return FakeResult({
+                    "attempt_count": self.attempt_count,
+                    "cancel_requested": False,
+                })
+            return FakeResult()
+
+    def repository_for(attempt_count):
+        repo = Repository.__new__(Repository)
+        connection = FakeConnection(attempt_count)
+
+        @contextmanager
+        def open_connection():
+            yield connection
+
+        repo.connection = open_connection
+        return repo, connection
+
+    repo, connection = repository_for(3)
+    assert repo.schedule_retry("run-id", "temporary error", 3) is True
+    assert any("status='pending'" in sql for sql, _params in connection.calls)
+
+    repo, connection = repository_for(4)
+    assert repo.schedule_retry("run-id", "last error", 3) is False
+    assert not any("status='pending'" in sql for sql, _params in connection.calls)
+
+
+def test_uploader_retries_only_the_failed_project(monkeypatch, tmp_path):
+    output_root = tmp_path / "output"
+    dated_output = output_root / executor_module.datetime.now().strftime("%Y%m%d")
+    dated_output.mkdir(parents=True)
+    (dated_output / "测试项目.xlsx").touch()
+    config = {
+        "browser": {
+            "output_dir": str(output_root),
+            "error_dir": str(tmp_path / "errors"),
+            "upload_timeout": 1,
+        },
+        "runtime": {"max_execution_retries": 3},
+    }
+    instance = uploader.Uploader(config, driver=object())
+    attempts = []
+    restarts = []
+
+    def upload_file(_path, project_name, is_first=False):
+        attempts.append((project_name, is_first))
+        if len(attempts) == 1:
+            raise RuntimeError("browser disconnected")
+        return {"project_name": project_name, "status": "success"}
+
+    monkeypatch.setattr(instance, "_upload_single_file", upload_file)
+    monkeypatch.setattr(instance, "_log_page_state", lambda *_args: None)
+    monkeypatch.setattr(instance, "_restart_session", lambda: restarts.append(True))
+
+    results = instance._do_uploads()
+
+    assert len(attempts) == 2
+    assert attempts[1][1] is True
+    assert restarts == [True]
+    assert results[0]["status"] == "success"
