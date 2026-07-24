@@ -50,6 +50,11 @@ pub async fn build_test_app() -> (Router, ContainerAsync<Postgres>) {
 }
 
 pub async fn build_test_app_with_pool() -> (Router, PgPool, ContainerAsync<Postgres>) {
+    let (state, pool, container) = build_test_state_with_pool().await;
+    (app_routes(state), pool, container)
+}
+
+pub async fn build_test_state_with_pool() -> (AppState, PgPool, ContainerAsync<Postgres>) {
     setup_env();
 
     let container = Postgres::default()
@@ -75,7 +80,7 @@ pub async fn build_test_app_with_pool() -> (Router, PgPool, ContainerAsync<Postg
     let db = Database::from_pool(pool.clone());
     let state = AppState::new_for_test(config, db);
 
-    (app_routes(state), pool, container)
+    (state, pool, container)
 }
 
 // ─── Request helpers ──────────────────────────────────────────────────────────

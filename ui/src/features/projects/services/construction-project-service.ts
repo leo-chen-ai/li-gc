@@ -54,6 +54,7 @@ import type {
   ConstructionWorker,
   ConstructionWorkerListResponse,
   ConstructionWorkerPayload,
+  JsonValue,
 } from "../types/construction-types";
 
 function unwrapData<T>(response: ApiResponse<T>, fallbackMessage: string): T {
@@ -764,6 +765,10 @@ export const constructionProjectService = {
 
   deletePlatformLog: async (logId: string): Promise<void> => {
     await apiClient.delete<ApiResponse<void>>(API_ENDPOINTS.ADMIN.PLATFORM_LOG(logId));
+  },
+
+  retryPlatformJob: async (jobId: string): Promise<void> => {
+    await apiClient.post<ApiResponse<JsonValue>>(API_ENDPOINTS.ADMIN.PLATFORM_JOB_RETRY(jobId));
   },
 
   getConstructionOverview: async (): Promise<ConstructionOverview> => {

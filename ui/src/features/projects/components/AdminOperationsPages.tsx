@@ -83,12 +83,19 @@ import {
   NINGBO_HOUSING_DEFAULT_BASE_URL,
   NINGBO_HOUSING_PLATFORM_NAME,
   NINGBO_HOUSING_PLATFORM_TYPE,
+  YONGXIN_V2_PLATFORM_NAME,
+  YONGXIN_V2_PLATFORM_TYPE,
   buildNingboHousingConfig,
+  buildYongxinV2Config,
   createNingboHousingConfigForm,
+  createYongxinV2ConfigForm,
   isNingboHousingConfig,
+  isYongxinV2Config,
   parseNingboHousingConfig,
+  parseYongxinV2Config,
   summarizePlatformConfig,
   validateNingboHousingConfig,
+  validateYongxinV2Config,
 } from "@/features/projects/lib/platform-configs";
 import {
   useAllWorkHourConfigsQuery,
@@ -104,6 +111,7 @@ import {
   useDeleteWorkHourConfigMutation,
   usePlatformConfigsQuery,
   usePlatformLogsQuery,
+  useRetryPlatformJobMutation,
   useProjectsQuery,
   useUpdateContractTemplateMutation,
   useUpdatePlatformConfigMutation,
@@ -630,17 +638,20 @@ function PlatformConfigPanel({ filters, setFilters, tabControls }: { filters: Co
   const selectedPlatform = BUILT_IN_PLATFORM_OPTIONS.find((option) => option.value === form.platform_type);
   const openCreate = () => { setEditing(null); setForm(createNingboHousingConfigForm()); setDialogOpen(true); };
   const openEdit = (config: ConstructionPlatformConfig) => {
-    if (!isNingboHousingConfig(config)) {
-      toast.error("当前表单仅支持宁波市住建配置");
+    if (!isNingboHousingConfig(config) && !isYongxinV2Config(config)) {
+      toast.error("当前平台暂未内置配置表单");
       return;
     }
     setEditing(config);
-    setForm(parseNingboHousingConfig(config));
+    setForm(isYongxinV2Config(config) ? parseYongxinV2Config(config) : parseNingboHousingConfig(config));
     setDialogOpen(true);
   };
   const selectPlatform = (platform_type: string) => {
+    const empty = platform_type === YONGXIN_V2_PLATFORM_TYPE
+      ? createYongxinV2ConfigForm()
+      : createNingboHousingConfigForm();
     setForm((current) => ({
-      ...createNingboHousingConfigForm(),
+      ...empty,
       project_id: current.project_id,
       platform_type,
       base_url: platform_type === NINGBO_HOUSING_PLATFORM_TYPE ? NINGBO_HOUSING_DEFAULT_BASE_URL : "",
@@ -650,16 +661,17 @@ function PlatformConfigPanel({ filters, setFilters, tabControls }: { filters: Co
   };
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const validationError = validateNingboHousingConfig(form);
+    const isYongxin = form.platform_type === YONGXIN_V2_PLATFORM_TYPE;
+    const validationError = isYongxin ? validateYongxinV2Config(form) : validateNingboHousingConfig(form);
     if (validationError) {
       toast.error(validationError);
       return;
     }
     const payload: ConstructionPlatformConfigPayload = {
       project_id: form.project_id,
-      platform_name: NINGBO_HOUSING_PLATFORM_NAME,
-      platform_type: NINGBO_HOUSING_PLATFORM_TYPE,
-      config: buildNingboHousingConfig(form),
+      platform_name: isYongxin ? YONGXIN_V2_PLATFORM_NAME : NINGBO_HOUSING_PLATFORM_NAME,
+      platform_type: isYongxin ? YONGXIN_V2_PLATFORM_TYPE : NINGBO_HOUSING_PLATFORM_TYPE,
+      config: isYongxin ? buildYongxinV2Config(form) : buildNingboHousingConfig(form),
       is_enabled: form.is_enabled,
       remark: form.remark.trim() || null,
     };
@@ -762,6 +774,42 @@ function PlatformConfigPanel({ filters, setFilters, tabControls }: { filters: Co
                 </section>
               </> : null}
 
+              {form.platform_type === YONGXIN_V2_PLATFORM_TYPE ? <>
+                <section className="rounded-lg border p-4">
+                  <div className="mb-4">
+                    <div className="text-sm font-semibold text-slate-900">接口凭证</div>
+                    <div className="mt-1 text-xs text-slate-500">凭证由甬薪精管平台提供。测试模式只生成异步任务和日志，不发起真实请求。</div>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <PlatformCredentialField className="md:col-span-2" label="接口地址" value={form.base_url} onChange={(base_url) => setForm((current) => ({ ...current, base_url }))} placeholder="https://平台提供的接口地址/" />
+                    <PlatformCredentialField label="项目对接码" value={form.project_code} onChange={(project_code) => setForm((current) => ({ ...current, project_code }))} autoComplete="off" />
+                    <div className="space-y-2">
+                      <Label>运行模式</Label>
+                      <select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={form.mode} onChange={(event) => setForm((current) => ({ ...current, mode: event.target.value as "test" | "production" }))}>
+                        <option value="test">测试模式（不发真实请求）</option>
+                        <option value="production">正式模式（自动推送）</option>
+                      </select>
+                    </div>
+                    <PlatformCredentialField label="AppKey" value={form.app_key} onChange={(app_key) => setForm((current) => ({ ...current, app_key }))} autoComplete="off" />
+                    <PlatformCredentialField label="AppSecret" value={form.app_secret} onChange={(app_secret) => setForm((current) => ({ ...current, app_secret }))} type="password" autoComplete="new-password" />
+                  </div>
+                </section>
+
+                <section className="rounded-lg border p-4">
+                  <div className="mb-4">
+                    <div className="text-sm font-semibold text-slate-900">异步同步范围</div>
+                    <div className="mt-1 text-xs text-slate-500">每个平台单独排队、限流、重试和记录日志；一个平台失败不会影响本地业务或其他平台。</div>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <CheckboxField label="同步参建单位" checked={form.sync_units} onChange={(sync_units) => setForm((current) => ({ ...current, sync_units }))} />
+                    <CheckboxField label="同步班组" checked={form.sync_teams} onChange={(sync_teams) => setForm((current) => ({ ...current, sync_teams }))} />
+                    <CheckboxField label="同步人员与进退场" checked={form.sync_workers} onChange={(sync_workers) => setForm((current) => ({ ...current, sync_workers }))} />
+                    <CheckboxField label="考勤机数据自动推送" checked={form.sync_attendance} onChange={(sync_attendance) => setForm((current) => ({ ...current, sync_attendance }))} />
+                    <PlatformCredentialField className="md:col-span-2" label="历史考勤补传起始日期（留空则从启用时开始）" value={form.attendance_backfill_from} onChange={(attendance_backfill_from) => setForm((current) => ({ ...current, attendance_backfill_from }))} type="date" required={false} />
+                  </div>
+                </section>
+              </> : null}
+
               <TextareaField label="备注" value={form.remark} onChange={(remark) => setForm((current) => ({ ...current, remark }))} rows={3} />
             </div>
             <DialogFooter className="mt-5"><Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>取消</Button><Button type="submit" disabled={createConfig.isPending || updateConfig.isPending} className="bg-[#0f6b5d] text-white hover:bg-[#0b5148]">{createConfig.isPending || updateConfig.isPending ? "保存中" : "保存配置"}</Button></DialogFooter>
@@ -777,9 +825,11 @@ function PlatformLogPanel({ filters, setFilters, tabControls }: { filters: Const
   const createLog = useCreatePlatformLogMutation();
   const updateLog = useUpdatePlatformLogMutation();
   const deleteLog = useDeletePlatformLogMutation();
+  const retryJob = useRetryPlatformJobMutation();
   const configsQuery = usePlatformConfigsQuery({ project_id: filters.project_id, page: 1, page_size: 100 });
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<ConstructionPlatformLog | null>(null);
+  const [detailLog, setDetailLog] = useState<ConstructionPlatformLog | null>(null);
   const [form, setForm] = useState({ project_id: "", platform_config_id: "", platform_name: "", operation: "人员上传", direction: "push", status: "success", request_count: "1", success_count: "1", failure_count: "0", message: "", payload: "{}" });
   const rows = query.data?.items ?? [];
   const summary = query.data?.summary;
@@ -804,6 +854,11 @@ function PlatformLogPanel({ filters, setFilters, tabControls }: { filters: Const
     } catch (error) { toast.error(error instanceof Error ? error.message : "保存平台日志失败"); }
   };
   const remove = async (log: ConstructionPlatformLog) => { if (!window.confirm(`确认删除日志「${log.operation}」？`)) return; try { await deleteLog.mutateAsync(log.id); toast.success("平台日志已删除"); } catch { toast.error("删除平台日志失败"); } };
+  const retry = async (log: ConstructionPlatformLog) => {
+    if (!window.confirm(`确认重新执行「${log.operation}」？`)) return;
+    try { await retryJob.mutateAsync(log.id); toast.success("任务已重新进入异步队列"); }
+    catch (error) { toast.error(error instanceof Error ? error.message : "任务重试失败"); }
+  };
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-white p-3 shadow-sm">
@@ -814,10 +869,16 @@ function PlatformLogPanel({ filters, setFilters, tabControls }: { filters: Const
       <PlatformLogFilters filters={filters} setFilters={setFilters} platformOptions={platformOptions} />
       <DataTable loading={query.isLoading} colSpan={9} headers={["平台", "项目", "操作", "方向", "状态", "请求/成功/失败", "消息", "时间", "操作"]}>
         {rows.map((row) => (
-          <TableRow key={row.id}><TableCell className="font-medium">{row.platform_name || "-"}</TableCell><TableCell className="max-w-[240px] truncate">{row.project_name || row.project_id}</TableCell><TableCell>{row.operation}</TableCell><TableCell>{row.direction}</TableCell><TableCell><PlatformStatusBadge status={row.status} /></TableCell><TableCell>{row.request_count}/{row.success_count}/{row.failure_count}</TableCell><TableCell className="max-w-[320px] truncate text-xs text-slate-500" title={row.message ?? undefined}>{row.message || "-"}</TableCell><TableCell>{formatDateTime(row.occurred_at)}</TableCell><TableCell className="text-right">{row.source === "system" ? <span className="text-xs text-slate-400">系统日志</span> : <RowActions onEdit={() => openEdit(row)} onDelete={() => void remove(row)} />}</TableCell></TableRow>
+          <TableRow key={row.id}><TableCell className="font-medium">{row.platform_name || "-"}</TableCell><TableCell className="max-w-[240px] truncate">{row.project_name || row.project_id}</TableCell><TableCell>{row.operation}</TableCell><TableCell>{row.direction}</TableCell><TableCell><PlatformStatusBadge status={row.status} /></TableCell><TableCell>{row.request_count}/{row.success_count}/{row.failure_count}</TableCell><TableCell className="max-w-[320px] truncate text-xs text-slate-500" title={row.message ?? undefined}>{row.message || "-"}</TableCell><TableCell>{formatDateTime(row.occurred_at)}</TableCell><TableCell className="text-right">{row.source === "system" ? <div className="inline-flex gap-1"><Button type="button" size="sm" variant="ghost" onClick={() => setDetailLog(row)}>详情</Button>{platformLogPlatformCode(row.payload) === YONGXIN_V2_PLATFORM_TYPE && (row.status === "failed" || row.status === "waiting_data" || row.status === "waiting_media") ? <Button type="button" size="sm" variant="outline" disabled={retryJob.isPending} onClick={() => void retry(row)}><RefreshCw className="mr-1 size-3" />重试</Button> : null}</div> : <RowActions onEdit={() => openEdit(row)} onDelete={() => void remove(row)} />}</TableCell></TableRow>
         ))}
       </DataTable>
       <Pager total={query.data?.total ?? 0} page={filters.page ?? 1} onPageChange={(page) => setFilters((current) => ({ ...current, page }))} />
+      <Dialog open={Boolean(detailLog)} onOpenChange={(open) => { if (!open) setDetailLog(null); }}>
+        <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-4xl">
+          <DialogHeader><DialogTitle>平台任务详情</DialogTitle><DialogDescription>{detailLog ? `${detailLog.platform_name ?? "平台"} · ${detailLog.operation} · ${formatDateTime(detailLog.occurred_at)}` : ""}</DialogDescription></DialogHeader>
+          {detailLog ? <div className="space-y-3"><div className="grid gap-3 rounded-lg border bg-slate-50 p-3 text-sm md:grid-cols-3"><div><span className="text-slate-500">状态：</span><PlatformStatusBadge status={detailLog.status} /></div><div><span className="text-slate-500">请求次数：</span>{detailLog.request_count}</div><div><span className="text-slate-500">消息：</span>{detailLog.message || "-"}</div></div><pre className="max-h-[55vh] overflow-auto rounded-lg bg-slate-950 p-4 text-xs leading-5 text-slate-100">{JSON.stringify(detailLog.payload ?? {}, null, 2)}</pre></div> : null}
+        </DialogContent>
+      </Dialog>
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}><DialogContent className="sm:max-w-4xl"><form onSubmit={submit}><DialogHeader><DialogTitle>{editing ? "编辑平台日志" : "新增平台日志"}</DialogTitle><DialogDescription>用于展示平台推送、上传等交互日志。</DialogDescription></DialogHeader><div className="mt-4 grid gap-4 md:grid-cols-2"><div className="space-y-2"><Label>项目</Label><ProjectSearchSelect value={form.project_id} onValueChange={(project_id) => setForm((current) => ({ ...current, project_id }))} /></div><div className="space-y-2"><Label>平台配置</Label><select className="h-10 w-full rounded-md border bg-background px-3" value={form.platform_config_id} onChange={(event) => { const selected = configsQuery.data?.items.find((item) => item.id === event.target.value); setForm((current) => ({ ...current, platform_config_id: event.target.value, platform_name: selected?.platform_name ?? current.platform_name })); }}><option value="">不关联配置</option>{(configsQuery.data?.items ?? []).map((config) => <option key={config.id} value={config.id}>{config.platform_name}</option>)}</select></div><TextField label="平台名称" value={form.platform_name} onChange={(platform_name) => setForm((current) => ({ ...current, platform_name }))} /><TextField label="操作" value={form.operation} onChange={(operation) => setForm((current) => ({ ...current, operation }))} /><TextField label="方向" value={form.direction} onChange={(direction) => setForm((current) => ({ ...current, direction }))} /><TextField label="状态" value={form.status} onChange={(status) => setForm((current) => ({ ...current, status }))} /><TextField label="请求数" value={form.request_count} onChange={(request_count) => setForm((current) => ({ ...current, request_count }))} /><TextField label="成功数" value={form.success_count} onChange={(success_count) => setForm((current) => ({ ...current, success_count }))} /><TextField label="失败数" value={form.failure_count} onChange={(failure_count) => setForm((current) => ({ ...current, failure_count }))} /><TextField label="消息" value={form.message} onChange={(message) => setForm((current) => ({ ...current, message }))} /><TextareaField className="md:col-span-2" label="Payload JSON" value={form.payload} onChange={(payload) => setForm((current) => ({ ...current, payload }))} rows={6} /></div><DialogFooter className="mt-5"><Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>取消</Button><Button type="submit" className="bg-[#0f6b5d] text-white hover:bg-[#0b5148]">保存</Button></DialogFooter></form></DialogContent></Dialog>
     </>
   );
@@ -994,7 +1055,7 @@ function PlatformLogFilters({
   platformOptions: ReadonlyArray<{ value: string; label: string }>;
 }) {
   return (
-    <div className="grid gap-3 rounded-lg border bg-[#f8faf9] p-3 lg:grid-cols-[minmax(260px,1fr)_minmax(240px,0.8fr)_minmax(200px,0.6fr)_auto]">
+    <div className="grid gap-3 rounded-lg border bg-[#f8faf9] p-3 lg:grid-cols-[minmax(240px,1fr)_minmax(220px,0.8fr)_minmax(180px,0.6fr)_minmax(180px,0.6fr)_auto]">
       <div className="relative">
         <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
@@ -1018,6 +1079,25 @@ function PlatformLogFilters({
       >
         <option value="">全部平台</option>
         {platformOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
+      <select
+        aria-label="任务状态"
+        className="h-10 w-full rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-[#0f6b5d]/20"
+        value={filters.status ?? ""}
+        onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value || undefined, page: 1 }))}
+      >
+        <option value="">全部状态</option>
+        <option value="pending">排队中</option>
+        <option value="processing">处理中</option>
+        <option value="retry">等待重试</option>
+        <option value="awaiting_result">等待平台回执</option>
+        <option value="waiting_dependency">等待前置数据</option>
+        <option value="waiting_data">等待补充资料</option>
+        <option value="waiting_media">等待图片</option>
+        <option value="success">成功</option>
+        <option value="failed">失败</option>
+        <option value="delivery_unknown">结果待核对</option>
+        <option value="disabled">平台已停用</option>
       </select>
       <Button variant="outline" onClick={() => setFilters((current) => ({ page: 1, page_size: current.page_size ?? pageSize }))}>重置</Button>
     </div>
@@ -1051,19 +1131,21 @@ function PlatformCredentialField({
   autoComplete,
   inputMode,
   className = "",
+  required = true,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
-  type?: "text" | "password";
+  type?: "text" | "password" | "date";
   placeholder?: string;
   autoComplete?: string;
   inputMode?: "numeric";
   className?: string;
+  required?: boolean;
 }) {
   return (
     <div className={`space-y-2 ${className}`}>
-      <Label>{label} <span className="text-red-500">*</span></Label>
+      <Label>{label} {required ? <span className="text-red-500">*</span> : null}</Label>
       <Input
         type={type}
         value={value}
@@ -1321,7 +1403,18 @@ function formatStepNumber(value: number) {
 function PlatformStatusBadge({ status }: { status: string }) {
   if (status === "success") return <Badge className="bg-emerald-50 text-emerald-700 hover:bg-emerald-50">成功</Badge>;
   if (status === "failed") return <Badge className="bg-red-50 text-red-700 hover:bg-red-50">失败</Badge>;
-  return <Badge variant="outline">{status}</Badge>;
+  const labels: Record<string, string> = {
+    pending: "排队中",
+    processing: "处理中",
+    retry: "等待重试",
+    awaiting_result: "等待平台回执",
+    waiting_dependency: "等待前置数据",
+    waiting_media: "等待图片",
+    waiting_data: "等待补充资料",
+    delivery_unknown: "结果待核对",
+    disabled: "平台已停用",
+  };
+  return <Badge variant="outline" className={status === "delivery_unknown" ? "border-amber-300 bg-amber-50 text-amber-800" : ""}>{labels[status] ?? status}</Badge>;
 }
 
 function parseJsonObject(value: string): { ok: true; value: JsonValue } | { ok: false } {
@@ -1331,6 +1424,11 @@ function parseJsonObject(value: string): { ok: true; value: JsonValue } | { ok: 
   } catch {
     return { ok: false };
   }
+}
+
+function platformLogPlatformCode(value: JsonValue): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return typeof value.platform_code === "string" ? value.platform_code : null;
 }
 
 function uploadRecordFromJson(value: JsonValue | null): UploadFileRecord | null {
@@ -1411,6 +1509,6 @@ function platformStatusLabel(status: string) {
 }
 
 function platformTypeLabel(type: string) {
-  const map: Record<string, string> = { ningbo_housing: "宁波市住建", real_name: "实名制", wage: "工资监管", attendance: "考勤平台" };
+  const map: Record<string, string> = { ningbo_housing: "宁波市住建", yongxin_v2: "甬薪精管 V2", real_name: "实名制", wage: "工资监管", attendance: "考勤平台" };
   return map[type] ?? type;
 }

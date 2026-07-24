@@ -965,8 +965,7 @@ async fn insert_run(
 }
 
 fn options_for_current_worker(mut options: Value) -> Value {
-    let target = std::env::var("REPORT_FORWARD_RUN_TARGET")
-        .unwrap_or_else(|_| "k3s".to_owned());
+    let target = std::env::var("REPORT_FORWARD_RUN_TARGET").unwrap_or_else(|_| "k3s".to_owned());
     if let Some(object) = options.as_object_mut() {
         object.insert("worker_target".to_owned(), Value::String(target));
     }

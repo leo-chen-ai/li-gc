@@ -277,6 +277,10 @@ pub fn admin_routes() -> Router<AppState> {
                 .delete(construction::handler::delete_platform_log),
         )
         .route(
+            "/platform-jobs/{job_id}/retry",
+            post(construction::handler::retry_platform_job),
+        )
+        .route(
             "/construction-overview",
             get(construction::handler::get_construction_overview),
         )

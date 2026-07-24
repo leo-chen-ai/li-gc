@@ -471,6 +471,23 @@ async fn process_attendance_record(
         .map_err(|error| error.to_string())?;
     }
 
+    crate::feature::integration::outbox_worker::enqueue_domain_event_tx(
+        &mut tx,
+        binding.project_id,
+        "construction.attendance.created",
+        "attendance",
+        attendance_record_id,
+        serde_json::json!({
+            "operation": "insert",
+            "source": "mqtt_rec_push",
+            "has_photo": photo_base64.is_some(),
+            "occurred_at": chrono::Utc::now(),
+        }),
+        &format!("attendance:mqtt_rec_push:{attendance_record_id}"),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+
     tx.commit().await.map_err(|error| error.to_string())?;
 
     if should_recalculate_generic_direction {

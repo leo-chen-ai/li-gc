@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 DATA_ROOT="${DATA_ROOT:-/srv/shanhuai}"
 OPS_DIR="$DATA_ROOT/ops"
 SECRETS_DIR="$DATA_ROOT/secrets"
 LOCAL_PATH="$DATA_ROOT/local-path"
+POSTGRES_BACKUP_MANIFEST="$SCRIPT_DIR/postgres-backup-cronjob.yaml"
 POSTGRES_PVC_SIZE="${POSTGRES_PVC_SIZE:-20Gi}"
 REDIS_PVC_SIZE="${REDIS_PVC_SIZE:-2Gi}"
 KUBECTL=(/usr/local/bin/k3s kubectl)
@@ -15,6 +17,11 @@ log() {
 
 if [ ! -f "$SECRETS_DIR/infra.env" ]; then
   echo "Missing $SECRETS_DIR/infra.env. Run bootstrap-single-node.sh first." >&2
+  exit 1
+fi
+
+if [ ! -f "$POSTGRES_BACKUP_MANIFEST" ]; then
+  echo "Missing $POSTGRES_BACKUP_MANIFEST. Keep it beside deploy-infra-services.sh." >&2
   exit 1
 fi
 
@@ -236,6 +243,11 @@ YAML
 "${KUBECTL[@]}" -n shanhuai-infra rollout status statefulset/postgresql --timeout=12m
 "${KUBECTL[@]}" -n shanhuai-infra rollout status statefulset/redis --timeout=12m
 
+log "Deploying PostgreSQL backup CronJob"
+install -m 0644 "$POSTGRES_BACKUP_MANIFEST" "$OPS_DIR/postgres-backup-cronjob.yaml"
+"${KUBECTL[@]}" apply -f "$OPS_DIR/postgres-backup-cronjob.yaml"
+rm -f /etc/cron.d/shanhuai-infra-backup
+
 log "Writing backup script and operations README"
 cat >"$OPS_DIR/backup-infra.sh" <<'BACKUP'
 #!/usr/bin/env bash
@@ -248,6 +260,13 @@ source "$SECRETS_FILE"
 stamp="$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$BACKUP_ROOT/postgres" "$BACKUP_ROOT/redis" "$BACKUP_ROOT/k3s"
 $KUBECTL -n shanhuai-infra exec statefulset/postgresql -- sh -c "PGPASSWORD=\"$POSTGRES_PASSWORD\" pg_dump -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -Fc" > "$BACKUP_ROOT/postgres/$stamp-$POSTGRES_DB.dump"
+set -- "$BACKUP_ROOT/postgres"/*-"$POSTGRES_DB".dump
+if [ -e "$1" ]; then
+  while [ "$#" -gt 3 ]; do
+    rm -f "$1"
+    shift
+  done
+fi
 $KUBECTL -n shanhuai-infra exec statefulset/redis -- sh -c "redis-cli -a \"$REDIS_PASSWORD\" BGSAVE >/dev/null || true"
 sleep 3
 $KUBECTL -n shanhuai-infra cp redis-0:/data/dump.rdb "$BACKUP_ROOT/redis/$stamp-dump.rdb" >/dev/null 2>&1 || true
@@ -255,12 +274,6 @@ tar -C /srv -czf "$BACKUP_ROOT/k3s/$stamp-k3s-server-db.tgz" shanhuai/k3s/server
 find "$BACKUP_ROOT" -type f -mtime +14 -delete
 BACKUP
 chmod 700 "$OPS_DIR/backup-infra.sh"
-
-cat >/etc/cron.d/shanhuai-infra-backup <<'CRON'
-SHELL=/bin/bash
-PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-0 3 * * * root /srv/shanhuai/ops/backup-infra.sh >/var/log/shanhuai-infra-backup.log 2>&1
-CRON
 
 cat >"$OPS_DIR/README.md" <<README
 # Shanhuai single-node K3s environment
@@ -273,8 +286,9 @@ cat >"$OPS_DIR/README.md" <<README
 - PostgreSQL service: postgresql.shanhuai-infra.svc.cluster.local:5432
 - Redis service: redis.shanhuai-infra.svc.cluster.local:6379
 - Kubernetes manifests: $OPS_DIR/postgres-redis.yaml
-- Backup script: $OPS_DIR/backup-infra.sh
-- Daily backup cron: /etc/cron.d/shanhuai-infra-backup
+- PostgreSQL backup manifest: $OPS_DIR/postgres-backup-cronjob.yaml
+- PostgreSQL backup CronJob: shanhuai-infra/postgresql-backup (daily at 02:00 Asia/Shanghai, keeps 3)
+- Manual full infrastructure backup script: $OPS_DIR/backup-infra.sh
 
 Migration note: stop k3s, copy /srv/shanhuai plus /etc/rancher/k3s/config.yaml to the new disk/server, restore permissions, then start k3s and verify pods.
 README

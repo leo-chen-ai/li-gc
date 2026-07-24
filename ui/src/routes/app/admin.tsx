@@ -24,6 +24,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 
+// 通知中心尚未接入真实数据，暂时隐藏入口；接入后改为 true 即可恢复。
+const SHOW_NOTIFICATIONS = false;
+
 // Mock notifications
 const notifications = [
   { id: 1, title: "考勤待补图", description: "淮安高铁商务区综合体项目有 1 条记录待补图", time: "2 分钟前", unread: true },
@@ -88,55 +91,57 @@ function AdminContent() {
               <Input className="h-9 pl-9" placeholder="搜索项目、班组、工人" />
             </div>
 
-            {/* Notifications */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="relative">
-                  <Bell className="h-5 w-5" />
-                  {unreadCount > 0 && (
-                    <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-amber-500 ring-2 ring-background" />
+            {/* 通知中心暂时隐藏，保留实现方便后续接入真实数据。 */}
+            {SHOW_NOTIFICATIONS ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="relative">
+                    <Bell className="h-5 w-5" />
+                    {unreadCount > 0 && (
+                      <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-amber-500 ring-2 ring-background" />
+                    )}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-80">
+                  <DropdownMenuLabel className="flex items-center justify-between">
+                    <span>通知提醒</span>
+                    {unreadCount > 0 && (
+                      <Badge variant="secondary" className="text-xs">
+                        {unreadCount} 条
+                      </Badge>
+                    )}
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {notifications.length === 0 ? (
+                    <div className="py-4 text-center text-sm text-muted-foreground">
+                      暂无通知
+                    </div>
+                  ) : (
+                    notifications.map((notification) => (
+                      <DropdownMenuItem
+                        key={notification.id}
+                        className="flex flex-col items-start gap-1 p-3 cursor-pointer"
+                      >
+                        <div className="flex w-full items-center justify-between">
+                          <span className="text-sm font-medium">{notification.title}</span>
+                          {notification.unread && (
+                            <span className="h-2 w-2 rounded-full bg-primary" />
+                          )}
+                        </div>
+                        <span className="text-xs text-muted-foreground line-clamp-1">
+                          {notification.description}
+                        </span>
+                        <span className="text-xs text-muted-foreground">{notification.time}</span>
+                      </DropdownMenuItem>
+                    ))
                   )}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-80">
-                <DropdownMenuLabel className="flex items-center justify-between">
-                  <span>通知提醒</span>
-                  {unreadCount > 0 && (
-                    <Badge variant="secondary" className="text-xs">
-                      {unreadCount} 条
-                    </Badge>
-                  )}
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                {notifications.length === 0 ? (
-                  <div className="py-4 text-center text-sm text-muted-foreground">
-                    暂无通知
-                  </div>
-                ) : (
-                  notifications.map((notification) => (
-                    <DropdownMenuItem
-                      key={notification.id}
-                      className="flex flex-col items-start gap-1 p-3 cursor-pointer"
-                    >
-                      <div className="flex w-full items-center justify-between">
-                        <span className="text-sm font-medium">{notification.title}</span>
-                        {notification.unread && (
-                          <span className="h-2 w-2 rounded-full bg-primary" />
-                        )}
-                      </div>
-                      <span className="text-xs text-muted-foreground line-clamp-1">
-                        {notification.description}
-                      </span>
-                      <span className="text-xs text-muted-foreground">{notification.time}</span>
-                    </DropdownMenuItem>
-                  ))
-                )}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem className="justify-center text-sm text-muted-foreground cursor-pointer">
-                  查看全部通知
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem className="justify-center text-sm text-muted-foreground cursor-pointer">
+                    查看全部通知
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
 
             {/* User Profile & Theme Menu */}
             <HeaderUserMenu />

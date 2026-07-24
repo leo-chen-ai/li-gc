@@ -1087,3 +1087,16 @@ export function useDeletePlatformLogMutation() {
     },
   });
 }
+
+export function useRetryPlatformJobMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: constructionProjectService.retryPlatformJob,
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: constructionProjectKeys.platformLogsRoot(),
+      });
+    },
+  });
+}

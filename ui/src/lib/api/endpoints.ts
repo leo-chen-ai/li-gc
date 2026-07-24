@@ -133,6 +133,7 @@ export const API_ENDPOINTS = {
       `/admin/platform-configs/${configId}`,
     PLATFORM_LOGS: "/admin/platform-logs",
     PLATFORM_LOG: (logId: string) => `/admin/platform-logs/${logId}`,
+    PLATFORM_JOB_RETRY: (jobId: string) => `/admin/platform-jobs/${jobId}/retry`,
     CONSTRUCTION_OVERVIEW: "/admin/construction-overview",
     ENTERPRISE_CUSTOMERS: "/admin/enterprise-customers",
     ENTERPRISE_CUSTOMERS_EXPORT: "/admin/enterprise-customers/export",

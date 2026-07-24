@@ -3351,6 +3351,36 @@ async fn record_team_sync_attempt(
     status: &str,
     error_message: Option<&str>,
 ) -> Result<(), ApiError> {
+    record_platform_http_attempt(
+        pool,
+        job_id,
+        project_id,
+        binding_id,
+        "POST",
+        request_url,
+        request_body,
+        response_status,
+        response_body,
+        status,
+        error_message,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn record_platform_http_attempt(
+    pool: &sqlx::PgPool,
+    job_id: Uuid,
+    project_id: Uuid,
+    binding_id: Uuid,
+    request_method: &str,
+    request_url: &str,
+    request_body: &Value,
+    response_status: Option<u16>,
+    response_body: Option<&Value>,
+    status: &str,
+    error_message: Option<&str>,
+) -> Result<(), ApiError> {
     let attempt_no = sqlx::query_scalar::<_, i32>(
         "SELECT COALESCE(MAX(attempt_no), 0) + 1 FROM integration_attempts WHERE job_id = $1",
     )
@@ -3374,15 +3404,16 @@ async fn record_team_sync_attempt(
             status,
             error_message
         )
-        VALUES ($1, $2, $3, $4, 'http', 'POST', $5, $6, $7, $8, $9, $10)
+        VALUES ($1, $2, $3, $4, 'http', $5, $6, $7, $8, $9, $10, $11)
         "#,
     )
     .bind(job_id)
     .bind(project_id)
     .bind(binding_id)
     .bind(attempt_no)
+    .bind(request_method)
     .bind(request_url)
-    .bind(request_body)
+    .bind(sanitize_ningbo_attempt_payload(request_body))
     .bind(response_status.map(i32::from))
     .bind(response_body)
     .bind(status)
@@ -3391,6 +3422,43 @@ async fn record_team_sync_attempt(
     .await
     .map_err(db_error)?;
     Ok(())
+}
+
+fn sanitize_ningbo_attempt_payload(value: &Value) -> Value {
+    match value {
+        Value::Object(object) => Value::Object(
+            object
+                .iter()
+                .map(|(key, value)| {
+                    let sensitive = matches!(
+                        key.as_str(),
+                        "IdentityCard"
+                            | "IdCardPhoto"
+                            | "PositiveIdCardFile"
+                            | "NegativeIdCardFile"
+                            | "FacePhoto"
+                            | "PayRollBankCardNumber"
+                            | "CardNumber"
+                            | "IssueCardPic"
+                            | "EntryAttachFile"
+                            | "ExitFile"
+                    );
+                    (
+                        key.clone(),
+                        if sensitive {
+                            Value::String("[REDACTED]".to_owned())
+                        } else {
+                            sanitize_ningbo_attempt_payload(value)
+                        },
+                    )
+                })
+                .collect(),
+        ),
+        Value::Array(items) => {
+            Value::Array(items.iter().map(sanitize_ningbo_attempt_payload).collect())
+        }
+        _ => value.clone(),
+    }
 }
 
 async fn complete_team_platform_mapping(
@@ -4588,14 +4656,56 @@ async fn sync_worker_to_ningbo_config(
             .await?;
 
     if worker_code.is_none() {
-        let worker_code_response =
-            ningbo_housing::get_worker_code(&client, &credentials, source.identity_card.trim())
-                .await;
-        worker_code = worker_code_response
-            .as_ref()
-            .ok()
-            .filter(|response| response.status.is_success())
-            .and_then(|response| ningbo_housing::extract_worker_code(&response.body));
+        let lookup_url = credentials
+            .endpoint("EnterpriseWorker/GetWorkerCode")
+            .map(|url| url.to_string())
+            .unwrap_or_else(|_| credentials.base_url.to_string());
+        let lookup_payload = serde_json::json!({
+            "IdentityCard": source.identity_card,
+            "ProjectGuid": credentials.project_guid,
+        });
+        match ningbo_housing::get_worker_code(&client, &credentials, source.identity_card.trim())
+            .await
+        {
+            Ok(response) => {
+                let success = response.status.is_success();
+                record_platform_http_attempt(
+                    state.db.pool(),
+                    job_id,
+                    source.project_id,
+                    binding_id,
+                    "GET",
+                    &lookup_url,
+                    &lookup_payload,
+                    Some(response.status.as_u16()),
+                    Some(&response.body),
+                    if success { "success" } else { "failed" },
+                    (!success)
+                        .then(|| ningbo_housing::response_message(&response.body))
+                        .as_deref(),
+                )
+                .await?;
+                if success {
+                    worker_code = ningbo_housing::extract_worker_code(&response.body);
+                }
+            }
+            Err(error) => {
+                record_platform_http_attempt(
+                    state.db.pool(),
+                    job_id,
+                    source.project_id,
+                    binding_id,
+                    "GET",
+                    &lookup_url,
+                    &lookup_payload,
+                    None,
+                    None,
+                    "failed",
+                    Some(&error.to_string()),
+                )
+                .await?;
+            }
+        }
     }
 
     if worker_code.is_none() {
@@ -4606,11 +4716,49 @@ async fn sync_worker_to_ningbo_config(
                 return Ok(());
             }
         };
+        let basic_payload = serde_json::to_value(&basic_request).unwrap_or(Value::Null);
+        let basic_url = credentials
+            .endpoint("EnterpriseWorker/AddOrUpdateWorker")
+            .map(|url| url.to_string())
+            .unwrap_or_else(|_| credentials.base_url.to_string());
         let response =
             match ningbo_housing::add_or_update_worker(&client, &credentials, &basic_request).await
             {
-                Ok(response) => response,
+                Ok(response) => {
+                    let success = response.status.is_success();
+                    record_platform_http_attempt(
+                        state.db.pool(),
+                        job_id,
+                        source.project_id,
+                        binding_id,
+                        "POST",
+                        &basic_url,
+                        &basic_payload,
+                        Some(response.status.as_u16()),
+                        Some(&response.body),
+                        if success { "success" } else { "failed" },
+                        (!success)
+                            .then(|| ningbo_housing::response_message(&response.body))
+                            .as_deref(),
+                    )
+                    .await?;
+                    response
+                }
                 Err(error) => {
+                    record_platform_http_attempt(
+                        state.db.pool(),
+                        job_id,
+                        source.project_id,
+                        binding_id,
+                        "POST",
+                        &basic_url,
+                        &basic_payload,
+                        None,
+                        None,
+                        "failed",
+                        Some(&error.to_string()),
+                    )
+                    .await?;
                     finish_team_sync_job(
                         state.db.pool(),
                         job_id,
@@ -4671,12 +4819,51 @@ async fn sync_worker_to_ningbo_config(
         work_date: source.entry_time.format("%Y-%m-%d").to_string(),
         current_work_type_name: work_type_name.clone(),
     };
+    let employment_payload = serde_json::to_value(&employment_request).unwrap_or(Value::Null);
+    let employment_url = credentials
+        .endpoint("EnterpriseWorker/AddEnterpriseOfWorker")
+        .map(|url| url.to_string())
+        .unwrap_or_else(|_| credentials.base_url.to_string());
     let employment_response =
         match ningbo_housing::add_enterprise_worker(&client, &credentials, &employment_request)
             .await
         {
-            Ok(response) => response,
+            Ok(response) => {
+                let accepted = response.status.is_success()
+                    || ningbo_housing::response_indicates_worker_already_employed(&response);
+                record_platform_http_attempt(
+                    state.db.pool(),
+                    job_id,
+                    source.project_id,
+                    binding_id,
+                    "POST",
+                    &employment_url,
+                    &employment_payload,
+                    Some(response.status.as_u16()),
+                    Some(&response.body),
+                    if accepted { "success" } else { "failed" },
+                    (!accepted)
+                        .then(|| ningbo_housing::response_message(&response.body))
+                        .as_deref(),
+                )
+                .await?;
+                response
+            }
             Err(error) => {
+                record_platform_http_attempt(
+                    state.db.pool(),
+                    job_id,
+                    source.project_id,
+                    binding_id,
+                    "POST",
+                    &employment_url,
+                    &employment_payload,
+                    None,
+                    None,
+                    "failed",
+                    Some(&error.to_string()),
+                )
+                .await?;
                 finish_team_sync_job(
                     state.db.pool(),
                     job_id,
@@ -4722,10 +4909,47 @@ async fn sync_worker_to_ningbo_config(
         has_buy_insurance: source.has_insurance,
     };
     let request_payload = serde_json::to_value(&project_request).unwrap_or(Value::Null);
+    let project_url = credentials
+        .endpoint("Project/AddWorkerV2")
+        .map(|url| url.to_string())
+        .unwrap_or_else(|_| credentials.base_url.to_string());
     let response =
         match ningbo_housing::add_project_worker(&client, &credentials, &project_request).await {
-            Ok(response) => response,
+            Ok(response) => {
+                let success = response.status.is_success();
+                record_platform_http_attempt(
+                    state.db.pool(),
+                    job_id,
+                    source.project_id,
+                    binding_id,
+                    "POST",
+                    &project_url,
+                    &request_payload,
+                    Some(response.status.as_u16()),
+                    Some(&response.body),
+                    if success { "success" } else { "failed" },
+                    (!success)
+                        .then(|| ningbo_housing::response_message(&response.body))
+                        .as_deref(),
+                )
+                .await?;
+                response
+            }
             Err(error) => {
+                record_platform_http_attempt(
+                    state.db.pool(),
+                    job_id,
+                    source.project_id,
+                    binding_id,
+                    "POST",
+                    &project_url,
+                    &request_payload,
+                    None,
+                    None,
+                    "failed",
+                    Some(&error.to_string()),
+                )
+                .await?;
                 finish_team_sync_job(
                     state.db.pool(),
                     job_id,
@@ -4828,11 +5052,49 @@ async fn edit_worker_on_ningbo_config(
             return Ok(Some(message));
         }
     };
+    let basic_payload = serde_json::to_value(&basic_request).unwrap_or(Value::Null);
+    let basic_url = credentials
+        .endpoint("EnterpriseWorker/AddOrUpdateWorker")
+        .map(|url| url.to_string())
+        .unwrap_or_else(|_| credentials.base_url.to_string());
     let basic_response =
         match ningbo_housing::add_or_update_worker(&client, credentials, &basic_request).await {
-            Ok(response) => response,
+            Ok(response) => {
+                let success = response.status.is_success();
+                record_platform_http_attempt(
+                    state.db.pool(),
+                    job_id,
+                    source.project_id,
+                    binding_id,
+                    "POST",
+                    &basic_url,
+                    &basic_payload,
+                    Some(response.status.as_u16()),
+                    Some(&response.body),
+                    if success { "success" } else { "failed" },
+                    (!success)
+                        .then(|| ningbo_housing::response_message(&response.body))
+                        .as_deref(),
+                )
+                .await?;
+                response
+            }
             Err(error) => {
                 let message = error.to_string();
+                record_platform_http_attempt(
+                    state.db.pool(),
+                    job_id,
+                    source.project_id,
+                    binding_id,
+                    "POST",
+                    &basic_url,
+                    &basic_payload,
+                    None,
+                    None,
+                    "failed",
+                    Some(&message),
+                )
+                .await?;
                 finish_team_sync_job(state.db.pool(), job_id, "failed", None, Some(&message))
                     .await?;
                 return Ok(Some(message));
@@ -4880,6 +5142,11 @@ async fn edit_worker_on_ningbo_config(
         work_date: source.entry_time.format("%Y-%m-%d").to_string(),
         current_work_type_name: work_type_name.clone(),
     };
+    let employment_payload = serde_json::to_value(&employment_request).unwrap_or(Value::Null);
+    let employment_url = credentials
+        .endpoint("EnterpriseWorker/AddEnterpriseOfWorker")
+        .map(|url| url.to_string())
+        .unwrap_or_else(|_| credentials.base_url.to_string());
     let employment_response = match ningbo_housing::add_enterprise_worker(
         &client,
         credentials,
@@ -4887,9 +5154,43 @@ async fn edit_worker_on_ningbo_config(
     )
     .await
     {
-        Ok(response) => response,
+        Ok(response) => {
+            let accepted = response.status.is_success()
+                || ningbo_housing::response_indicates_worker_already_employed(&response);
+            record_platform_http_attempt(
+                state.db.pool(),
+                job_id,
+                source.project_id,
+                binding_id,
+                "POST",
+                &employment_url,
+                &employment_payload,
+                Some(response.status.as_u16()),
+                Some(&response.body),
+                if accepted { "success" } else { "failed" },
+                (!accepted)
+                    .then(|| ningbo_housing::response_message(&response.body))
+                    .as_deref(),
+            )
+            .await?;
+            response
+        }
         Err(error) => {
             let message = error.to_string();
+            record_platform_http_attempt(
+                state.db.pool(),
+                job_id,
+                source.project_id,
+                binding_id,
+                "POST",
+                &employment_url,
+                &employment_payload,
+                None,
+                None,
+                "failed",
+                Some(&message),
+            )
+            .await?;
             finish_team_sync_job(state.db.pool(), job_id, "failed", None, Some(&message)).await?;
             return Ok(Some(message));
         }
@@ -4963,10 +5264,47 @@ async fn edit_worker_on_ningbo_config(
         has_buy_insurance: source.has_insurance,
     };
     let request_payload = serde_json::to_value(&request).unwrap_or(Value::Null);
+    let edit_url = credentials
+        .endpoint("Project/EditWorker")
+        .map(|url| url.to_string())
+        .unwrap_or_else(|_| credentials.base_url.to_string());
     let response = match ningbo_housing::edit_project_worker(&client, credentials, &request).await {
-        Ok(response) => response,
+        Ok(response) => {
+            let success = response.status.is_success();
+            record_platform_http_attempt(
+                state.db.pool(),
+                job_id,
+                source.project_id,
+                binding_id,
+                "POST",
+                &edit_url,
+                &request_payload,
+                Some(response.status.as_u16()),
+                Some(&response.body),
+                if success { "success" } else { "failed" },
+                (!success)
+                    .then(|| ningbo_housing::response_message(&response.body))
+                    .as_deref(),
+            )
+            .await?;
+            response
+        }
         Err(error) => {
             let message = error.to_string();
+            record_platform_http_attempt(
+                state.db.pool(),
+                job_id,
+                source.project_id,
+                binding_id,
+                "POST",
+                &edit_url,
+                &request_payload,
+                None,
+                None,
+                "failed",
+                Some(&message),
+            )
+            .await?;
             finish_team_sync_job(state.db.pool(), job_id, "failed", None, Some(&message)).await?;
             return Ok(Some(message));
         }
@@ -5101,10 +5439,48 @@ async fn exit_worker_from_ningbo_config(
             return Ok(Some(message));
         }
     };
+    let exit_url = credentials
+        .endpoint("Project/ProjectWorkerExit")
+        .map(|url| url.to_string())
+        .unwrap_or_else(|_| credentials.base_url.to_string());
     let response = match ningbo_housing::exit_project_worker(&client, credentials, &request).await {
-        Ok(response) => response,
+        Ok(response) => {
+            let accepted = response.status.is_success()
+                || ningbo_housing::response_indicates_worker_already_exited(&response);
+            record_platform_http_attempt(
+                state.db.pool(),
+                job_id,
+                source.project_id,
+                binding_id,
+                "POST",
+                &exit_url,
+                &request_payload,
+                Some(response.status.as_u16()),
+                Some(&response.body),
+                if accepted { "success" } else { "failed" },
+                (!accepted)
+                    .then(|| ningbo_housing::response_message(&response.body))
+                    .as_deref(),
+            )
+            .await?;
+            response
+        }
         Err(error) => {
             let message = error.to_string();
+            record_platform_http_attempt(
+                state.db.pool(),
+                job_id,
+                source.project_id,
+                binding_id,
+                "POST",
+                &exit_url,
+                &request_payload,
+                None,
+                None,
+                "failed",
+                Some(&message),
+            )
+            .await?;
             finish_team_sync_job(state.db.pool(), job_id, "failed", None, Some(&message)).await?;
             return Ok(Some(message));
         }
@@ -5620,11 +5996,12 @@ async fn list_workers_page(
                                 WHEN r.worker_type = 1001 OR r.work_type = 1001 THEN 'ignored'
                                 WHEN latest_job.id IS NULL THEN 'not_reported'
                                 WHEN latest_job.status IN ('success', 'completed') THEN 'success'
+                                WHEN latest_job.status IN ('pending', 'processing', 'retry', 'awaiting_result', 'waiting_dependency', 'waiting_media') THEN 'pending'
                                 ELSE 'failed'
                             END,
                             'failure_reason', CASE
                                 WHEN latest_job.id IS NOT NULL
-                                     AND latest_job.status NOT IN ('success', 'completed')
+                                     AND latest_job.status NOT IN ('success', 'completed', 'pending', 'processing', 'retry', 'awaiting_result', 'waiting_dependency', 'waiting_media')
                                     THEN COALESCE(
                                         NULLIF(latest_job.last_error, ''),
                                         latest_job.response_payload ->> 'message',
@@ -5645,7 +6022,6 @@ async fn list_workers_page(
                           AND job.entity_type IN ('worker', 'construction_worker')
                           AND job.local_entity_id = r.id
                           AND job.platform_code = config.platform_type
-                          AND job.status NOT IN ('pending', 'processing')
                         ORDER BY job.updated_at DESC, job.id DESC
                         LIMIT 1
                     ) latest_job ON TRUE
@@ -5733,6 +6109,7 @@ async fn worker_reporting_summary(
                     WHEN worker.worker_type = 1001 OR worker.work_type = 1001 THEN 'ignored'
                     WHEN worker.id IS NULL OR latest_job.id IS NULL THEN 'not_reported'
                     WHEN latest_job.status IN ('success', 'completed') THEN 'success'
+                    WHEN latest_job.status IN ('pending', 'processing', 'retry', 'awaiting_result', 'waiting_dependency', 'waiting_media') THEN 'pending'
                     ELSE 'failed'
                 END AS reporting_status
             FROM construction_platform_configs config
@@ -5746,7 +6123,6 @@ async fn worker_reporting_summary(
                   AND job.entity_type IN ('worker', 'construction_worker')
                   AND job.local_entity_id = worker.id
                   AND job.platform_code = config.platform_type
-                  AND job.status NOT IN ('pending', 'processing')
                 ORDER BY job.updated_at DESC, job.id DESC
                 LIMIT 1
             ) latest_job ON TRUE
@@ -7808,6 +8184,58 @@ pub async fn list_platform_logs(
     Ok(ApiSuccess::default().with_data(data))
 }
 
+pub async fn retry_platform_job(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Path(job_id): Path<Uuid>,
+) -> ApiResult<Value> {
+    let row = sqlx::query(
+        r#"
+        SELECT project_id, platform_code, status
+        FROM integration_jobs
+        WHERE id = $1
+        "#,
+    )
+    .bind(job_id)
+    .fetch_optional(state.db.pool())
+    .await
+    .map_err(db_error)?
+    .ok_or_else(not_found)?;
+    let project_id: Uuid = row.try_get("project_id").map_err(db_error)?;
+    let platform_code: String = row.try_get("platform_code").map_err(db_error)?;
+    let status: String = row.try_get("status").map_err(db_error)?;
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+    if platform_code != "yongxin_v2" {
+        return Err(invalid_input("当前平台任务暂不支持从此入口重试"));
+    }
+    if status == "delivery_unknown" {
+        return Err(invalid_input(
+            "该任务的请求结果未知，直接重试可能产生重复数据，请先向平台核对",
+        ));
+    }
+    if matches!(status.as_str(), "success" | "completed" | "processing") {
+        return Err(invalid_input("当前任务状态不允许重试"));
+    }
+
+    let result = sqlx::query_scalar::<_, Value>(
+        r#"
+        UPDATE integration_jobs
+        SET status = 'pending', attempt_count = 0, next_attempt_at = NOW(),
+            locked_by = NULL, locked_until = NULL, last_error = NULL,
+            response_payload = NULL, external_request_id = NULL,
+            remote_state = NULL, result_checked_at = NULL, expires_at = NULL,
+            completed_at = NULL, updated_at = NOW()
+        WHERE id = $1
+        RETURNING to_jsonb(integration_jobs)
+        "#,
+    )
+    .bind(job_id)
+    .fetch_one(state.db.pool())
+    .await
+    .map_err(db_error)?;
+    Ok(ApiSuccess::default().with_data(result))
+}
+
 async fn list_unified_platform_logs(
     pool: &sqlx::PgPool,
     auth_user: &AuthUser,
@@ -7868,35 +8296,64 @@ async fn list_unified_platform_logs(
                          AND job.operation = 'Project/EditWorker' THEN '工人编辑'
                     WHEN job.entity_type IN ('worker', 'construction_worker')
                          AND job.operation = 'Project/ProjectWorkerExit' THEN '工人退场'
+                    WHEN job.operation = 'project.query' THEN '项目配置校验'
+                    WHEN job.operation = 'unit.sync' THEN '参建单位同步'
+                    WHEN job.operation = 'team.sync' THEN '班组同步'
+                    WHEN job.operation = 'worker.sync' THEN '人员同步'
+                    WHEN job.operation = 'entry_exit.sync' THEN '人员进退场同步'
+                    WHEN job.operation = 'attendance.sync' THEN '设备考勤同步'
                     ELSE job.operation
                 END AS operation,
                 'push'::text AS direction,
                 CASE
                     WHEN job.status IN ('success', 'completed') THEN 'success'
-                    ELSE 'failed'
+                    WHEN job.status = 'failed' THEN 'failed'
+                    ELSE job.status
                 END AS status,
                 GREATEST(
                     job.attempt_count,
-                    (SELECT COUNT(*)::int FROM integration_attempts attempt WHERE attempt.job_id = job.id),
-                    1
+                    (SELECT COUNT(*)::int FROM integration_attempts attempt WHERE attempt.job_id = job.id)
                 )::int AS request_count,
                 CASE WHEN job.status IN ('success', 'completed') THEN 1 ELSE 0 END::int AS success_count,
-                CASE WHEN job.status IN ('success', 'completed') THEN 0 ELSE 1 END::int AS failure_count,
+                CASE WHEN job.status IN ('failed', 'delivery_unknown') THEN 1 ELSE 0 END::int AS failure_count,
                 COALESCE(
                     NULLIF(job.last_error, ''),
                     CASE
                         WHEN job.response_payload ->> 'recovered_existing' = 'true'
                             THEN '平台提示班组重复，已查询并绑定现有平台班组 ID'
+                        WHEN job.response_payload ->> 'skipped' = 'true'
+                            THEN COALESCE(job.response_payload ->> 'reason', '当前操作无需调用平台接口')
                         WHEN job.status IN ('success', 'completed') THEN '上报成功'
                         ELSE NULL
                     END
                 ) AS message,
                 jsonb_build_object(
                     'source', 'integration_job',
+                    'platform_code', job.platform_code,
                     'entity_type', job.entity_type,
                     'local_entity_id', job.local_entity_id,
-                    'request', job.request_payload,
-                    'response', job.response_payload
+                    'external_request_id', job.external_request_id,
+                    'remote_state', job.remote_state,
+                    'response', job.response_payload,
+                    'attempt_count', job.attempt_count,
+                    'attempts', COALESCE((
+                        SELECT jsonb_agg(
+                            jsonb_build_object(
+                                'attempt_no', attempt.attempt_no,
+                                'method', attempt.request_method,
+                                'url', attempt.request_url,
+                                'request', attempt.request_body,
+                                'http_status', attempt.response_status,
+                                'response', attempt.response_body,
+                                'duration_ms', attempt.duration_ms,
+                                'status', attempt.status,
+                                'error', attempt.error_message,
+                                'created_at', attempt.created_at
+                            ) ORDER BY attempt.attempt_no
+                        )
+                        FROM integration_attempts attempt
+                        WHERE attempt.job_id = job.id
+                    ), '[]'::jsonb)
                 ) AS payload,
                 job.updated_at AS occurred_at,
                 NULL::uuid AS created_by_user_id,
@@ -7927,7 +8384,7 @@ async fn list_unified_platform_logs(
                 ORDER BY config.is_enabled DESC, config.created_at, config.id
                 LIMIT 1
             ) config ON TRUE
-            WHERE job.status NOT IN ('pending', 'processing')
+            WHERE TRUE
         ), filtered_logs AS (
             SELECT *
             FROM unified_logs log
@@ -10620,12 +11077,13 @@ async fn list_team_rows_page(
                                 WHEN r.is_manage_team OR r.work_type = 1001 THEN 'ignored'
                                 WHEN latest_job.id IS NULL THEN 'not_reported'
                                 WHEN latest_job.status IN ('success', 'completed') THEN 'success'
+                                WHEN latest_job.status IN ('pending', 'processing', 'retry', 'awaiting_result', 'waiting_dependency', 'waiting_media') THEN 'pending'
                                 ELSE 'failed'
                             END,
                             'failure_reason', CASE
                                 WHEN r.is_manage_team OR r.work_type = 1001 THEN NULL
                                 WHEN latest_job.id IS NOT NULL
-                                     AND latest_job.status NOT IN ('success', 'completed')
+                                     AND latest_job.status NOT IN ('success', 'completed', 'pending', 'processing', 'retry', 'awaiting_result', 'waiting_dependency', 'waiting_media')
                                     THEN COALESCE(
                                         NULLIF(latest_job.last_error, ''),
                                         latest_job.response_payload ->> 'message',
@@ -10654,7 +11112,6 @@ async fn list_team_rows_page(
                               job.platform_code = config.platform_type
                               OR (config.platform_type = 'ningbo_housing' AND job.platform_code = 'zhenhai')
                           )
-                          AND job.status NOT IN ('pending', 'processing')
                         ORDER BY job.created_at DESC, job.id DESC
                         LIMIT 1
                     ) latest_job ON TRUE
@@ -10706,6 +11163,7 @@ async fn team_reporting_summary(pool: &sqlx::PgPool, project_id: Uuid) -> Result
                     WHEN team.is_manage_team OR team.work_type = 1001 THEN 'ignored'
                     WHEN team.id IS NULL OR latest_job.id IS NULL THEN 'not_reported'
                     WHEN latest_job.status IN ('success', 'completed') THEN 'success'
+                    WHEN latest_job.status IN ('pending', 'processing', 'retry', 'awaiting_result', 'waiting_dependency', 'waiting_media') THEN 'pending'
                     ELSE 'failed'
                 END AS reporting_status
             FROM construction_platform_configs config
@@ -10722,7 +11180,6 @@ async fn team_reporting_summary(pool: &sqlx::PgPool, project_id: Uuid) -> Result
                       job.platform_code = config.platform_type
                       OR (config.platform_type = 'ningbo_housing' AND job.platform_code = 'zhenhai')
                   )
-                  AND job.status NOT IN ('pending', 'processing')
                 ORDER BY job.created_at DESC, job.id DESC
                 LIMIT 1
             ) latest_job ON TRUE

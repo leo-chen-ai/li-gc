@@ -6,6 +6,10 @@ import {
   createNingboHousingConfigForm,
   parseNingboHousingConfig,
   validateNingboHousingConfig,
+  buildYongxinV2Config,
+  createYongxinV2ConfigForm,
+  parseYongxinV2Config,
+  validateYongxinV2Config,
 } from "./platform-configs.ts";
 
 test("宁波市住建表单自动生成标准配置", () => {
@@ -124,4 +128,64 @@ test("新增配置时必须先选择平台", () => {
   };
 
   assert.equal(validateNingboHousingConfig(form), "请选择对接平台");
+});
+
+test("甬薪配置默认测试模式且模块可以独立开关", () => {
+  const form = {
+    ...createYongxinV2ConfigForm(),
+    project_id: "local-project",
+    base_url: "https://yongxin.example/open/",
+    project_code: "project-code",
+    app_key: "app-key",
+    app_secret: "1234567890abcdef",
+    sync_attendance: false,
+    attendance_backfill_from: "2026-07-01",
+  };
+
+  assert.equal(validateYongxinV2Config(form), null);
+  assert.deepEqual(buildYongxinV2Config(form), {
+    base_url: "https://yongxin.example/open",
+    project_code: "project-code",
+    app_key: "app-key",
+    app_secret: "1234567890abcdef",
+    mode: "test",
+    modules: {
+      sync_units: true,
+      sync_teams: true,
+      sync_workers: true,
+      sync_attendance: false,
+    },
+    attendance_backfill_from: "2026-07-01T00:00:00+08:00",
+  });
+});
+
+test("甬薪配置编辑时保留每个平台自己的运行模式", () => {
+  const form = parseYongxinV2Config({
+    id: "config-yongxin",
+    project_id: "local-project",
+    platform_name: "甬薪精管开放平台 V2",
+    platform_type: "yongxin_v2",
+    config: {
+      base_url: "https://example.test",
+      project_code: "P1",
+      app_key: "K1",
+      app_secret: "1234567890abcdef",
+      mode: "production",
+      modules: { sync_units: false, sync_attendance: true },
+    },
+    is_enabled: true,
+    remark: null,
+    is_deleted: false,
+    project_name: null,
+    created_by_user_id: null,
+    updated_by_user_id: null,
+    created_at: "",
+    updated_at: "",
+    deleted_at: null,
+  });
+
+  assert.equal(form.mode, "production");
+  assert.equal(form.sync_units, false);
+  assert.equal(form.sync_teams, true);
+  assert.equal(form.sync_attendance, true);
 });

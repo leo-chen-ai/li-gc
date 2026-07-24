@@ -1,0 +1,128 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgresql-backup
+  namespace: shanhuai-infra
+  labels:
+    app.kubernetes.io/name: postgresql-backup
+    app.kubernetes.io/component: backup
+    app.kubernetes.io/part-of: shanhuai-infra
+spec:
+  schedule: "0 2 * * *"
+  timeZone: Asia/Shanghai
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 1800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: postgresql-backup
+            app.kubernetes.io/component: backup
+            app.kubernetes.io/part-of: shanhuai-infra
+        spec:
+          restartPolicy: Never
+          nodeSelector:
+            kubernetes.io/hostname: shanhuai-single-1
+          securityContext:
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: pg-dump
+              image: postgres:16-alpine
+              imagePullPolicy: IfNotPresent
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
+                readOnlyRootFilesystem: true
+              env:
+                - name: PGHOST
+                  value: postgresql.shanhuai-infra.svc.cluster.local
+                - name: PGPORT
+                  value: "5432"
+                - name: POSTGRES_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: shanhuai-infra-secrets
+                      key: POSTGRES_USER
+                - name: POSTGRES_DB
+                  valueFrom:
+                    secretKeyRef:
+                      name: shanhuai-infra-secrets
+                      key: POSTGRES_DB
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: shanhuai-infra-secrets
+                      key: POSTGRES_PASSWORD
+                - name: BACKUP_RETENTION_COUNT
+                  value: "3"
+              command:
+                - /bin/sh
+                - -ec
+                - |
+                  umask 077
+                  backup_dir=/backups
+                  stamp="$(date -u +%Y%m%d-%H%M%SZ)"
+                  final_file="$backup_dir/$stamp-$POSTGRES_DB.dump"
+                  temp_file="$backup_dir/.$stamp-$POSTGRES_DB.dump.tmp"
+
+                  cleanup() {
+                    rm -f "$temp_file"
+                  }
+                  trap cleanup EXIT HUP INT TERM
+
+                  case "$BACKUP_RETENTION_COUNT" in
+                    ''|*[!0-9]*|0)
+                      echo "BACKUP_RETENTION_COUNT must be a positive integer" >&2
+                      exit 1
+                      ;;
+                  esac
+
+                  echo "Starting PostgreSQL backup: $PGHOST/$POSTGRES_DB"
+                  pg_dump \
+                    --format=custom \
+                    --compress=6 \
+                    --no-owner \
+                    --no-privileges \
+                    --file="$temp_file" \
+                    --username="$POSTGRES_USER" \
+                    --dbname="$POSTGRES_DB"
+
+                  test -s "$temp_file"
+                  pg_restore --list "$temp_file" >/dev/null
+                  mv "$temp_file" "$final_file"
+                  trap - EXIT HUP INT TERM
+
+                  set -- "$backup_dir"/*-"$POSTGRES_DB".dump
+                  if [ -e "$1" ]; then
+                    while [ "$#" -gt "$BACKUP_RETENTION_COUNT" ]; do
+                      oldest_file="$1"
+                      shift
+                      echo "Removing expired backup: $(basename "$oldest_file")"
+                      rm -f "$oldest_file"
+                    done
+                  fi
+
+                  echo "Backup completed: $(basename "$final_file") ($(wc -c < "$final_file") bytes)"
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  cpu: "1"
+                  memory: 512Mi
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+          volumes:
+            - name: backups
+              hostPath:
+                path: /srv/shanhuai/backups/postgres
+                type: DirectoryOrCreate
