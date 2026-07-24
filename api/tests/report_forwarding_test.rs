@@ -16,6 +16,12 @@ fn admin_token(user_id: Uuid) -> String {
         .access_token
 }
 
+fn user_token(user_id: Uuid, email: &str) -> String {
+    create_token_pair(user_id, email, &[Role::User])
+        .expect("user token")
+        .access_token
+}
+
 async fn request_json(
     app: axum::Router,
     method: &str,
@@ -62,6 +68,74 @@ fn config_payload(lifecycle_status: &str, is_enabled: bool) -> Value {
         "settings": {"headless": true, "upload_timeout_minutes": 15},
         "remark": "integration test"
     })
+}
+
+#[tokio::test]
+async fn custom_role_menu_controls_report_forward_access() {
+    let (app, pool, _container) = build_test_app_with_pool().await;
+    let role_id = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO role_configs (code,name,description) VALUES ('shujubaosong','数据报送','报送角色') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("create custom role");
+    sqlx::query(
+        "INSERT INTO role_menu_permissions (role_id,menu_key) VALUES ($1,'projects'),($1,'data_reporting')",
+    )
+    .bind(role_id)
+    .execute(&pool)
+    .await
+    .expect("grant report forwarding menu");
+
+    let permitted_user_id = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO users (email,username,role,is_active,email_verified) VALUES ('bao1@example.com','bao1','shujubaosong',TRUE,TRUE) RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("create permitted user");
+    let permitted_token = user_token(permitted_user_id, "bao1@example.com");
+
+    let (status, permissions) = request_json(
+        app.clone(),
+        "GET",
+        "/api/v1/management/role-permissions",
+        &permitted_token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{permissions}");
+    assert_eq!(permissions["data"]["code"], "shujubaosong");
+    assert_eq!(
+        permissions["data"]["menu_keys"],
+        json!(["projects", "data_reporting"])
+    );
+
+    let (status, summary) = request_json(
+        app.clone(),
+        "GET",
+        "/api/v1/management/report-forward/summary",
+        &permitted_token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{summary}");
+
+    let denied_user_id = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO users (email,username,role,is_active,email_verified) VALUES ('plain@example.com','plain','user',TRUE,TRUE) RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("create unpermitted user");
+    let denied_token = user_token(denied_user_id, "plain@example.com");
+    let (status, denied) = request_json(
+        app,
+        "GET",
+        "/api/v1/management/report-forward/summary",
+        &denied_token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied}");
 }
 
 #[tokio::test]

@@ -1,9 +1,14 @@
 use axum::{
-    Router, middleware,
+    Router,
+    extract::{Request, State},
+    http::StatusCode,
+    middleware::{self, Next},
+    response::Response,
     routing::{delete, get, post, put},
 };
 
 use crate::{
+    feature::auth::{AuthUser, Role},
     infrastructure::web::middleware::{admin_middleware, auth_middleware},
     state::AppState,
 };
@@ -13,21 +18,8 @@ use super::{
     stats, upload, user,
 };
 
-pub fn admin_routes() -> Router<AppState> {
+fn report_forward_routes() -> Router<AppState> {
     Router::new()
-        .route("/log/level", post(log::handler::set_log_level))
-        .route(
-            "/attendance-alert-configs",
-            get(attendance_alert::list_configs).post(attendance_alert::create_config),
-        )
-        .route(
-            "/attendance-alert-configs/{config_id}",
-            put(attendance_alert::update_config)
-                .patch(attendance_alert::update_config)
-                .delete(attendance_alert::delete_config),
-        )
-        .route("/attendance-alert-logs", get(attendance_alert::list_logs))
-        .route("/attendance-alerts/run", post(attendance_alert::run_alerts))
         .route("/report-forward/summary", get(report_forwarding::summary))
         .route(
             "/report-forward/configs",
@@ -66,6 +58,24 @@ pub fn admin_routes() -> Router<AppState> {
             "/report-forward/artifacts/{artifact_id}/download",
             get(report_forwarding::download_artifact),
         )
+}
+
+pub fn admin_routes() -> Router<AppState> {
+    Router::new()
+        .merge(report_forward_routes())
+        .route("/log/level", post(log::handler::set_log_level))
+        .route(
+            "/attendance-alert-configs",
+            get(attendance_alert::list_configs).post(attendance_alert::create_config),
+        )
+        .route(
+            "/attendance-alert-configs/{config_id}",
+            put(attendance_alert::update_config)
+                .patch(attendance_alert::update_config)
+                .delete(attendance_alert::delete_config),
+        )
+        .route("/attendance-alert-logs", get(attendance_alert::list_logs))
+        .route("/attendance-alerts/run", post(attendance_alert::run_alerts))
         .route(
             "/managed-attendance/photo-groups",
             get(construction::handler::list_managed_attendance_photo_groups)
@@ -426,8 +436,17 @@ pub fn admin_routes() -> Router<AppState> {
         .route_layer(middleware::from_fn(auth_middleware))
 }
 
-pub fn management_routes() -> Router<AppState> {
+pub fn management_routes(state: AppState) -> Router<AppState> {
+    let permitted_report_forward_routes = report_forward_routes().route_layer(
+        middleware::from_fn_with_state(state, data_reporting_permission_middleware),
+    );
+
     Router::new()
+        .merge(permitted_report_forward_routes)
+        .route(
+            "/role-permissions",
+            get(role::handler::current_role_permissions),
+        )
         .route("/projects", get(construction::handler::list_projects))
         .route(
             "/projects/{project_id}",
@@ -560,4 +579,40 @@ pub fn management_routes() -> Router<AppState> {
             get(construction::handler::get_personnel_worker),
         )
         .route_layer(middleware::from_fn(auth_middleware))
+}
+
+async fn data_reporting_permission_middleware(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    let auth_user = request
+        .extensions()
+        .get::<AuthUser>()
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    if auth_user.roles.contains(&Role::Admin) {
+        return Ok(next.run(request).await);
+    }
+
+    let user = state
+        .user_repo
+        .find_by_id(state.db.pool(), auth_user.user_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .filter(|user| user.is_active)
+        .ok_or(StatusCode::FORBIDDEN)?;
+
+    let role = state
+        .admin_role_repo
+        .find_by_code(state.db.pool(), &user.role)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::FORBIDDEN)?;
+
+    if !role.menu_keys.iter().any(|key| key == "data_reporting") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    Ok(next.run(request).await)
 }

@@ -50,7 +50,7 @@ import {
   getMenuKeysForUserRole,
   type MenuPermissionKey,
 } from "@/features/admin/data/rbac";
-import { useRolesList } from "@/features/admin/hooks/use-roles";
+import { useCurrentRolePermissions } from "@/features/admin/hooks/use-roles";
 import { useAuthUser } from "@/stores/use-auth-store";
 
 type SidebarItem = {
@@ -69,9 +69,18 @@ type SidebarSection = {
 export function AppSidebar() {
   const user = useAuthUser();
   const isAdmin = user?.role === "admin";
+  const shouldLoadCustomRole = Boolean(user?.role && user.role !== "admin" && user.role !== "user");
   const location = useLocation();
-  const { data: roles = [] } = useRolesList(isAdmin);
-  const allowedMenus = new Set(getMenuKeysForUserRole(user?.role, roles));
+  const { data: currentRolePermissions } = useCurrentRolePermissions(
+    user?.role,
+    shouldLoadCustomRole
+  );
+  const roleConfigs = currentRolePermissions ? [currentRolePermissions] : [];
+  const allowedMenus = new Set(
+    shouldLoadCustomRole && !currentRolePermissions
+      ? []
+      : getMenuKeysForUserRole(user?.role, roleConfigs)
+  );
 
   const sections: SidebarSection[] = [
     {
@@ -83,7 +92,7 @@ export function AppSidebar() {
     {
       title: "数据报送",
       items: [
-        { key: "data_reporting", title: "数据报送中心", href: "/app/admin/data-reporting", icon: Send, enabled: isAdmin },
+        { key: "data_reporting", title: "数据报送中心", href: "/app/admin/data-reporting", icon: Send, enabled: true },
       ],
     },
     {

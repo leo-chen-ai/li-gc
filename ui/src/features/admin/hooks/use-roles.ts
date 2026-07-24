@@ -4,7 +4,17 @@ import type { CreateRoleRequest } from "@/features/admin/types/admin-types";
 
 export const roleKeys = {
   all: ["admin", "roles"] as const,
+  current: ["admin", "roles", "current"] as const,
 };
+
+export function useCurrentRolePermissions(roleCode?: string, enabled = true) {
+  return useQuery({
+    queryKey: [...roleKeys.current, roleCode],
+    queryFn: adminService.getCurrentRolePermissions,
+    enabled: enabled && Boolean(roleCode),
+    staleTime: 30 * 1000,
+  });
+}
 
 export function useRolesList(enabled = true) {
   return useQuery({

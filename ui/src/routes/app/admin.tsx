@@ -13,6 +13,8 @@ import {
 import { AppSidebar } from "@/components/layout/AppSidebar";
 import { AdminWindowTabs } from "@/components/layout/AdminWindowTabs";
 import { useAuthUser } from "@/stores/use-auth-store";
+import { getMenuKeysForUserRole, type MenuPermissionKey } from "@/features/admin/data/rbac";
+import { useCurrentRolePermissions } from "@/features/admin/hooks/use-roles";
 import { HeaderUserMenu } from "@/components/layout/HeaderUserMenu";
 import {
   DropdownMenu,
@@ -46,20 +48,53 @@ function AdminContent() {
   const location = useLocation();
   const navigate = useNavigate();
   const user = useAuthUser();
+  const isCustomRole = Boolean(user?.role && user.role !== "admin" && user.role !== "user");
+  const {
+    data: currentRolePermissions,
+    isLoading: arePermissionsLoading,
+    isError: isPermissionsError,
+  } = useCurrentRolePermissions(user?.role, isCustomRole);
+  const allowedMenus = new Set(
+    isCustomRole && !currentRolePermissions
+      ? []
+      : getMenuKeysForUserRole(
+          user?.role,
+          currentRolePermissions ? [currentRolePermissions] : []
+        )
+  );
   const unreadCount = notifications.filter((n) => n.unread).length;
   const scopedUserPages = [
-    "/app/admin/projects",
-    "/app/admin/attendance-devices",
-    "/app/admin/attendance-device-issue-reports",
-    "/app/admin/personnel-workers",
-  ];
-  const canUseScopedPage = scopedUserPages.some(
-    (path) => location.pathname === path || location.pathname.startsWith(`${path}/`)
+    { path: "/app/admin/projects", menuKey: "projects" },
+    { path: "/app/admin/data-reporting", menuKey: "data_reporting" },
+    { path: "/app/admin/attendance-devices", menuKey: "attendance_devices" },
+    {
+      path: "/app/admin/attendance-device-issue-reports",
+      menuKey: "attendance_device_issue_reports",
+    },
+    { path: "/app/admin/personnel-workers", menuKey: "personnel_workers" },
+  ] satisfies Array<{ path: string; menuKey: MenuPermissionKey }>;
+  const currentScopedPage = scopedUserPages.find(
+    ({ path }) => location.pathname === path || location.pathname.startsWith(`${path}/`)
+  );
+  const canUseScopedPage = Boolean(
+    currentScopedPage && allowedMenus.has(currentScopedPage.menuKey)
   );
 
   // Note: Authenticated guard is handled by app.tsx 
 
   // Redirect standard users to their workspace
+  if (isCustomRole && arePermissionsLoading) {
+    return null;
+  }
+
+  if (isCustomRole && isPermissionsError) {
+    return (
+      <div className="flex min-h-screen items-center justify-center p-6 text-sm text-muted-foreground">
+        无法读取当前角色权限，请刷新页面后重试。
+      </div>
+    );
+  }
+
   if (user?.role !== "admin" && !canUseScopedPage) {
     navigate({ to: "/app" });
     return null;

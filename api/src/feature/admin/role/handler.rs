@@ -1,11 +1,15 @@
-use axum::{Json, extract::Path, extract::State, http::StatusCode};
+use axum::{Extension, Json, extract::Path, extract::State, http::StatusCode};
 use uuid::Uuid;
 
 use crate::{
     feature::admin::role::{
-        dto::{AdminRoleResponse, CreateRoleRequest, UpdateRoleMenusRequest},
+        dto::{
+            AdminRoleResponse, CreateRoleRequest, CurrentRolePermissionsResponse,
+            UpdateRoleMenusRequest,
+        },
         repository::{AdminRole, AdminRoleRepositoryError},
     },
+    feature::auth::AuthUser,
     infrastructure::web::response::{ApiError, ApiResult, ApiSuccess, codes::generic},
     state::AppState,
 };
@@ -58,6 +62,47 @@ pub async fn list_roles(State(state): State<AppState>) -> ApiResult<Vec<AdminRol
     Ok(ApiSuccess::default()
         .with_data(roles.into_iter().map(AdminRoleResponse::from).collect())
         .with_message("Roles retrieved successfully"))
+}
+
+pub async fn current_role_permissions(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+) -> ApiResult<CurrentRolePermissionsResponse> {
+    let user = state
+        .user_repo
+        .find_by_id(state.db.pool(), auth_user.user_id)
+        .await
+        .map_err(|e| ApiError::default().log_only(e))?
+        .ok_or_else(|| {
+            ApiError::default()
+                .with_code(StatusCode::UNAUTHORIZED)
+                .with_message("User not found")
+        })?;
+
+    if !user.is_active {
+        return Err(ApiError::default()
+            .with_code(StatusCode::FORBIDDEN)
+            .with_message("User is inactive"));
+    }
+
+    let role = state
+        .admin_role_repo
+        .find_by_code(state.db.pool(), &user.role)
+        .await
+        .map_err(|e| ApiError::default().log_only(e))?
+        .ok_or_else(|| {
+            ApiError::default()
+                .with_code(StatusCode::FORBIDDEN)
+                .with_message("Role configuration not found")
+        })?;
+
+    Ok(ApiSuccess::default()
+        .with_data(CurrentRolePermissionsResponse {
+            code: role.code,
+            name: role.name,
+            menu_keys: role.menu_keys,
+        })
+        .with_message("Current role permissions retrieved successfully"))
 }
 
 pub async fn create_role(

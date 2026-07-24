@@ -15,6 +15,13 @@ pub struct AdminRoleResponse {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct CurrentRolePermissionsResponse {
+    pub code: String,
+    pub name: String,
+    pub menu_keys: Vec<String>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CreateRoleRequest {
     pub code: String,

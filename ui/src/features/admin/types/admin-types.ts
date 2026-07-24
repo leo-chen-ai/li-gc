@@ -59,6 +59,12 @@ export interface AdminRole {
   updated_at: string;
 }
 
+export interface CurrentRolePermissions {
+  code: string;
+  name: string;
+  menu_keys: string[];
+}
+
 export interface CreateRoleRequest {
   code: string;
   name: string;

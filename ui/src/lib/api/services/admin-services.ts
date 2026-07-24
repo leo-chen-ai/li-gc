@@ -5,6 +5,7 @@ import type {
   AdminUploadFile,
   CreateAdminUserRequest,
   CreateRoleRequest,
+  CurrentRolePermissions,
   RegistrationLead,
   UserWithTimestamps,
 } from "@/features/admin/types/admin-types";
@@ -49,6 +50,19 @@ export interface CreateApiKeyResponse {
 }
 
 export const adminService = {
+  getCurrentRolePermissions: async (): Promise<CurrentRolePermissions> => {
+    const response = await apiClient.get<ApiResponse<CurrentRolePermissions>>(
+      API_ENDPOINTS.MANAGEMENT.ROLE_PERMISSIONS
+    );
+
+    const data = response.data.data;
+    if (!data) {
+      throw new Error("Failed to get current role permissions");
+    }
+
+    return data;
+  },
+
   getUsers: async (): Promise<UserWithTimestamps[]> => {
     const response = await apiClient.get<ApiResponse<UserWithTimestamps[]>>(
       API_ENDPOINTS.ADMIN.USERS

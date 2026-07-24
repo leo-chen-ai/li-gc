@@ -19,3 +19,12 @@ test("standard users receive scoped management menus by default", () => {
     "personnel_workers",
   ]);
 });
+
+test("custom roles receive their configured menus", () => {
+  assert.deepEqual(
+    getMenuKeysForUserRole("shujubaosong", [
+      { code: "shujubaosong", menu_keys: ["projects", "data_reporting"] },
+    ]),
+    ["projects", "data_reporting"]
+  );
+});
