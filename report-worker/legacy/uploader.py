@@ -4,6 +4,7 @@ import time
 import shutil
 import subprocess
 import logging
+import hashlib
 from datetime import datetime
 
 import openpyxl
@@ -46,6 +47,95 @@ def normalize_upload_result(total_rows, success_rows, result_text):
         'already_exists': already_exists,
         'person_details_available': total == 1,
     }
+
+
+def extract_error_person_results(paths):
+    """Read government error workbooks without retaining plaintext identities."""
+    results = []
+    seen_fingerprints = set()
+    identity_headers = {'证件号码', '身份证号', '身份证号码', 'KJCGGBNR'}
+    name_headers = {'姓名', '人员姓名', 'ZPMC'}
+    error_headers = {'错误消息', '错误原因', '失败原因', 'ErrorMsg'}
+
+    for path in paths:
+        try:
+            # Government workbooks can advertise a stale A1:A1 worksheet dimension.
+            # Normal mode discovers the populated cells instead of trusting that metadata.
+            workbook = openpyxl.load_workbook(path, data_only=True, read_only=False)
+            try:
+                for sheet in workbook.worksheets:
+                    rows = list(sheet.iter_rows(values_only=True))
+                    if not rows:
+                        continue
+                    header_rows = rows[:2]
+                    identity_column = next(
+                        (
+                            index
+                            for headers in header_rows
+                            for index, value in enumerate(headers)
+                            if str(value or '').strip() in identity_headers
+                        ),
+                        None,
+                    )
+                    error_column = next(
+                        (
+                            index
+                            for headers in header_rows
+                            for index, value in enumerate(headers)
+                            if str(value or '').strip() in error_headers
+                        ),
+                        None,
+                    )
+                    name_column = next(
+                        (
+                            index
+                            for headers in header_rows
+                            for index, value in enumerate(headers)
+                            if str(value or '').strip() in name_headers
+                        ),
+                        None,
+                    )
+                    if identity_column is None and name_column is None:
+                        continue
+                    for row in rows[2:]:
+                        identity = (
+                            str(row[identity_column] or '').strip().upper()
+                            if identity_column is not None and identity_column < len(row)
+                            else ''
+                        )
+                        person_name = (
+                            str(row[name_column] or '').strip()
+                            if name_column is not None and name_column < len(row)
+                            else ''
+                        )
+                        if not identity and not person_name:
+                            continue
+                        fingerprint = (
+                            hashlib.sha256(identity.encode('utf-8')).hexdigest()
+                            if identity else None
+                        )
+                        if fingerprint and fingerprint in seen_fingerprints:
+                            continue
+                        error = (
+                            str(row[error_column] or '').strip()
+                            if error_column is not None and error_column < len(row)
+                            else ''
+                        )
+                        result = {
+                            'error': error or '政府错误明细判定该人员失败',
+                        }
+                        if fingerprint:
+                            result['identity_fingerprint'] = fingerprint
+                            seen_fingerprints.add(fingerprint)
+                        else:
+                            result['person_name'] = person_name
+                        results.append(result)
+            finally:
+                workbook.close()
+        except Exception as error:
+            logger.warning(f"解析错误明细人员失败: {error}")
+
+    return results
 
 
 def _find_first(driver, selectors, check_displayed=True):
@@ -769,8 +859,20 @@ class Uploader:
         for error_file in downloaded_error_files:
             result_text += "\n" + self._read_workbook_text(error_file)
         normalized = normalize_upload_result(total_rows, success_rows, result_text)
+        person_results = extract_error_person_results(downloaded_error_files)
+        if person_results:
+            normalized['person_results'] = person_results
+            normalized['person_details_available'] = (
+                normalized['failure_rows'] is not None
+                and len(person_results) == normalized['failure_rows']
+            )
         if normalized['already_exists']:
             logger.info("政府平台返回该人员已存在，计为测试成功")
+        elif normalized['person_details_available']:
+            logger.info(
+                "已从政府错误明细对应到 %s 条失败人员，剩余 %s 条为成功",
+                len(person_results), normalized['success_rows'],
+            )
         elif normalized['total_rows'] and normalized['total_rows'] > 1 and normalized['failure_rows']:
             logger.warning(
                 "政府平台批量结果为成功 %s 条、失败 %s 条；未返回可可靠对应到个人的成功名单",

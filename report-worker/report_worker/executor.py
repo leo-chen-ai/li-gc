@@ -304,13 +304,23 @@ class RunExecutor:
         for result in results:
             name = result["project_name"]
             project_id = self.project_ids.get(name) or self.repo.upsert_project(self.run_id, name)
+            person_results = [
+                {
+                    "identity_fingerprint": item.get("identity_fingerprint"),
+                    "person_name": item.get("person_name"),
+                    "error": redact(item.get("error", "政府错误明细判定该人员失败")),
+                }
+                for item in result.get("person_results", [])
+                if item.get("identity_fingerprint") or item.get("person_name")
+            ]
+            receipt = {key: value for key, value in result.items() if key != "person_results"}
             total = result.get("total_rows") or 0
             success = result.get("success_rows") or 0
             failure = result.get("failure_rows") if result.get("failure_rows") is not None else (1 if result["status"] == "failed" else 0)
             if result["status"] == "failed":
                 self.failed_projects += 1
                 self.repo.update_project(project_id, status="failed", current_stage="target_upload", last_error=redact(result.get("error", "上传失败")), upload_failure_count=failure)
-                self.repo.mark_project_items(project_id, "failed", result, redact(result.get("error", "上传失败")))
+                self.repo.mark_project_items(project_id, "failed", receipt, redact(result.get("error", "上传失败")))
             else:
                 if success > 0 or failure == 0:
                     self.successful_projects += 1
@@ -318,14 +328,22 @@ class RunExecutor:
                     self.failed_projects += 1
                 project_status = "partial_success" if failure else "validated" if result["status"] == "validated" else "success"
                 self.repo.update_project(
-                    project_id, status=project_status, current_stage="target_upload", target_receipt=result,
+                    project_id, status=project_status, current_stage="target_upload", target_receipt=receipt,
                     upload_total_count=total, upload_success_count=success, upload_failure_count=failure,
                 )
-                if total > 1 and failure and not result.get("person_details_available"):
-                    item_status = "result_unknown"
+                if total > 1 and failure and person_results:
+                    default_status = (
+                        "validated" if result["status"] == "validated" else "submitted"
+                    ) if result.get("person_details_available") else "result_unknown"
+                    self.repo.mark_project_item_results(
+                        project_id, default_status, receipt, person_results
+                    )
                 else:
-                    item_status = "validated_with_errors" if result["status"] == "validated" and failure else "validated" if result["status"] == "validated" else "submitted_with_errors" if failure else "submitted"
-                self.repo.mark_project_items(project_id, item_status, result)
+                    if total > 1 and failure and not result.get("person_details_available"):
+                        item_status = "result_unknown"
+                    else:
+                        item_status = "validated_with_errors" if result["status"] == "validated" and failure else "validated" if result["status"] == "validated" else "submitted_with_errors" if failure else "submitted"
+                    self.repo.mark_project_items(project_id, item_status, receipt)
         error_dir = Path(self.config["browser"]["error_dir"]) / datetime.now().strftime("%Y%m%d")
         if error_dir.exists():
             for path in error_dir.glob("*.xlsx"):

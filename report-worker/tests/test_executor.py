@@ -2,6 +2,7 @@ import hashlib
 import sys
 from datetime import date, timedelta
 from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import openpyxl
 
@@ -125,6 +126,58 @@ def test_single_existing_person_is_counted_as_success():
     assert result["success_rows"] == 1
     assert result["failure_rows"] == 0
     assert result["already_exists"] is True
+
+
+def test_error_workbook_extracts_hashed_person_results(tmp_path):
+    path = tmp_path / "errors.xlsx"
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "sheet1"
+    sheet.append(["姓名", "证件号码", "错误消息"])
+    sheet.append(["ZPMC", "KJCGGBNR", "ErrorMsg"])
+    sheet.append(["张三", "330203199001011234", "人员已存在"])
+    sheet.append(["李四", "330203199001011235", "备案日期错误"])
+    workbook.save(path)
+
+    results = uploader.extract_error_person_results([path])
+
+    assert results == [
+        {
+            "identity_fingerprint": hashlib.sha256(b"330203199001011234").hexdigest(),
+            "error": "人员已存在",
+        },
+        {
+            "identity_fingerprint": hashlib.sha256(b"330203199001011235").hexdigest(),
+            "error": "备案日期错误",
+        },
+    ]
+
+
+def test_error_workbook_falls_back_to_person_names(tmp_path):
+    path = tmp_path / "name-errors.xlsx"
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.append(["姓名"])
+    sheet.append(["ZPMC"])
+    sheet.append(["张三"])
+    sheet.append(["李四"])
+    workbook.save(path)
+
+    with ZipFile(path) as archive:
+        entries = {name: archive.read(name) for name in archive.namelist()}
+    sheet_xml = entries["xl/worksheets/sheet1.xml"]
+    entries["xl/worksheets/sheet1.xml"] = sheet_xml.replace(
+        b'<dimension ref="A1:A4" />', b'<dimension ref="A1:A1" />'
+    )
+    assert entries["xl/worksheets/sheet1.xml"] != sheet_xml
+    with ZipFile(path, "w", ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+
+    assert uploader.extract_error_person_results([path]) == [
+        {"person_name": "张三", "error": "政府错误明细判定该人员失败"},
+        {"person_name": "李四", "error": "政府错误明细判定该人员失败"},
+    ]
 
 
 def test_redact_sensitive_values():
@@ -276,3 +329,63 @@ def test_upload_with_row_failures_is_partial_success(monkeypatch, tmp_path):
     assert executor.failed_projects == 1
     assert executor.repo.project_update["status"] == "partial_success"
     assert executor.repo.item_status == "result_unknown"
+
+
+def test_upload_maps_error_detail_people_and_infers_success(monkeypatch, tmp_path):
+    failed_fingerprint = hashlib.sha256(b"330203199001011234").hexdigest()
+
+    class FakeUploader:
+        def __init__(self, _config):
+            pass
+
+        def run(self):
+            return [{
+                "project_name": "测试项目", "status": "success",
+                "total_rows": 2, "success_rows": 1, "failure_rows": 1,
+                "person_details_available": True,
+                "person_results": [{
+                    "identity_fingerprint": failed_fingerprint,
+                    "error": "身份证 330203199001011234 校验失败",
+                }],
+            }]
+
+    class FakeRepository:
+        def __init__(self):
+            self.project_update = None
+            self.item_result_args = None
+
+        def update_project(self, _project_id, **fields):
+            self.project_update = fields
+
+        def mark_project_item_results(self, project_id, default_status, receipt, results):
+            self.item_result_args = (project_id, default_status, receipt, results)
+
+        def mark_project_items(self, *_args):
+            raise AssertionError("complete error details must use per-person mapping")
+
+        def upsert_project(self, *_args):
+            return "project-id"
+
+    monkeypatch.setattr(executor_module, "Uploader", FakeUploader)
+    executor = RunExecutor.__new__(RunExecutor)
+    executor.config = {"browser": {"error_dir": str(tmp_path / "errors")}}
+    executor.config_id = "config-id"
+    executor.run_id = "run-id"
+    executor.project_ids = {"测试项目": "project-id"}
+    executor.successful_projects = 0
+    executor.failed_projects = 0
+    executor.repo = FakeRepository()
+    executor.stage = lambda *_args, **_kwargs: None
+
+    executor._upload()
+
+    assert executor.repo.project_update["status"] == "partial_success"
+    project_id, default_status, receipt, results = executor.repo.item_result_args
+    assert project_id == "project-id"
+    assert default_status == "submitted"
+    assert "person_results" not in receipt
+    assert results == [{
+        "identity_fingerprint": failed_fingerprint,
+        "person_name": None,
+        "error": "身份证 330203********1234 校验失败",
+    }]

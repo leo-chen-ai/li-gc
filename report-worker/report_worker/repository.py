@@ -234,6 +234,78 @@ class Repository:
                 (status, Jsonb(target_result or {}), error, status, project_id),
             )
 
+    def mark_project_item_results(self, project_id, default_status, target_result, person_results):
+        with self.connection() as conn, conn.transaction():
+            matched_groups = []
+            matched_ids = set()
+            fingerprint_results = [
+                item for item in person_results if item.get("identity_fingerprint")
+            ]
+            name_results = {}
+            for item in person_results:
+                if not item.get("identity_fingerprint") and item.get("person_name"):
+                    name_results.setdefault(item["person_name"], []).append(item)
+
+            for item in fingerprint_results:
+                rows = conn.execute(
+                    """SELECT id FROM report_forward_items
+                       WHERE run_project_id=%s AND identity_fingerprint=%s""",
+                    (project_id, item["identity_fingerprint"]),
+                ).fetchall()
+                if len(rows) != 1:
+                    return self._mark_project_results_unknown(conn, project_id, target_result)
+                ids = [rows[0]["id"]]
+                if matched_ids.intersection(ids):
+                    return self._mark_project_results_unknown(conn, project_id, target_result)
+                matched_ids.update(ids)
+                matched_groups.append((ids, item.get("error")))
+
+            for person_name, items in name_results.items():
+                rows = conn.execute(
+                    """SELECT id FROM report_forward_items
+                       WHERE run_project_id=%s AND person_name=%s""",
+                    (project_id, person_name),
+                ).fetchall()
+                ids = [row["id"] for row in rows]
+                if len(ids) != len(items) or matched_ids.intersection(ids):
+                    return self._mark_project_results_unknown(conn, project_id, target_result)
+                matched_ids.update(ids)
+                matched_groups.append((ids, items[0].get("error")))
+
+            if len(matched_ids) != len(person_results):
+                return self._mark_project_results_unknown(conn, project_id, target_result)
+
+            conn.execute(
+                """UPDATE report_forward_items SET status=%s,target_result=%s,last_error=NULL,
+                   pushed_at=CASE WHEN %s IN ('submitted','validated') THEN NOW() ELSE pushed_at END,
+                   updated_at=NOW() WHERE run_project_id=%s""",
+                (default_status, Jsonb(target_result or {}), default_status, project_id),
+            )
+            with conn.cursor() as cur:
+                cur.executemany(
+                    """UPDATE report_forward_items SET status='failed',target_result=%s,last_error=%s,
+                       pushed_at=NULL,updated_at=NOW() WHERE run_project_id=%s AND id=ANY(%s)""",
+                    [
+                        (
+                            Jsonb(target_result or {}),
+                            error or "政府错误明细判定该人员失败",
+                            project_id,
+                            ids,
+                        )
+                        for ids, error in matched_groups
+                    ],
+                )
+            return True
+
+    def _mark_project_results_unknown(self, conn, project_id, target_result):
+        conn.execute(
+            """UPDATE report_forward_items SET status='result_unknown',target_result=%s,
+               last_error='政府只返回批量汇总，无法可靠对应到个人结果',pushed_at=NULL,
+               updated_at=NOW() WHERE run_project_id=%s""",
+            (Jsonb(target_result or {}), project_id),
+        )
+        return False
+
     def complete(self, run_id, status, error=None):
         with self.connection() as conn:
             conn.execute(
