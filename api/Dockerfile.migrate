@@ -31,6 +31,7 @@ WORKDIR /migrations
 
 COPY migrations/ /migrations/
 COPY migrate.sh /migrate.sh
-RUN chmod +x /migrate.sh
+RUN sed -i 's/\r$//' /migrate.sh \
+    && chmod +x /migrate.sh
 
 ENTRYPOINT ["/migrate.sh"]
