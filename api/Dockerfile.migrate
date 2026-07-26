@@ -31,7 +31,8 @@ WORKDIR /migrations
 
 COPY migrations/ /migrations/
 COPY migrate.sh /migrate.sh
-RUN sed -i 's/\r$//' /migrate.sh \
+RUN find /migrations -type f -name '*.sql' -exec sed -i 's/\r$//' {} + \
+    && sed -i 's/\r$//' /migrate.sh \
     && chmod +x /migrate.sh
 
 ENTRYPOINT ["/migrate.sh"]
