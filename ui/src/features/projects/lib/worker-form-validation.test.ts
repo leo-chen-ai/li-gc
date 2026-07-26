@@ -27,7 +27,7 @@ test("requires work type for every worker", () => {
   );
 });
 
-test("拒绝宁波市住建字典之外的旧工种", () => {
+test("拒绝市住建字典之外的旧工种", () => {
   assert.throws(
     () =>
       validateWorkerCreatePayload({
@@ -37,7 +37,7 @@ test("拒绝宁波市住建字典之外的旧工种", () => {
         work_type: 12,
         political_status: 1,
       }),
-    /工种不在宁波市住建工人工种字典中/
+    /工种不在市住建工人工种字典中/
   );
 });
 

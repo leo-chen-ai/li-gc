@@ -12,7 +12,7 @@ type Aes192CbcEnc = cbc::Encryptor<Aes192>;
 type Aes256CbcEnc = cbc::Encryptor<Aes256>;
 
 pub const PLATFORM_CODE: &str = "yongxin_v2";
-pub const PLATFORM_NAME: &str = "甬薪精管开放平台 V2";
+pub const PLATFORM_NAME: &str = "甬薪";
 const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 
 pub const PROJECT_QUERY_PATH: &str = "project/v1/query";

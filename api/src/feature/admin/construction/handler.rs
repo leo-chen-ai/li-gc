@@ -2923,7 +2923,7 @@ async fn validate_team_type_for_enabled_platforms(
             WHERE project_id = $1
               AND is_deleted = FALSE
               AND is_enabled = TRUE
-              AND (platform_type = 'ningbo_housing' OR platform_name = '宁波市住建')
+              AND (platform_type = 'ningbo_housing' OR platform_name = '市住建')
         )
         "#,
     )
@@ -2938,7 +2938,7 @@ async fn validate_team_type_for_enabled_platforms(
     let work_type = json_i32_value(body.get("work_type"));
     if ningbo_team_type_label(work_type).is_empty() {
         return Err(invalid_input(
-            "启用宁波市住建上报后，班组类型为必填项且必须选择平台支持的类型",
+            "启用市住建上报后，班组类型为必填项且必须选择平台支持的类型",
         ));
     }
     Ok(())
@@ -3010,7 +3010,7 @@ pub(crate) async fn sync_new_team_to_ningbo_platforms(
         WHERE project_id = $1
           AND is_deleted = FALSE
           AND is_enabled = TRUE
-          AND (platform_type = 'ningbo_housing' OR platform_name = '宁波市住建')
+          AND (platform_type = 'ningbo_housing' OR platform_name = '市住建')
         ORDER BY created_at, id
         "#,
     )
@@ -3048,21 +3048,22 @@ async fn sync_team_to_ningbo_config(
     };
     let team_type = ningbo_team_type_label(source.work_type);
     let validation_error = if source.name.trim().is_empty() {
-        Some("班组名称为空，无法上报宁波市住建平台".to_owned())
+        Some("班组名称为空，无法上报市住建平台".to_owned())
     } else if corp_code.is_empty() {
-        Some("参建单位统一社会信用代码为空，无法上报宁波市住建平台".to_owned())
+        Some("参建单位统一社会信用代码为空，无法上报市住建平台".to_owned())
     } else if !ningbo_housing::is_valid_social_credit_code(&corp_code) {
         Some(format!(
             "参建单位统一社会信用代码格式错误：{corp_code}（应为 18 位大写字母或数字）"
         ))
     } else if team_type.is_empty() {
-        Some("班组工种未配置，无法匹配宁波市住建班组类型".to_owned())
+        Some("班组工种未配置，无法匹配市住建班组类型".to_owned())
     } else {
         None
     };
 
     let binding_id =
-        ensure_ningbo_project_binding(pool, source.project_id, &credentials, config).await?;
+        ensure_ningbo_project_binding(pool, source.project_id, config_id, &credentials, config)
+            .await?;
     let request = ningbo_housing::add_team_request(
         &credentials,
         corp_code.clone(),
@@ -3219,6 +3220,7 @@ async fn sync_team_to_ningbo_config(
 async fn ensure_ningbo_project_binding(
     pool: &sqlx::PgPool,
     project_id: Uuid,
+    config_id: Uuid,
     credentials: &ningbo_housing::NingboHousingCredentials,
     config: &Value,
 ) -> Result<Uuid, ApiError> {
@@ -3227,6 +3229,7 @@ async fn ensure_ningbo_project_binding(
         INSERT INTO integration_project_bindings (
             project_id,
             platform_id,
+            platform_config_id,
             external_project_id,
             base_url,
             credentials,
@@ -3243,6 +3246,7 @@ async fn ensure_ningbo_project_binding(
             $3,
             $4,
             $5,
+            $6,
             ARRAY['team.created', 'worker.created', 'worker.updated', 'worker.exited']::text[],
             TRUE,
             FALSE,
@@ -3251,7 +3255,7 @@ async fn ensure_ningbo_project_binding(
         WHERE platform.code = 'ningbo_housing'
           AND platform.is_deleted = FALSE
           AND platform.is_enabled = TRUE
-        ON CONFLICT (project_id, platform_id) WHERE is_deleted = FALSE
+        ON CONFLICT (platform_config_id) WHERE is_deleted = FALSE AND platform_config_id IS NOT NULL
         DO UPDATE SET
             external_project_id = EXCLUDED.external_project_id,
             base_url = EXCLUDED.base_url,
@@ -3264,6 +3268,7 @@ async fn ensure_ningbo_project_binding(
         "#,
     )
     .bind(project_id)
+    .bind(config_id)
     .bind(credentials.project_id.to_string())
     .bind(credentials.base_url.as_str())
     .bind(serde_json::json!({
@@ -3274,7 +3279,7 @@ async fn ensure_ningbo_project_binding(
     .fetch_optional(pool)
     .await
     .map_err(db_error)?
-    .ok_or_else(|| invalid_input("宁波市住建平台适配器未初始化，请先运行数据库迁移"))
+    .ok_or_else(|| invalid_input("市住建平台适配器未初始化，请先运行数据库迁移"))
 }
 
 async fn upsert_team_sync_job(
@@ -3724,7 +3729,7 @@ pub async fn repair_team_reporting(
             WHERE project_id = $1
               AND is_deleted = FALSE
               AND is_enabled = TRUE
-              AND (platform_type = 'ningbo_housing' OR platform_name = '宁波市住建')
+              AND (platform_type = 'ningbo_housing' OR platform_name = '市住建')
         )
         "#,
     )
@@ -3733,7 +3738,7 @@ pub async fn repair_team_reporting(
     .await
     .map_err(db_error)?;
     if !has_enabled_platform {
-        return Err(invalid_input("当前项目未启用宁波市住建上报配置"));
+        return Err(invalid_input("当前项目未启用市住建上报配置"));
     }
 
     let team_ids = sqlx::query_scalar::<_, Uuid>(
@@ -3811,7 +3816,7 @@ pub async fn repair_worker_reporting(
             WHERE project_id = $1
               AND is_deleted = FALSE
               AND is_enabled = TRUE
-              AND (platform_type = 'ningbo_housing' OR platform_name = '宁波市住建')
+              AND (platform_type = 'ningbo_housing' OR platform_name = '市住建')
         )
         "#,
     )
@@ -3820,7 +3825,7 @@ pub async fn repair_worker_reporting(
     .await
     .map_err(db_error)?;
     if !has_enabled_platform {
-        return Err(invalid_input("当前项目未启用宁波市住建上报配置"));
+        return Err(invalid_input("当前项目未启用市住建上报配置"));
     }
 
     let worker_ids = sqlx::query_scalar::<_, Uuid>(
@@ -4169,7 +4174,7 @@ pub(crate) async fn exit_team_from_ningbo_platforms(
 fn platform_exit_error(message: &str) -> ApiError {
     ApiError::default()
         .with_code(StatusCode::BAD_GATEWAY)
-        .with_message(format!("宁波市住建平台班组退场失败：{message}"))
+        .with_message(format!("市住建平台班组退场失败：{message}"))
 }
 
 async fn normalize_team_update_type(
@@ -4352,7 +4357,7 @@ pub(crate) async fn reconcile_worker_to_ningbo_platforms(
         WHERE project_id = $1
           AND is_deleted = FALSE
           AND is_enabled = TRUE
-          AND (platform_type = 'ningbo_housing' OR platform_name = '宁波市住建')
+          AND (platform_type = 'ningbo_housing' OR platform_name = '市住建')
         ORDER BY created_at, id
         "#,
     )
@@ -4410,9 +4415,14 @@ async fn reconcile_worker_to_ningbo_config(
             return Ok(Some(error.to_string()));
         }
     };
-    let binding_id =
-        ensure_ningbo_project_binding(state.db.pool(), source.project_id, &credentials, config)
-            .await?;
+    let binding_id = ensure_ningbo_project_binding(
+        state.db.pool(),
+        source.project_id,
+        config_id,
+        &credentials,
+        config,
+    )
+    .await?;
     let mapping = worker_platform_mapping(state.db.pool(), binding_id, source.id).await?;
 
     if source.work_status == 2 {
@@ -4470,7 +4480,7 @@ async fn worker_platform_mapping(
         .try_get::<String, _>("external_entity_id")
         .map_err(db_error)?
         .parse::<i64>()
-        .map_err(|_| invalid_input("已保存的宁波市住建项目人员 ID 格式错误"))?;
+        .map_err(|_| invalid_input("已保存的市住建项目人员 ID 格式错误"))?;
     let external_team_id = row
         .try_get::<Option<String>, _>("external_parent_id")
         .map_err(db_error)?
@@ -4584,9 +4594,14 @@ async fn sync_worker_to_ningbo_config(
             return Ok(());
         }
     };
-    let binding_id =
-        ensure_ningbo_project_binding(state.db.pool(), source.project_id, &credentials, config)
-            .await?;
+    let binding_id = ensure_ningbo_project_binding(
+        state.db.pool(),
+        source.project_id,
+        config_id,
+        &credentials,
+        config,
+    )
+    .await?;
     let job_id = upsert_worker_sync_job(
         state.db.pool(),
         source,
@@ -4629,7 +4644,7 @@ async fn sync_worker_to_ningbo_config(
             job_id,
             "failed",
             None,
-            Some("所属班组尚未成功上报，缺少宁波市住建班组 ID"),
+            Some("所属班组尚未成功上报，缺少市住建班组 ID"),
         )
         .await?;
         return Ok(());
@@ -5032,7 +5047,7 @@ async fn edit_worker_on_ningbo_config(
     let external_team_id =
         current_external_team_id(state.db.pool(), binding_id, source.team_id).await?;
     let Some(external_team_id) = external_team_id else {
-        let error = "所属班组尚未成功上报，缺少宁波市住建班组 ID".to_owned();
+        let error = "所属班组尚未成功上报，缺少市住建班组 ID".to_owned();
         finish_team_sync_job(state.db.pool(), job_id, "failed", None, Some(&error)).await?;
         return Ok(Some(error));
     };
@@ -5545,7 +5560,7 @@ fn worker_sync_validation_error(
         (work_type_name, "工种"),
     ];
     if let Some((_, label)) = required.iter().find(|(value, _)| value.is_empty()) {
-        return Some(format!("{label}为空，无法上报宁波市住建平台"));
+        return Some(format!("{label}为空，无法上报市住建平台"));
     }
     if !ningbo_housing::is_valid_social_credit_code(source.corp_code.trim()) {
         return Some(format!(
@@ -5852,7 +5867,7 @@ async fn complete_worker_platform_mapping(
     .execute(pool)
     .await;
     if let Err(error) = result {
-        let message = format!("保存宁波市住建项目人员 ID 失败：{error}");
+        let message = format!("保存市住建项目人员 ID 失败：{error}");
         finish_team_sync_job(pool, job_id, "failed", Some(&payload), Some(&message)).await?;
         return Ok(());
     }
@@ -5878,7 +5893,7 @@ async fn integration_binding_platform_id(
     .fetch_optional(pool)
     .await
     .map_err(db_error)?
-    .ok_or_else(|| invalid_input("宁波市住建项目绑定不存在"))
+    .ok_or_else(|| invalid_input("市住建项目绑定不存在"))
 }
 
 async fn cached_external_person_id(
@@ -5993,7 +6008,8 @@ async fn list_workers_page(
                             'platform_type', config.platform_type,
                             'is_enabled', config.is_enabled,
                             'status', CASE
-                                WHEN r.worker_type = 1001 OR r.work_type = 1001 THEN 'ignored'
+                                WHEN config.platform_type <> 'xinleda'
+                                     AND (r.worker_type = 1001 OR r.work_type = 1001) THEN 'ignored'
                                 WHEN latest_job.id IS NULL THEN 'not_reported'
                                 WHEN latest_job.status IN ('success', 'completed') THEN 'success'
                                 WHEN latest_job.status IN ('pending', 'processing', 'retry', 'awaiting_result', 'waiting_dependency', 'waiting_media') THEN 'pending'
@@ -6018,10 +6034,12 @@ async fn list_workers_page(
                     LEFT JOIN LATERAL (
                         SELECT job.id, job.status, job.last_error, job.response_payload, job.updated_at
                         FROM integration_jobs job
+                        LEFT JOIN integration_project_bindings binding
+                          ON binding.id = job.binding_id
                         WHERE job.project_id = r.project_id
                           AND job.entity_type IN ('worker', 'construction_worker')
                           AND job.local_entity_id = r.id
-                          AND job.platform_code = config.platform_type
+                          AND platform_job_matches_config(job.binding_id, job.platform_code, binding.platform_config_id, config.id, config.project_id, config.platform_type)
                         ORDER BY job.updated_at DESC, job.id DESC
                         LIMIT 1
                     ) latest_job ON TRUE
@@ -6106,7 +6124,8 @@ async fn worker_reporting_summary(
                 config.created_at AS platform_created_at,
                 worker.id AS worker_id,
                 CASE
-                    WHEN worker.worker_type = 1001 OR worker.work_type = 1001 THEN 'ignored'
+                    WHEN config.platform_type <> 'xinleda'
+                         AND (worker.worker_type = 1001 OR worker.work_type = 1001) THEN 'ignored'
                     WHEN worker.id IS NULL OR latest_job.id IS NULL THEN 'not_reported'
                     WHEN latest_job.status IN ('success', 'completed') THEN 'success'
                     WHEN latest_job.status IN ('pending', 'processing', 'retry', 'awaiting_result', 'waiting_dependency', 'waiting_media') THEN 'pending'
@@ -6119,10 +6138,12 @@ async fn worker_reporting_summary(
             LEFT JOIN LATERAL (
                 SELECT job.id, job.status
                 FROM integration_jobs job
+                LEFT JOIN integration_project_bindings binding
+                  ON binding.id = job.binding_id
                 WHERE job.project_id = config.project_id
                   AND job.entity_type IN ('worker', 'construction_worker')
                   AND job.local_entity_id = worker.id
-                  AND job.platform_code = config.platform_type
+                  AND platform_job_matches_config(job.binding_id, job.platform_code, binding.platform_config_id, config.id, config.project_id, config.platform_type)
                 ORDER BY job.updated_at DESC, job.id DESC
                 LIMIT 1
             ) latest_job ON TRUE
@@ -8205,7 +8226,7 @@ pub async fn retry_platform_job(
     let platform_code: String = row.try_get("platform_code").map_err(db_error)?;
     let status: String = row.try_get("status").map_err(db_error)?;
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
-    if platform_code != "yongxin_v2" {
+    if !matches!(platform_code.as_str(), "yongxin_v2" | "xinleda") {
         return Err(invalid_input("当前平台任务暂不支持从此入口重试"));
     }
     if status == "delivery_unknown" {
@@ -8297,11 +8318,13 @@ async fn list_unified_platform_logs(
                     WHEN job.entity_type IN ('worker', 'construction_worker')
                          AND job.operation = 'Project/ProjectWorkerExit' THEN '工人退场'
                     WHEN job.operation = 'project.query' THEN '项目配置校验'
+                    WHEN job.operation = 'project.sync' THEN '项目基本信息同步'
                     WHEN job.operation = 'unit.sync' THEN '参建单位同步'
                     WHEN job.operation = 'team.sync' THEN '班组同步'
                     WHEN job.operation = 'worker.sync' THEN '人员同步'
                     WHEN job.operation = 'entry_exit.sync' THEN '人员进退场同步'
                     WHEN job.operation = 'attendance.sync' THEN '设备考勤同步'
+                    WHEN job.operation = 'safeguard.sync' THEN '企业保证金同步'
                     ELSE job.operation
                 END AS operation,
                 'push'::text AS direction,
@@ -8372,18 +8395,9 @@ async fn list_unified_platform_logs(
             LEFT JOIN integration_platforms platform
               ON platform.id = binding.platform_id
              AND platform.is_deleted = FALSE
-            LEFT JOIN LATERAL (
-                SELECT config.id, config.platform_name, config.platform_type
-                FROM construction_platform_configs config
-                WHERE config.project_id = job.project_id
-                  AND config.is_deleted = FALSE
-                  AND (
-                      config.platform_type = job.platform_code
-                      OR (config.platform_type = 'ningbo_housing' AND job.platform_code = 'zhenhai')
-                  )
-                ORDER BY config.is_enabled DESC, config.created_at, config.id
-                LIMIT 1
-            ) config ON TRUE
+            LEFT JOIN construction_platform_configs config
+              ON config.id = binding.platform_config_id
+             AND config.is_deleted = FALSE
             WHERE TRUE
         ), filtered_logs AS (
             SELECT *
@@ -11105,13 +11119,12 @@ async fn list_team_rows_page(
                             job.response_payload,
                             job.updated_at
                         FROM integration_jobs job
+                        LEFT JOIN integration_project_bindings binding
+                          ON binding.id = job.binding_id
                         WHERE job.project_id = r.project_id
                           AND job.entity_type IN ('team', 'construction_team')
                           AND job.local_entity_id = r.id
-                          AND (
-                              job.platform_code = config.platform_type
-                              OR (config.platform_type = 'ningbo_housing' AND job.platform_code = 'zhenhai')
-                          )
+                          AND platform_job_matches_config(job.binding_id, job.platform_code, binding.platform_config_id, config.id, config.project_id, config.platform_type)
                         ORDER BY job.created_at DESC, job.id DESC
                         LIMIT 1
                     ) latest_job ON TRUE
@@ -11173,13 +11186,12 @@ async fn team_reporting_summary(pool: &sqlx::PgPool, project_id: Uuid) -> Result
             LEFT JOIN LATERAL (
                 SELECT job.id, job.status
                 FROM integration_jobs job
+                LEFT JOIN integration_project_bindings binding
+                  ON binding.id = job.binding_id
                 WHERE job.project_id = config.project_id
                   AND job.entity_type IN ('team', 'construction_team')
                   AND job.local_entity_id = team.id
-                  AND (
-                      job.platform_code = config.platform_type
-                      OR (config.platform_type = 'ningbo_housing' AND job.platform_code = 'zhenhai')
-                  )
+                  AND platform_job_matches_config(job.binding_id, job.platform_code, binding.platform_config_id, config.id, config.project_id, config.platform_type)
                 ORDER BY job.created_at DESC, job.id DESC
                 LIMIT 1
             ) latest_job ON TRUE
@@ -11572,7 +11584,7 @@ fn validate_worker_work_type(
         .flatten()
         .ok_or_else(|| invalid_input("请选择工种"))?;
     if !is_official_ningbo_worker_work_type(work_type) {
-        return Err(invalid_input("工种不在宁波市住建工人工种字典中"));
+        return Err(invalid_input("工种不在市住建工人工种字典中"));
     }
     Ok(())
 }

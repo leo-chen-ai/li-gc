@@ -1,0 +1,117 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shanhuai-mock
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shanhuai-integration-mock-config
+  namespace: shanhuai-mock
+data:
+  PORT: "3000"
+  MOCK_DATABASE_PATH: /data/integration-mock.sqlite
+  MOCK_AUTH_MODE: strict
+  MOCK_MAX_BODY_BYTES: "12582912"
+  MOCK_XINLEDA_TIMESTAMP_WINDOW_MS: "600000"
+  MOCK_NINGBO_PROJECT_ID: "1206"
+  MOCK_NINGBO_PROJECT_GUID: 00000000-0000-0000-0000-000000001206
+  MOCK_NINGBO_PROJECT_NAME: 山淮模拟测试项目
+  MOCK_YONGXIN_PROJECT_CODE: MOCK-PROJECT-001
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: shanhuai-integration-mock-data
+  namespace: shanhuai-mock
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shanhuai-integration-mock
+  namespace: shanhuai-mock
+  labels:
+    app.kubernetes.io/name: shanhuai-integration-mock
+    app.kubernetes.io/part-of: shanhuai
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: shanhuai-integration-mock
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: shanhuai-integration-mock
+        app.kubernetes.io/part-of: shanhuai
+    spec:
+      securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: mock
+          image: shanhuai-integration-mock:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: shanhuai-integration-mock-config
+            - secretRef:
+                name: shanhuai-integration-mock-secrets
+          resources:
+            requests:
+              cpu: 25m
+              memory: 48Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: shanhuai-integration-mock-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shanhuai-integration-mock
+  namespace: shanhuai-mock
+  labels:
+    app.kubernetes.io/name: shanhuai-integration-mock
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: shanhuai-integration-mock
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+      nodePort: 30083

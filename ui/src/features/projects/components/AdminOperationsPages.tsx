@@ -83,18 +83,26 @@ import {
   NINGBO_HOUSING_DEFAULT_BASE_URL,
   NINGBO_HOUSING_PLATFORM_NAME,
   NINGBO_HOUSING_PLATFORM_TYPE,
+  XINLEDA_DEFAULT_BASE_URL,
+  XINLEDA_PLATFORM_NAME,
+  XINLEDA_PLATFORM_TYPE,
   YONGXIN_V2_PLATFORM_NAME,
   YONGXIN_V2_PLATFORM_TYPE,
   buildNingboHousingConfig,
+  buildXinledaConfig,
   buildYongxinV2Config,
   createNingboHousingConfigForm,
+  createXinledaConfigForm,
   createYongxinV2ConfigForm,
   isNingboHousingConfig,
+  isXinledaConfig,
   isYongxinV2Config,
   parseNingboHousingConfig,
+  parseXinledaConfig,
   parseYongxinV2Config,
   summarizePlatformConfig,
   validateNingboHousingConfig,
+  validateXinledaConfig,
   validateYongxinV2Config,
 } from "@/features/projects/lib/platform-configs";
 import {
@@ -638,23 +646,33 @@ function PlatformConfigPanel({ filters, setFilters, tabControls }: { filters: Co
   const selectedPlatform = BUILT_IN_PLATFORM_OPTIONS.find((option) => option.value === form.platform_type);
   const openCreate = () => { setEditing(null); setForm(createNingboHousingConfigForm()); setDialogOpen(true); };
   const openEdit = (config: ConstructionPlatformConfig) => {
-    if (!isNingboHousingConfig(config) && !isYongxinV2Config(config)) {
+    if (!isNingboHousingConfig(config) && !isYongxinV2Config(config) && !isXinledaConfig(config)) {
       toast.error("当前平台暂未内置配置表单");
       return;
     }
     setEditing(config);
-    setForm(isYongxinV2Config(config) ? parseYongxinV2Config(config) : parseNingboHousingConfig(config));
+    setForm(isYongxinV2Config(config)
+      ? parseYongxinV2Config(config)
+      : isXinledaConfig(config)
+        ? parseXinledaConfig(config)
+        : parseNingboHousingConfig(config));
     setDialogOpen(true);
   };
   const selectPlatform = (platform_type: string) => {
     const empty = platform_type === YONGXIN_V2_PLATFORM_TYPE
       ? createYongxinV2ConfigForm()
-      : createNingboHousingConfigForm();
+      : platform_type === XINLEDA_PLATFORM_TYPE
+        ? createXinledaConfigForm()
+        : createNingboHousingConfigForm();
     setForm((current) => ({
       ...empty,
       project_id: current.project_id,
       platform_type,
-      base_url: platform_type === NINGBO_HOUSING_PLATFORM_TYPE ? NINGBO_HOUSING_DEFAULT_BASE_URL : "",
+      base_url: platform_type === NINGBO_HOUSING_PLATFORM_TYPE
+        ? NINGBO_HOUSING_DEFAULT_BASE_URL
+        : platform_type === XINLEDA_PLATFORM_TYPE
+          ? XINLEDA_DEFAULT_BASE_URL
+          : "",
       is_enabled: current.is_enabled,
       remark: current.remark,
     }));
@@ -662,16 +680,21 @@ function PlatformConfigPanel({ filters, setFilters, tabControls }: { filters: Co
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const isYongxin = form.platform_type === YONGXIN_V2_PLATFORM_TYPE;
-    const validationError = isYongxin ? validateYongxinV2Config(form) : validateNingboHousingConfig(form);
+    const isXinleda = form.platform_type === XINLEDA_PLATFORM_TYPE;
+    const validationError = isYongxin
+      ? validateYongxinV2Config(form)
+      : isXinleda
+        ? validateXinledaConfig(form)
+        : validateNingboHousingConfig(form);
     if (validationError) {
       toast.error(validationError);
       return;
     }
     const payload: ConstructionPlatformConfigPayload = {
       project_id: form.project_id,
-      platform_name: isYongxin ? YONGXIN_V2_PLATFORM_NAME : NINGBO_HOUSING_PLATFORM_NAME,
-      platform_type: isYongxin ? YONGXIN_V2_PLATFORM_TYPE : NINGBO_HOUSING_PLATFORM_TYPE,
-      config: isYongxin ? buildYongxinV2Config(form) : buildNingboHousingConfig(form),
+      platform_name: isYongxin ? YONGXIN_V2_PLATFORM_NAME : isXinleda ? XINLEDA_PLATFORM_NAME : NINGBO_HOUSING_PLATFORM_NAME,
+      platform_type: isYongxin ? YONGXIN_V2_PLATFORM_TYPE : isXinleda ? XINLEDA_PLATFORM_TYPE : NINGBO_HOUSING_PLATFORM_TYPE,
+      config: isYongxin ? buildYongxinV2Config(form) : isXinleda ? buildXinledaConfig(form) : buildNingboHousingConfig(form),
       is_enabled: form.is_enabled,
       remark: form.remark.trim() || null,
     };
@@ -751,7 +774,7 @@ function PlatformConfigPanel({ filters, setFilters, tabControls }: { filters: Co
                 <section className="rounded-lg border p-4">
                 <div className="mb-4">
                   <div className="text-sm font-semibold text-slate-900">接口凭证</div>
-                  <div className="mt-1 text-xs text-slate-500">AppKey 和 AppSecret 由宁波市住建平台提供，系统会自动生成请求签名。</div>
+                  <div className="mt-1 text-xs text-slate-500">AppKey 和 AppSecret 由市住建平台提供，系统会自动生成请求签名。</div>
                 </div>
                 <div className="grid gap-4 md:grid-cols-2">
                   <PlatformCredentialField className="md:col-span-2" label="接口地址" value={form.base_url} onChange={(base_url) => setForm((current) => ({ ...current, base_url }))} placeholder="http://183.136.157.18:7334" />
@@ -807,6 +830,51 @@ function PlatformConfigPanel({ filters, setFilters, tabControls }: { filters: Co
                     <CheckboxField label="考勤机数据自动推送" checked={form.sync_attendance} onChange={(sync_attendance) => setForm((current) => ({ ...current, sync_attendance }))} />
                     <PlatformCredentialField className="md:col-span-2" label="历史考勤补传起始日期（留空则从启用时开始）" value={form.attendance_backfill_from} onChange={(attendance_backfill_from) => setForm((current) => ({ ...current, attendance_backfill_from }))} type="date" required={false} />
                   </div>
+                </section>
+              </> : null}
+
+              {form.platform_type === XINLEDA_PLATFORM_TYPE ? <>
+                <section className="rounded-lg border p-4">
+                  <div className="mb-4">
+                    <div className="text-sm font-semibold text-slate-900">接口凭证</div>
+                    <div className="mt-1 text-xs text-slate-500">AppID、AppSecret 由薪乐达提供；项目编码可在薪乐达项目后台查看。测试模式只记录任务，不发送真实请求。</div>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <PlatformCredentialField className="md:col-span-2" label="接口地址" value={form.base_url} onChange={(base_url) => setForm((current) => ({ ...current, base_url }))} placeholder={XINLEDA_DEFAULT_BASE_URL} />
+                    <PlatformCredentialField label="AppID" value={form.app_id} onChange={(app_id) => setForm((current) => ({ ...current, app_id }))} autoComplete="off" />
+                    <PlatformCredentialField label="AppSecret" value={form.app_secret} onChange={(app_secret) => setForm((current) => ({ ...current, app_secret }))} type="password" autoComplete="new-password" />
+                    <PlatformCredentialField label="项目编码" value={form.project_code} onChange={(project_code) => setForm((current) => ({ ...current, project_code }))} autoComplete="off" />
+                    <div className="space-y-2">
+                      <Label>运行模式</Label>
+                      <select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={form.mode} onChange={(event) => setForm((current) => ({ ...current, mode: event.target.value as "test" | "production" }))}>
+                        <option value="test">测试模式（不发真实请求）</option>
+                        <option value="production">正式模式（自动推送）</option>
+                      </select>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="rounded-lg border p-4">
+                  <div className="mb-4">
+                    <div className="text-sm font-semibold text-slate-900">异步同步范围</div>
+                    <div className="mt-1 text-xs text-slate-500">每条薪乐达配置使用独立绑定、队列、限流、映射与日志；同一项目可配置多个薪乐达账户。</div>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <CheckboxField label="同步项目基本信息" checked={form.sync_project} onChange={(sync_project) => setForm((current) => ({ ...current, sync_project }))} />
+                    <CheckboxField label="同步企业基础信息" checked={form.sync_units} onChange={(sync_units) => setForm((current) => ({ ...current, sync_units }))} />
+                    <CheckboxField label="同步班组关联" checked={form.sync_teams} onChange={(sync_teams) => setForm((current) => ({ ...current, sync_teams }))} />
+                    <CheckboxField label="同步实名人员与进退场" checked={form.sync_workers} onChange={(sync_workers) => setForm((current) => ({ ...current, sync_workers }))} />
+                    <CheckboxField label="同步设备考勤（含照片上传）" checked={form.sync_attendance} onChange={(sync_attendance) => setForm((current) => ({ ...current, sync_attendance }))} />
+                    <PlatformCredentialField className="md:col-span-2" label="历史考勤补传起始日期（留空则从启用时开始）" value={form.attendance_backfill_from} onChange={(attendance_backfill_from) => setForm((current) => ({ ...current, attendance_backfill_from }))} type="date" required={false} />
+                  </div>
+                </section>
+
+                <section className="rounded-lg border p-4">
+                  <div className="mb-4">
+                    <div className="text-sm font-semibold text-slate-900">企业保证金接口数据（可选）</div>
+                    <div className="mt-1 text-xs text-slate-500">填写 company.safeguard 所需的 JSON 对象或对象数组；未配置时跳过。代发委托书、维权告示牌、三方协议按要求不接入。</div>
+                  </div>
+                  <TextareaField label="保证金 JSON" value={form.company_safeguard_payload} onChange={(company_safeguard_payload) => setForm((current) => ({ ...current, company_safeguard_payload }))} rows={8} />
                 </section>
               </> : null}
 
@@ -869,7 +937,7 @@ function PlatformLogPanel({ filters, setFilters, tabControls }: { filters: Const
       <PlatformLogFilters filters={filters} setFilters={setFilters} platformOptions={platformOptions} />
       <DataTable loading={query.isLoading} colSpan={9} headers={["平台", "项目", "操作", "方向", "状态", "请求/成功/失败", "消息", "时间", "操作"]}>
         {rows.map((row) => (
-          <TableRow key={row.id}><TableCell className="font-medium">{row.platform_name || "-"}</TableCell><TableCell className="max-w-[240px] truncate">{row.project_name || row.project_id}</TableCell><TableCell>{row.operation}</TableCell><TableCell>{row.direction}</TableCell><TableCell><PlatformStatusBadge status={row.status} /></TableCell><TableCell>{row.request_count}/{row.success_count}/{row.failure_count}</TableCell><TableCell className="max-w-[320px] truncate text-xs text-slate-500" title={row.message ?? undefined}>{row.message || "-"}</TableCell><TableCell>{formatDateTime(row.occurred_at)}</TableCell><TableCell className="text-right">{row.source === "system" ? <div className="inline-flex gap-1"><Button type="button" size="sm" variant="ghost" onClick={() => setDetailLog(row)}>详情</Button>{platformLogPlatformCode(row.payload) === YONGXIN_V2_PLATFORM_TYPE && (row.status === "failed" || row.status === "waiting_data" || row.status === "waiting_media") ? <Button type="button" size="sm" variant="outline" disabled={retryJob.isPending} onClick={() => void retry(row)}><RefreshCw className="mr-1 size-3" />重试</Button> : null}</div> : <RowActions onEdit={() => openEdit(row)} onDelete={() => void remove(row)} />}</TableCell></TableRow>
+          <TableRow key={row.id}><TableCell className="font-medium">{row.platform_name || "-"}</TableCell><TableCell className="max-w-[240px] truncate">{row.project_name || row.project_id}</TableCell><TableCell>{row.operation}</TableCell><TableCell>{row.direction}</TableCell><TableCell><PlatformStatusBadge status={row.status} /></TableCell><TableCell>{row.request_count}/{row.success_count}/{row.failure_count}</TableCell><TableCell className="max-w-[320px] truncate text-xs text-slate-500" title={row.message ?? undefined}>{row.message || "-"}</TableCell><TableCell>{formatDateTime(row.occurred_at)}</TableCell><TableCell className="text-right">{row.source === "system" ? <div className="inline-flex gap-1"><Button type="button" size="sm" variant="ghost" onClick={() => setDetailLog(row)}>详情</Button>{(platformLogPlatformCode(row.payload) === YONGXIN_V2_PLATFORM_TYPE || platformLogPlatformCode(row.payload) === XINLEDA_PLATFORM_TYPE) && (row.status === "failed" || row.status === "waiting_data" || row.status === "waiting_media") ? <Button type="button" size="sm" variant="outline" disabled={retryJob.isPending} onClick={() => void retry(row)}><RefreshCw className="mr-1 size-3" />重试</Button> : null}</div> : <RowActions onEdit={() => openEdit(row)} onDelete={() => void remove(row)} />}</TableCell></TableRow>
         ))}
       </DataTable>
       <Pager total={query.data?.total ?? 0} page={filters.page ?? 1} onPageChange={(page) => setFilters((current) => ({ ...current, page }))} />
@@ -1509,6 +1577,6 @@ function platformStatusLabel(status: string) {
 }
 
 function platformTypeLabel(type: string) {
-  const map: Record<string, string> = { ningbo_housing: "宁波市住建", yongxin_v2: "甬薪精管 V2", real_name: "实名制", wage: "工资监管", attendance: "考勤平台" };
+  const map: Record<string, string> = { ningbo_housing: "市住建", yongxin_v2: "甬薪精管 V2", xinleda: "薪乐达", real_name: "实名制", wage: "工资监管", attendance: "考勤平台" };
   return map[type] ?? type;
 }

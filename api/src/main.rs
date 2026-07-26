@@ -54,6 +54,7 @@ async fn main() -> eyre::Result<()> {
         quax::feature::device_mqtt::worker::spawn_device_mqtt_worker(state.clone());
         quax::feature::device_mqtt::retry::spawn_device_issue_retry_worker(state.clone());
         quax::feature::integration::outbox_worker::spawn_integration_outbox_workers(state.clone());
+        quax::feature::integration::xinleda_job_worker::spawn_xinleda_job_workers(state.clone());
         quax::feature::integration::yongxin_job_worker::spawn_yongxin_job_workers(state.clone());
     } else {
         info!("background workers disabled for this API process");

@@ -1,0 +1,15 @@
+{
+  "name": "shanhuai-integration-mock",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "SQLite-backed mock server for Ningbo Housing, Xinleda and Yongxin APIs",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test",
+    "smoke": "node scripts/smoke.js"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

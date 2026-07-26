@@ -24,7 +24,7 @@ use tokio::{net::TcpListener, sync::Mutex, task::JoinHandle};
 use uuid::Uuid;
 
 use quax::{
-    feature::integration::{outbox_worker, yongxin_job_worker},
+    feature::integration::{outbox_worker, xinleda_job_worker, yongxin_job_worker},
     state::AppState,
 };
 
@@ -32,6 +32,7 @@ use quax::{
 enum MockKind {
     Ningbo,
     Yongxin,
+    Xinleda,
 }
 
 #[derive(Clone, Debug)]
@@ -200,6 +201,52 @@ async fn mock_receiver(
                 );
             }
         },
+        MockKind::Xinleda => {
+            if path == "/upfiles" {
+                json!({"code": 0, "message": "上传成功", "data": [format!("https://files.test/{id}.jpg")]})
+            } else {
+                match body
+                    .get("method")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                {
+                    "unifiedlog.get" => json!({
+                        "code": 0,
+                        "message": "查询成功",
+                        "data": {"status": 3, "method": "mock", "version": "1.0", "reason": ""}
+                    }),
+                    "project.import" => json!({
+                        "code": 0,
+                        "message": "调用成功",
+                        "data": [{"project_code": "MOCK-PROJECT"}],
+                        "token": format!("project.import_1.0_{id}")
+                    }),
+                    method
+                        if matches!(
+                            method,
+                            "company.import"
+                                | "company.safeguard"
+                                | "labourer.import"
+                                | "project.labourer.entry"
+                                | "project.manager.entry"
+                                | "project.labourer.attendance"
+                        ) =>
+                    {
+                        json!({
+                            "code": 20,
+                            "message": "任务待执行",
+                            "data": format!("{method}_1.0_{id}")
+                        })
+                    }
+                    _ => {
+                        return (
+                            StatusCode::NOT_FOUND,
+                            Json(json!({"code": 1, "message": "unknown Xinleda method"})),
+                        );
+                    }
+                }
+            }
+        }
     };
     (StatusCode::OK, Json(response))
 }
@@ -368,6 +415,172 @@ async fn three_project_platform_matrix_pushes_every_supported_entity_without_cro
     }
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn xinleda_two_accounts_use_independent_bindings_and_cover_required_interfaces() {
+    let xinleda = MockServer::start(MockKind::Xinleda).await;
+    let (state, pool, _container) = common::build_test_state_with_pool().await;
+    let project_id = create_project(&pool, "薪乐达多账户测试项目").await;
+    sqlx::query(
+        r#"
+        UPDATE construction_projects
+        SET address_code = '浙江省宁波市海曙区330203',
+            manager = '项目经理', manager_phone = '13800000000',
+            contractor = '测试总包单位', contractor_credit_code = '91330200MA2CLPX01N',
+            build_unit = '测试建设单位', build_unit_credit_code = '91330200MA2CLPX02N',
+            category = 1, industry = 1, status = 3
+        WHERE id = $1
+        "#,
+    )
+    .bind(project_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let config_a = insert_xinleda_config(
+        &pool,
+        project_id,
+        &xinleda.base_url,
+        "xinleda-company-a",
+        "1234567890abcdef",
+        "XLD-PROJECT-A",
+    )
+    .await;
+    let config_b = insert_xinleda_config(
+        &pool,
+        project_id,
+        &xinleda.base_url,
+        "xinleda-company-b",
+        "abcdef1234567890",
+        "XLD-PROJECT-B",
+    )
+    .await;
+
+    let (image_data_uri, image_base64) = generated_test_image();
+    let seeded = seed_complete_project(&pool, project_id, 4, &image_data_uri, &image_base64).await;
+    sqlx::query(
+        "UPDATE construction_workers SET work_type = 1001, worker_type = 1001, is_manage_team = TRUE, manager_type = '1' WHERE id = $1",
+    )
+    .bind(seeded.worker_ids[1])
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    drain_outbox(&state).await;
+    drain_xinleda(&state, &pool).await;
+
+    let bindings = sqlx::query_as::<_, (Uuid, Uuid, String)>(
+        r#"
+        SELECT binding.id, binding.platform_config_id, binding.external_project_id
+        FROM integration_project_bindings binding
+        JOIN integration_platforms platform ON platform.id = binding.platform_id
+        WHERE binding.project_id = $1
+          AND binding.is_deleted = FALSE
+          AND platform.code = 'xinleda'
+        ORDER BY binding.external_project_id
+        "#,
+    )
+    .bind(project_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(bindings.len(), 2);
+    assert_ne!(bindings[0].0, bindings[1].0);
+    assert_eq!(
+        bindings
+            .iter()
+            .map(|row| row.1)
+            .collect::<std::collections::HashSet<_>>(),
+        std::collections::HashSet::from([config_a, config_b])
+    );
+    assert_eq!(
+        bindings
+            .iter()
+            .map(|row| row.2.as_str())
+            .collect::<Vec<_>>(),
+        vec!["XLD-PROJECT-A", "XLD-PROJECT-B"]
+    );
+
+    let requests = xinleda.requests().await;
+    let openapi = requests
+        .iter()
+        .filter(|request| request.path == "/openapi")
+        .collect::<Vec<_>>();
+    let methods = openapi
+        .iter()
+        .filter_map(|request| request.body.get("method").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    for required in [
+        "unifiedlog.get",
+        "company.import",
+        "company.safeguard",
+        "project.import",
+        "project.labourer.entry",
+        "project.labourer.attendance",
+        "project.manager.entry",
+        "labourer.import",
+    ] {
+        assert!(
+            methods.contains(&required),
+            "missing Xinleda method {required}: {methods:#?}"
+        );
+    }
+    for excluded in [
+        "project.commission",
+        "project.billboard",
+        "project.agreement",
+    ] {
+        assert!(
+            !methods.contains(&excluded),
+            "excluded method was called: {excluded}"
+        );
+    }
+    assert!(requests.iter().any(|request| request.path == "/upfiles"));
+
+    let mut app_projects: HashMap<String, std::collections::HashSet<String>> = HashMap::new();
+    for request in &openapi {
+        assert_eq!(request.method, "POST");
+        assert_eq!(request.body["version"], "1.0");
+        assert_eq!(request.body["format"], "json");
+        assert_eq!(request.body["sign"].as_str().unwrap().len(), 64);
+        let app_id = request.body["appid"].as_str().unwrap().to_owned();
+        if request.body["method"] != "unifiedlog.get" {
+            let data: Value = serde_json::from_str(request.body["data"].as_str().unwrap()).unwrap();
+            for row in data.as_array().into_iter().flatten() {
+                if let Some(project_code) = row.get("project_code").and_then(Value::as_str) {
+                    app_projects
+                        .entry(app_id.clone())
+                        .or_default()
+                        .insert(project_code.to_owned());
+                }
+            }
+        }
+    }
+    assert_eq!(
+        app_projects["xinleda-company-a"],
+        std::collections::HashSet::from(["XLD-PROJECT-A".to_owned()])
+    );
+    assert_eq!(
+        app_projects["xinleda-company-b"],
+        std::collections::HashSet::from(["XLD-PROJECT-B".to_owned()])
+    );
+    for identity_card in &seeded.identity_cards {
+        assert!(
+            !requests
+                .iter()
+                .any(|request| request.body.to_string().contains(identity_card)),
+            "Xinleda request leaked plaintext identity card"
+        );
+    }
+
+    let failed = sqlx::query_as::<_, (String, String, Option<String>)>(
+        "SELECT operation, status, last_error FROM integration_jobs WHERE platform_code = 'xinleda' AND status NOT IN ('success', 'completed', 'disabled') ORDER BY created_at",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert!(failed.is_empty(), "Xinleda jobs must complete: {failed:#?}");
+}
+
 async fn create_project(pool: &PgPool, name: &str) -> Uuid {
     sqlx::query_scalar("INSERT INTO construction_projects (name) VALUES ($1) RETURNING id")
         .bind(name)
@@ -388,7 +601,7 @@ async fn insert_yongxin_config(
         INSERT INTO construction_platform_configs (
             project_id, platform_name, platform_type, config, is_enabled
         )
-        VALUES ($1, '甬薪精管开放平台 V2', 'yongxin_v2', $2, TRUE)
+        VALUES ($1, '甬薪', 'yongxin_v2', $2, TRUE)
         "#,
     )
     .bind(project_id)
@@ -417,7 +630,7 @@ async fn insert_ningbo_config(pool: &PgPool, project_id: Uuid, base_url: &str) {
         INSERT INTO construction_platform_configs (
             project_id, platform_name, platform_type, config, is_enabled
         )
-        VALUES ($1, '宁波市住建', 'ningbo_housing', $2, TRUE)
+        VALUES ($1, '市住建', 'ningbo_housing', $2, TRUE)
         "#,
     )
     .bind(project_id)
@@ -431,6 +644,57 @@ async fn insert_ningbo_config(pool: &PgPool, project_id: Uuid, base_url: &str) {
     .execute(pool)
     .await
     .unwrap();
+}
+
+async fn insert_xinleda_config(
+    pool: &PgPool,
+    project_id: Uuid,
+    base_url: &str,
+    app_id: &str,
+    app_secret: &str,
+    project_code: &str,
+) -> Uuid {
+    sqlx::query_scalar(
+        r#"
+        INSERT INTO construction_platform_configs (
+            project_id, platform_name, platform_type, config, is_enabled, remark
+        )
+        VALUES ($1, '薪乐达', 'xinleda', $2, TRUE, $3)
+        RETURNING id
+        "#,
+    )
+    .bind(project_id)
+    .bind(json!({
+        "base_url": base_url,
+        "app_id": app_id,
+        "app_secret": app_secret,
+        "project_code": project_code,
+        "mode": "production",
+        "modules": {
+            "sync_project": true,
+            "sync_units": true,
+            "sync_teams": true,
+            "sync_workers": true,
+            "sync_attendance": true
+        },
+        "attendance_backfill_from": "2020-01-01T00:00:00+08:00",
+        "company_safeguard_payload": {
+            "company_name": "测试总包单位",
+            "organization_code": "91330200MA2CLPX01N",
+            "province_code": "330000",
+            "city_code": "330200",
+            "county_code": "330203",
+            "institution_name": "测试银行",
+            "assure_amt": 100,
+            "type": 2,
+            "status": 3,
+            "attrs_url": "https://files.test/margin.jpg"
+        }
+    }))
+    .bind(format!("薪乐达账户 {app_id}"))
+    .fetch_one(pool)
+    .await
+    .unwrap()
 }
 
 fn generated_test_image() -> (String, String) {
@@ -657,6 +921,50 @@ async fn drain_yongxin(state: &AppState, pool: &PgPool) {
             .await
             .unwrap();
         assert!(index < 999, "Yongxin jobs did not drain");
+    }
+}
+
+async fn drain_xinleda(state: &AppState, pool: &PgPool) {
+    for index in 0..1_500 {
+        if xinleda_job_worker::process_one_pending(state, "e2e-xinleda")
+            .await
+            .unwrap()
+        {
+            sqlx::query("UPDATE integration_rate_limits SET next_allowed_at = NOW() WHERE platform_code = 'xinleda'")
+                .execute(pool)
+                .await
+                .unwrap();
+            continue;
+        }
+        let remaining = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*) FROM integration_jobs
+            WHERE platform_code = 'xinleda'
+              AND status IN ('pending', 'retry', 'awaiting_result', 'waiting_dependency', 'processing')
+            "#,
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        if remaining == 0 {
+            return;
+        }
+        sqlx::query(
+            r#"
+            UPDATE integration_jobs
+            SET next_attempt_at = NOW(), locked_by = NULL, locked_until = NULL
+            WHERE platform_code = 'xinleda'
+              AND status IN ('pending', 'retry', 'awaiting_result', 'waiting_dependency', 'processing')
+            "#,
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE integration_rate_limits SET next_allowed_at = NOW() WHERE platform_code = 'xinleda'")
+            .execute(pool)
+            .await
+            .unwrap();
+        assert!(index < 1_499, "Xinleda jobs did not drain");
     }
 }
 

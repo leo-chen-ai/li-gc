@@ -10,9 +10,13 @@ import {
   createYongxinV2ConfigForm,
   parseYongxinV2Config,
   validateYongxinV2Config,
+  buildXinledaConfig,
+  createXinledaConfigForm,
+  parseXinledaConfig,
+  validateXinledaConfig,
 } from "./platform-configs.ts";
 
-test("宁波市住建表单自动生成标准配置", () => {
+test("市住建表单自动生成标准配置", () => {
   const form = {
     ...createNingboHousingConfigForm(),
     project_id: "local-project",
@@ -42,7 +46,7 @@ test("编辑时兼容旧配置字段别名", () => {
   const form = parseNingboHousingConfig({
     id: "config-1",
     project_id: "local-project",
-    platform_name: "宁波市住建",
+    platform_name: "市住建",
     platform_type: "real_name",
     config: {
       url: "http://example.test",
@@ -163,7 +167,7 @@ test("甬薪配置编辑时保留每个平台自己的运行模式", () => {
   const form = parseYongxinV2Config({
     id: "config-yongxin",
     project_id: "local-project",
-    platform_name: "甬薪精管开放平台 V2",
+    platform_name: "甬薪",
     platform_type: "yongxin_v2",
     config: {
       base_url: "https://example.test",
@@ -188,4 +192,86 @@ test("甬薪配置编辑时保留每个平台自己的运行模式", () => {
   assert.equal(form.sync_units, false);
   assert.equal(form.sync_teams, true);
   assert.equal(form.sync_attendance, true);
+});
+
+test("薪乐达配置使用 AppID、项目编码并支持保证金数据", () => {
+  const form = {
+    ...createXinledaConfigForm(),
+    project_id: "local-project",
+    app_id: " xinleda-app ",
+    app_secret: "1234567890abcdef",
+    project_code: " XLD-PROJECT-1 ",
+    mode: "production" as const,
+    sync_attendance: false,
+    company_safeguard_payload: JSON.stringify({
+      company_name: "测试企业",
+      organization_code: "91330212062914115M",
+      province_code: "330000",
+      city_code: "330200",
+      county_code: "330203",
+      institution_name: "测试银行",
+      assure_amt: 100,
+      type: 2,
+      status: 3,
+      attrs_url: "https://example.test/margin.jpg",
+    }),
+  };
+
+  assert.equal(validateXinledaConfig(form), null);
+  assert.deepEqual(buildXinledaConfig(form), {
+    base_url: "https://openapi.hwxld.com",
+    app_id: "xinleda-app",
+    app_secret: "1234567890abcdef",
+    project_code: "XLD-PROJECT-1",
+    mode: "production",
+    modules: {
+      sync_project: true,
+      sync_units: true,
+      sync_teams: true,
+      sync_workers: true,
+      sync_attendance: false,
+    },
+    attendance_backfill_from: null,
+    company_safeguard_payload: {
+      company_name: "测试企业",
+      organization_code: "91330212062914115M",
+      province_code: "330000",
+      city_code: "330200",
+      county_code: "330203",
+      institution_name: "测试银行",
+      assure_amt: 100,
+      type: 2,
+      status: 3,
+      attrs_url: "https://example.test/margin.jpg",
+    },
+  });
+});
+
+test("薪乐达配置可编辑同平台多账户且兼容 appid 字段", () => {
+  const form = parseXinledaConfig({
+    id: "config-xinleda-2",
+    project_id: "local-project",
+    platform_name: "薪乐达-劳务公司B",
+    platform_type: "xinleda",
+    config: {
+      appid: "company-b",
+      appsecret: "1234567890abcdef",
+      projectCode: "XLD-B",
+      modules: { sync_project: false, sync_workers: true },
+    },
+    is_enabled: true,
+    remark: null,
+    is_deleted: false,
+    project_name: null,
+    created_by_user_id: null,
+    updated_by_user_id: null,
+    created_at: "",
+    updated_at: "",
+    deleted_at: null,
+  });
+
+  assert.equal(form.app_id, "company-b");
+  assert.equal(form.project_code, "XLD-B");
+  assert.equal(form.sync_project, false);
+  assert.equal(form.sync_workers, true);
 });

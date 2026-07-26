@@ -2,9 +2,9 @@ use serde_json::{Value, json};
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
-use super::yongxin_v2;
+use super::{xinleda, yongxin_v2};
 
-const SUPPORTED_PLATFORM_CODES: &[&str] = &[yongxin_v2::PLATFORM_CODE];
+const SUPPORTED_PLATFORM_CODES: &[&str] = &[yongxin_v2::PLATFORM_CODE, xinleda::PLATFORM_CODE];
 
 #[derive(Debug, FromRow)]
 struct PlatformConfigRow {
@@ -59,7 +59,7 @@ pub async fn dispatch(
             continue;
         }
         let binding_id = ensure_binding(pool, &config).await?;
-        for operation in operations_for_event(event_type, payload) {
+        for operation in operations_for_event(&config.platform_type, event_type, payload) {
             enqueue_job(
                 pool,
                 event_id,
@@ -113,16 +113,17 @@ async fn bootstrap_binding(
     }
 
     let Some(config) = config else {
-        disable_binding(pool, project_id, &platform_type).await?;
+        disable_binding(pool, config_id).await?;
         return Ok(());
     };
     if config.is_deleted || !config.is_enabled {
-        disable_binding(pool, project_id, &platform_type).await?;
+        disable_binding(pool, config_id).await?;
         return Ok(());
     }
 
     let binding_id = ensure_binding(pool, &config).await?;
     let version = config.updated_at.timestamp_millis();
+    let operation = bootstrap_operation(&platform_type);
     sqlx::query(
         r#"
         INSERT INTO integration_jobs (
@@ -130,20 +131,46 @@ async fn bootstrap_binding(
             local_entity_id, idempotency_key, request_payload, status,
             attempt_count, max_attempts, next_attempt_at
         )
-        VALUES ($1, $2, $3, 'project.query', 'project', $1, $4, $5, 'pending', 0, 5, NOW())
+        VALUES ($1, $2, $3, $4, 'project', $1, $5, $6, 'pending', 0, 5, NOW())
         ON CONFLICT (idempotency_key) DO NOTHING
         "#,
     )
     .bind(project_id)
     .bind(binding_id)
     .bind(&platform_type)
-    .bind(format!("{binding_id}:project.query:{version}"))
+    .bind(operation)
+    .bind(format!("{binding_id}:{operation}:{version}"))
     .bind(json!({
         "platform_config_id": config.id,
         "config_version": version,
     }))
     .execute(pool)
     .await?;
+
+    if platform_type == xinleda::PLATFORM_CODE {
+        sqlx::query(
+            r#"
+            INSERT INTO integration_jobs (
+                project_id, binding_id, platform_code, operation, entity_type,
+                local_entity_id, idempotency_key, request_payload, status,
+                attempt_count, max_attempts, next_attempt_at
+            )
+            VALUES ($1, $2, $3, 'safeguard.sync', 'project', $1, $4, $5,
+                    'pending', 0, 5, NOW())
+            ON CONFLICT (idempotency_key) DO NOTHING
+            "#,
+        )
+        .bind(project_id)
+        .bind(binding_id)
+        .bind(&platform_type)
+        .bind(format!("{binding_id}:safeguard.sync:{version}"))
+        .bind(json!({
+            "platform_config_id": config.id,
+            "config_version": version,
+        }))
+        .execute(pool)
+        .await?;
+    }
 
     enqueue_bootstrap_events(pool, &config).await
 }
@@ -248,22 +275,18 @@ async fn enqueue_bootstrap_events(
 }
 
 async fn ensure_binding(pool: &PgPool, config: &PlatformConfigRow) -> Result<Uuid, sqlx::Error> {
-    let enabled_events = enabled_events(&config.config);
+    let enabled_events = enabled_events(&config.platform_type, &config.config);
     let mut tx = pool.begin().await?;
     let previous = sqlx::query_as::<_, (Uuid, Value)>(
         r#"
         SELECT binding.id, binding.config
         FROM integration_project_bindings binding
-        JOIN integration_platforms platform
-          ON platform.id = binding.platform_id
-         AND platform.code = $2
-        WHERE binding.project_id = $1
+        WHERE binding.platform_config_id = $1
           AND binding.is_deleted = FALSE
         FOR UPDATE
         "#,
     )
-    .bind(config.project_id)
-    .bind(&config.platform_type)
+    .bind(config.id)
     .fetch_optional(&mut *tx)
     .await?;
     let credentials_changed = previous.as_ref().is_some_and(|(_, old_config)| {
@@ -273,14 +296,14 @@ async fn ensure_binding(pool: &PgPool, config: &PlatformConfigRow) -> Result<Uui
     let binding_id = sqlx::query_scalar::<_, Uuid>(
         r#"
         INSERT INTO integration_project_bindings (
-            project_id, platform_id, external_project_id, base_url,
+            project_id, platform_id, platform_config_id, external_project_id, base_url,
             credentials, config, enabled_events, is_enabled, remark
         )
-        SELECT $1, platform.id, $2, $3, $4, $4, $5, TRUE,
+        SELECT $1, platform.id, $2, $3, $4, $5, $5, $6, TRUE,
                '由项目平台配置自动维护'
         FROM integration_platforms platform
-        WHERE platform.code = $6 AND platform.is_deleted = FALSE
-        ON CONFLICT (project_id, platform_id) WHERE is_deleted = FALSE
+        WHERE platform.code = $7 AND platform.is_deleted = FALSE
+        ON CONFLICT (platform_config_id) WHERE is_deleted = FALSE AND platform_config_id IS NOT NULL
         DO UPDATE SET
             external_project_id = EXCLUDED.external_project_id,
             base_url = EXCLUDED.base_url,
@@ -293,6 +316,7 @@ async fn ensure_binding(pool: &PgPool, config: &PlatformConfigRow) -> Result<Uui
         "#,
     )
     .bind(config.project_id)
+    .bind(config.id)
     .bind(config_string(
         &config.config,
         &["project_code", "projectCode"],
@@ -340,24 +364,16 @@ async fn ensure_binding(pool: &PgPool, config: &PlatformConfigRow) -> Result<Uui
     Ok(binding_id)
 }
 
-async fn disable_binding(
-    pool: &PgPool,
-    project_id: Uuid,
-    platform_code: &str,
-) -> Result<(), sqlx::Error> {
+async fn disable_binding(pool: &PgPool, platform_config_id: Uuid) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"
-        UPDATE integration_project_bindings binding
+        UPDATE integration_project_bindings
         SET is_enabled = FALSE, updated_at = NOW()
-        FROM integration_platforms platform
-        WHERE binding.platform_id = platform.id
-          AND binding.project_id = $1
-          AND binding.is_deleted = FALSE
-          AND platform.code = $2
+        WHERE platform_config_id = $1
+          AND is_deleted = FALSE
         "#,
     )
-    .bind(project_id)
-    .bind(platform_code)
+    .bind(platform_config_id)
     .execute(pool)
     .await?;
     Ok(())
@@ -403,8 +419,15 @@ async fn enqueue_job(
     Ok(())
 }
 
-fn operations_for_event<'a>(event_type: &str, payload: &'a Value) -> Vec<&'a str> {
+fn operations_for_event<'a>(
+    platform_type: &str,
+    event_type: &str,
+    payload: &'a Value,
+) -> Vec<&'a str> {
     match event_type {
+        "construction.project.changed" if platform_type == xinleda::PLATFORM_CODE => {
+            vec!["project.sync"]
+        }
         "construction.unit.changed" => vec!["unit.sync"],
         "construction.team.changed" => vec!["team.sync"],
         "construction.worker.changed" => {
@@ -427,6 +450,7 @@ fn operations_for_event<'a>(event_type: &str, payload: &'a Value) -> Vec<&'a str
 
 fn event_enabled(config: &Value, event_type: &str) -> bool {
     let key = match event_type {
+        "construction.project.changed" => "sync_project",
         "construction.unit.changed" => "sync_units",
         "construction.team.changed" => "sync_teams",
         "construction.worker.changed" => "sync_workers",
@@ -441,14 +465,18 @@ fn event_enabled(config: &Value, event_type: &str) -> bool {
         .unwrap_or(true)
 }
 
-fn enabled_events(config: &Value) -> Vec<String> {
+fn enabled_events(platform_type: &str, config: &Value) -> Vec<String> {
     [
+        ("construction.project.changed", "sync_project"),
         ("construction.unit.changed", "sync_units"),
         ("construction.team.changed", "sync_teams"),
         ("construction.worker.changed", "sync_workers"),
         ("construction.attendance.created", "sync_attendance"),
     ]
     .into_iter()
+    .filter(|(event, _)| {
+        *event != "construction.project.changed" || platform_type == xinleda::PLATFORM_CODE
+    })
     .filter(|(_, key)| {
         config
             .get("modules")
@@ -479,13 +507,29 @@ fn binding_identity(
     Option<String>,
     Option<String>,
     Option<String>,
+    Option<String>,
 ) {
     (
         config_string(config, &["base_url", "url", "endpoint"]),
         config_string(config, &["project_code", "projectCode"]),
-        config_string(config, &["app_key", "appKey", "AppKey"]),
+        config_string(
+            config,
+            &["app_key", "appKey", "AppKey", "app_id", "appid", "appId"],
+        ),
+        config_string(
+            config,
+            &["app_secret", "appSecret", "AppSecret", "appsecret"],
+        ),
         config_string(config, &["mode", "runtime_mode", "environment"]),
     )
+}
+
+fn bootstrap_operation(platform_type: &str) -> &'static str {
+    if platform_type == xinleda::PLATFORM_CODE {
+        "project.sync"
+    } else {
+        "project.query"
+    }
 }
 
 #[cfg(test)]
@@ -503,6 +547,7 @@ mod tests {
     fn worker_delete_only_creates_exit_operation() {
         assert_eq!(
             operations_for_event(
+                yongxin_v2::PLATFORM_CODE,
                 "construction.worker.changed",
                 &json!({"operation": "delete"})
             ),

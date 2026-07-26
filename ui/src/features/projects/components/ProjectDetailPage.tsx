@@ -864,7 +864,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   };
 
   const handleRepairTeamReporting = async () => {
-    if (!window.confirm("确认修正失败和未传的班组上报？系统将重新调用已启用的宁波市住建接口。")) {
+    if (!window.confirm("确认修正失败和未传的班组上报？系统将重新调用已启用的市住建接口。")) {
       return;
     }
 
@@ -891,7 +891,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   };
 
   const handleRepairWorkerReporting = async () => {
-    if (!window.confirm("确认修正失败和未传的工人上报？系统将按甬建码、任职信息、项目班组关系重新调用宁波市住建接口。")) {
+    if (!window.confirm("确认修正失败和未传的工人上报？系统将按甬建码、任职信息、项目班组关系重新调用市住建接口。")) {
       return;
     }
 

@@ -9,7 +9,7 @@ INSERT INTO integration_platforms (
 )
 VALUES (
     'ningbo_housing',
-    '宁波市住建',
+    '市住建',
     'ningbo_housing',
     'http://183.136.157.18:7334',
     'appkey_curtime_sha256',
@@ -19,6 +19,6 @@ VALUES (
             "list_teams": {"method": "GET", "path": "/Project/ListTeams", "body": "query"}
         }
     }'::jsonb,
-    '宁波市住建实名制平台第三方数据直连接口'
+    '市住建实名制平台第三方数据直连接口'
 )
 ON CONFLICT DO NOTHING;

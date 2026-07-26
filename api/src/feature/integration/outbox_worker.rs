@@ -19,6 +19,7 @@ const WORKER_RECONCILE_EVENT: &str = "ningbo.worker.reconcile";
 const TEAM_SYNC_EVENT: &str = "ningbo.team.sync";
 const TEAM_EXIT_EVENT: &str = "ningbo.team.exit";
 const GENERIC_EVENTS: &[&str] = &[
+    "construction.project.changed",
     "construction.unit.changed",
     "construction.team.changed",
     "construction.worker.changed",
@@ -215,6 +216,7 @@ async fn claim_event(
                     'ningbo.worker.reconcile',
                     'ningbo.team.sync',
                     'ningbo.team.exit',
+                    'construction.project.changed',
                     'construction.unit.changed',
                     'construction.team.changed',
                     'construction.worker.changed',
@@ -244,6 +246,7 @@ async fn claim_event(
                             'ningbo.worker.reconcile',
                             'ningbo.team.sync',
                             'ningbo.team.exit',
+                            'construction.project.changed',
                             'construction.unit.changed',
                             'construction.team.changed',
                             'construction.worker.changed',

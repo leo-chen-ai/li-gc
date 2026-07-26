@@ -166,7 +166,7 @@ async fn admin_can_search_and_paginate_projects_on_backend() {
         &token,
         json!({
             "project_id": target_project_id,
-            "platform_name": "宁波市住建",
+            "platform_name": "市住建",
             "platform_type": "ningbo_housing",
             "config": {},
             "is_enabled": true
@@ -191,7 +191,7 @@ async fn admin_can_search_and_paginate_projects_on_backend() {
     assert_eq!(items[0]["name"], "后端分页搜索目标项目");
     assert_eq!(
         items[0]["reporting_platforms"][0]["platform_name"],
-        "宁波市住建"
+        "市住建"
     );
     assert_eq!(items[0]["reporting_platforms"][0]["is_enabled"], true);
 
@@ -204,23 +204,23 @@ async fn admin_can_search_and_paginate_projects_on_backend() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
         body["data"]["reporting_platforms"][0]["platform_name"],
-        "宁波市住建"
+        "市住建"
     );
 
-    let (status, _) = delete_authed(
+    let (status, body) = delete_authed(
         app.clone(),
         &format!("/api/v1/admin/projects/{target_project_id}"),
         &token,
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
-    let (status, _) = delete_authed(
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = delete_authed(
         app.clone(),
         &format!("/api/v1/admin/projects/{other_project_id}"),
         &token,
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::OK, "{body}");
 }
 
 #[tokio::test]
@@ -995,7 +995,7 @@ async fn team_list_reports_latest_platform_status_and_project_summary() {
         &token,
         json!({
             "project_id": project_id,
-            "platform_name": "宁波市住建",
+            "platform_name": "市住建",
             "platform_type": "ningbo_housing",
             "config": {},
             "is_enabled": false
@@ -1076,7 +1076,7 @@ async fn team_list_reports_latest_platform_status_and_project_summary() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let summary = &body["data"]["reporting_summary"][0];
-    assert_eq!(summary["platform_name"], "宁波市住建");
+    assert_eq!(summary["platform_name"], "市住建");
     assert_eq!(summary["success_count"], 1);
     assert_eq!(summary["failure_count"], 1);
     assert_eq!(summary["not_reported_count"], 1);
@@ -1107,6 +1107,139 @@ async fn team_list_reports_latest_platform_status_and_project_summary() {
 }
 
 #[tokio::test]
+async fn xinleda_management_worker_is_reported_instead_of_ignored() {
+    let (app, pool, _container) = build_test_app_with_pool().await;
+    let token = admin_token();
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        "/api/v1/admin/projects",
+        &token,
+        json!({ "name": "薪乐达管理人员状态测试", "status": 1 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let project_id = body["data"]["id"].as_str().expect("project id");
+    let project_uuid = Uuid::parse_str(project_id).expect("project uuid");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        "/api/v1/admin/platform-configs",
+        &token,
+        json!({
+            "project_id": project_id,
+            "platform_name": "薪乐达-总包账户",
+            "platform_type": "xinleda",
+            "config": {},
+            "is_enabled": true
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let config_id = Uuid::parse_str(body["data"]["id"].as_str().expect("platform config id"))
+        .expect("config uuid");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/units"),
+        &token,
+        json!({ "company_name": "薪乐达测试总包", "company_type": 1 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let unit_id = body["data"]["id"].as_str().expect("unit id");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/teams"),
+        &token,
+        json!({
+            "unit_id": unit_id,
+            "name": "项目管理班组",
+            "work_type": 1001,
+            "is_manage_team": true
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let team_id = body["data"]["id"].as_str().expect("team id");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/workers"),
+        &token,
+        json!({
+            "unit_id": unit_id,
+            "team_id": team_id,
+            "id_card": "330203199001011234",
+            "name": "薪乐达项目经理",
+            "phone": "13800000000",
+            "worker_type": 1001,
+            "work_type": 1001,
+            "manager_type": "1",
+            "work_status": 1
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let worker_id =
+        Uuid::parse_str(body["data"]["id"].as_str().expect("worker id")).expect("worker uuid");
+
+    let binding_id = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        INSERT INTO integration_project_bindings (
+            project_id, platform_id, platform_config_id, is_enabled
+        )
+        SELECT $1, platform.id, $2, TRUE
+        FROM integration_platforms platform
+        WHERE platform.code = 'xinleda' AND platform.is_deleted = FALSE
+        RETURNING id
+        "#,
+    )
+    .bind(project_uuid)
+    .bind(config_id)
+    .fetch_one(&pool)
+    .await
+    .expect("Xinleda binding");
+    sqlx::query(
+        r#"
+        INSERT INTO integration_jobs (
+            project_id, binding_id, platform_code, operation, entity_type,
+            local_entity_id, idempotency_key, request_payload, status
+        )
+        VALUES ($1, $2, 'xinleda', 'project.manager.entry', 'worker', $3, $4, '{}'::jsonb, 'success')
+        "#,
+    )
+    .bind(project_uuid)
+    .bind(binding_id)
+    .bind(worker_id)
+    .bind(format!("xinleda-manager-status-{worker_id}"))
+    .execute(&pool)
+    .await
+    .expect("Xinleda manager job");
+
+    let (status, body) = get_authed(
+        app,
+        &format!("/api/v1/admin/projects/{project_id}/workers"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["data"]["items"][0]["reporting_platforms"][0]["status"],
+        "success"
+    );
+    assert_eq!(body["data"]["reporting_summary"][0]["total_count"], 1);
+    assert_eq!(body["data"]["reporting_summary"][0]["success_count"], 1);
+    assert_eq!(body["data"]["reporting_summary"][0]["ignored_count"], 0);
+}
+
+#[tokio::test]
 async fn enabled_ningbo_platform_requires_team_type_but_not_team_leader() {
     let (app, pool, _container) = build_test_app_with_pool().await;
     let token = admin_token();
@@ -1129,7 +1262,7 @@ async fn enabled_ningbo_platform_requires_team_type_but_not_team_leader() {
         &token,
         json!({
             "project_id": project_id,
-            "platform_name": "宁波市住建",
+            "platform_name": "市住建",
             "platform_type": "ningbo_housing",
             "config": {},
             "is_enabled": true
@@ -1839,13 +1972,13 @@ async fn admin_can_crud_search_paginate_attendance_device_issue_reports() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["data"]["total"], 0);
 
-    let (status, _) = delete_authed(
+    let (status, body) = delete_authed(
         app.clone(),
         &format!("/api/v1/admin/projects/{project_id}"),
         &token,
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::OK, "{body}");
 }
 
 #[tokio::test]

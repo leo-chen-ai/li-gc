@@ -103,7 +103,7 @@ test("worker identity and employment fields are grouped with basic information",
   assert.equal(basicSection.fields.find((field) => field.key === "phone")?.required, true);
 });
 
-test("项目工人工种与宁波市住建文档字典一致", () => {
+test("项目工人工种与市住建文档字典一致", () => {
   assert.deepEqual(workerWorkTypeOptions.map((option) => option.label), [
     "砌筑工", "钢筋工", "架子工", "混凝土工", "模板工", "机械设备安装工", "通风工", "安装起重工", "安装钳工",
     "电气设备安装调试工", "管道工", "变电安装工", "建筑电工", "司泵工", "挖掘铲运和桩工机械司机", "桩机操作工",

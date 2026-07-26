@@ -14,17 +14,17 @@ const MAX_TEAM_LIST_PAGES: i64 = 100;
 
 #[derive(Debug, Error)]
 pub enum NingboHousingError {
-    #[error("宁波市住建平台配置缺少 {0}")]
+    #[error("市住建平台配置缺少 {0}")]
     MissingConfig(&'static str),
-    #[error("宁波市住建平台项目 ID 必须是 1–2147483647 范围内的整数")]
+    #[error("市住建平台项目 ID 必须是 1–2147483647 范围内的整数")]
     InvalidProjectId,
-    #[error("宁波市住建平台接口地址不受信任")]
+    #[error("市住建平台接口地址不受信任")]
     UntrustedBaseUrl,
-    #[error("宁波市住建平台请求失败：{0}")]
+    #[error("市住建平台请求失败：{0}")]
     Request(String),
-    #[error("宁波市住建平台响应超过 1 MiB 限制")]
+    #[error("市住建平台响应超过 1 MiB 限制")]
     ResponseTooLarge,
-    #[error("宁波市住建平台响应无法解析")]
+    #[error("市住建平台响应无法解析")]
     InvalidResponse,
 }
 
