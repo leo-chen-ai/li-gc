@@ -13,7 +13,10 @@ use sqlx::{Postgres, QueryBuilder, Row};
 use uuid::Uuid;
 
 use crate::{
-    infrastructure::web::response::{ApiError, ApiResult, ApiSuccess},
+    infrastructure::web::{
+        response::{ApiError, ApiResult, ApiSuccess},
+        trimmed_json::TrimmedJson,
+    },
     state::AppState,
 };
 
@@ -105,7 +108,7 @@ pub async fn list_configs(State(state): State<AppState>, uri: Uri) -> ApiResult<
 
 pub async fn create_config(
     State(state): State<AppState>,
-    Json(body): Json<Value>,
+    TrimmedJson(body): TrimmedJson<Value>,
 ) -> ApiResult<Value> {
     let object = json_object(&body)?;
     let project_id = required_uuid(object.get("project_id"), "project_id")?;
@@ -154,7 +157,7 @@ pub async fn create_config(
 pub async fn update_config(
     State(state): State<AppState>,
     Path(config_id): Path<Uuid>,
-    Json(body): Json<Value>,
+    TrimmedJson(body): TrimmedJson<Value>,
 ) -> ApiResult<Value> {
     let object = json_object(&body)?;
     let existing = fetch_config(state.db.pool(), config_id).await?;

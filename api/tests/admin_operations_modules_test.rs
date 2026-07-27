@@ -445,7 +445,8 @@ async fn admin_can_crud_work_hour_configs() {
             "rules": {
                 "dayHours": 8,
                 "overtimeAfterHours": 9,
-                "nightShift": { "start": "22:00", "end": "06:00", "ratio": 1.5 }
+                "nightShift": { "start": " 22:00 ", "end": "06:00", "ratio": 1.5 },
+                "label": "  日常 工时  "
             },
             "is_enabled": true,
             "remark": "项目默认算法"
@@ -455,6 +456,8 @@ async fn admin_can_crud_work_hour_configs() {
     assert_eq!(status, StatusCode::CREATED, "{body}");
     let config_id = body["data"]["id"].as_str().expect("config id");
     assert_eq!(body["data"]["rules"]["dayHours"], 8);
+    assert_eq!(body["data"]["rules"]["nightShift"]["start"], "22:00");
+    assert_eq!(body["data"]["rules"]["label"], "日常 工时");
 
     let (status, body) = get_authed(
         app.clone(),
@@ -702,7 +705,11 @@ async fn admin_can_crud_platform_configs_and_logs_with_today_summary() {
             "project_id": project_id,
             "platform_name": "实名制监管平台",
             "platform_type": "real_name",
-            "config": { "endpoint": "https://example.test/api", "appKey": "demo-key" },
+            "config": {
+                "endpoint": "  https://example.test/api  ",
+                "appKey": "\t demo-key \n",
+                "scopes": [" worker.read ", "worker write"]
+            },
             "is_enabled": true,
             "remark": "测试配置"
         }),
@@ -711,6 +718,12 @@ async fn admin_can_crud_platform_configs_and_logs_with_today_summary() {
     assert_eq!(status, StatusCode::CREATED, "{body}");
     let config_id = body["data"]["id"].as_str().expect("config id");
     assert_eq!(body["data"]["config"]["appKey"], "demo-key");
+    assert_eq!(
+        body["data"]["config"]["endpoint"],
+        "https://example.test/api"
+    );
+    assert_eq!(body["data"]["config"]["scopes"][0], "worker.read");
+    assert_eq!(body["data"]["config"]["scopes"][1], "worker write");
 
     let (status, body) = get_authed(
         app.clone(),

@@ -25,7 +25,10 @@ use crate::{
         issue_device_workers_via_broker, issue_single_worker_via_broker,
     },
     feature::integration::ningbo_housing,
-    infrastructure::web::response::{ApiError, ApiResult, ApiSuccess},
+    infrastructure::web::{
+        response::{ApiError, ApiResult, ApiSuccess},
+        trimmed_json::TrimmedJson,
+    },
     state::AppState,
 };
 
@@ -7249,7 +7252,7 @@ pub async fn delete_managed_attendance_photo_group(
 
 pub async fn create_managed_attendance_config(
     State(state): State<AppState>,
-    Json(body): Json<Value>,
+    TrimmedJson(body): TrimmedJson<Value>,
 ) -> ApiResult<Value> {
     validate_managed_attendance_config_body(state.db.pool(), &body).await?;
     let created = create_row(
@@ -7294,7 +7297,7 @@ pub async fn get_managed_attendance_config(
 pub async fn update_managed_attendance_config(
     State(state): State<AppState>,
     Path(config_id): Path<Uuid>,
-    Json(body): Json<Value>,
+    TrimmedJson(body): TrimmedJson<Value>,
 ) -> ApiResult<Value> {
     validate_managed_attendance_config_patch(state.db.pool(), config_id, &body).await?;
     update_row(
@@ -7881,7 +7884,7 @@ pub async fn get_project_contract_template_config(
 pub async fn upsert_project_contract_template_config(
     State(state): State<AppState>,
     Path(project_id): Path<Uuid>,
-    Json(body): Json<Value>,
+    TrimmedJson(body): TrimmedJson<Value>,
 ) -> ApiResult<Value> {
     let object = body
         .as_object()
@@ -8020,7 +8023,7 @@ pub async fn download_worker_contract(
 
 pub async fn create_work_hour_config(
     State(state): State<AppState>,
-    Json(body): Json<Value>,
+    TrimmedJson(body): TrimmedJson<Value>,
 ) -> ApiResult<Value> {
     ensure_json_object_if_present(&body, "rules")?;
     create_row(
@@ -8054,7 +8057,7 @@ pub async fn get_work_hour_config(
 pub async fn update_work_hour_config(
     State(state): State<AppState>,
     Path(config_id): Path<Uuid>,
-    Json(body): Json<Value>,
+    TrimmedJson(body): TrimmedJson<Value>,
 ) -> ApiResult<Value> {
     ensure_json_object_if_present(&body, "rules")?;
     update_row(
@@ -8082,7 +8085,7 @@ pub async fn delete_work_hour_config(
 pub async fn create_platform_config(
     State(state): State<AppState>,
     Extension(auth_user): Extension<AuthUser>,
-    Json(body): Json<Value>,
+    TrimmedJson(body): TrimmedJson<Value>,
 ) -> ApiResult<Value> {
     ensure_body_project_access(state.db.pool(), &auth_user, &body).await?;
     ensure_json_object_if_present(&body, "config")?;
@@ -8136,7 +8139,7 @@ pub async fn update_platform_config(
     State(state): State<AppState>,
     Extension(auth_user): Extension<AuthUser>,
     Path(config_id): Path<Uuid>,
-    Json(body): Json<Value>,
+    TrimmedJson(body): TrimmedJson<Value>,
 ) -> ApiResult<Value> {
     ensure_row_project_access(
         state.db.pool(),
