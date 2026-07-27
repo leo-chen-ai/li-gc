@@ -5,6 +5,7 @@ const yesNoOptions = [
 
 const deviceTypeOptions = [
   { label: "A厂家", value: "A厂家" },
+  { label: "B厂家", value: "B厂家" },
 ];
 
 const companyTypeOptions = [

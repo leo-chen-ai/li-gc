@@ -1,0 +1,2 @@
+DROP INDEX IF EXISTS idx_outbox_worker_changes_project_created;
+DROP INDEX IF EXISTS idx_attendance_devices_b_serial_normalized;

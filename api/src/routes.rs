@@ -3,7 +3,7 @@ use std::time::Duration;
 use tower_http::services::ServeDir;
 
 use crate::{
-    feature::{admin, auth, health, miniapp, ocr, upload, user},
+    feature::{admin, auth, device_vendor_b, health, miniapp, ocr, upload, user},
     infrastructure::web::middleware::{RateLimiter, rate_limit_middleware},
     state::AppState,
 };
@@ -15,15 +15,20 @@ pub fn app_routes(state: AppState) -> Router {
     let global_limiter = RateLimiter::new(120, Duration::from_secs(60));
     // Auth: 10 req/min per IP (anti brute-force)
     let auth_limiter = RateLimiter::new(10, Duration::from_secs(60));
+    // B vendor devices may share the same reverse-proxy address. Keep their
+    // polling budget isolated from management API traffic.
+    let device_vendor_b_limiter = RateLimiter::new(600, Duration::from_secs(60));
 
     // Cleanup expired entries every minute
     let g = global_limiter.clone();
     let a = auth_limiter.clone();
+    let d = device_vendor_b_limiter.clone();
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(60)).await;
             g.cleanup();
             a.cleanup();
+            d.cleanup();
         }
     });
 
@@ -31,6 +36,10 @@ pub fn app_routes(state: AppState) -> Router {
     let auth_sensitive = auth::auth_sensitive_routes()
         .layer(from_fn(rate_limit_middleware))
         .layer(Extension(auth_limiter));
+
+    let device_vendor_b_routes = device_vendor_b::routes()
+        .layer(from_fn(rate_limit_middleware))
+        .layer(Extension(device_vendor_b_limiter));
 
     // Provide session_blacklist to auth middleware
     let blacklist = state.session_blacklist.clone();
@@ -53,6 +62,7 @@ pub fn app_routes(state: AppState) -> Router {
 
     Router::new()
         .nest("/health", health::health_routes())
+        .merge(device_vendor_b_routes)
         .nest("/api/v1", api_routes)
         .nest_service("/media", ServeDir::new("uploads"))
         .fallback(handle_404)
