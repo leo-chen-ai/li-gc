@@ -32,3 +32,8 @@ tmp/
 
 # Legacy local reporting workspace contains logs, credentials and personnel files
 /备份代码/新中源/
+api_stderr.log
+api_stdout.log
+ui/src/routeTree.gen.ts
+run_api.bat
+ssh_pass.bat

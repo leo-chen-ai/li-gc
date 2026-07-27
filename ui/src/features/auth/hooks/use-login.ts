@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { authService } from "@/lib/api";
 import { useAuthActions } from "@/stores/use-auth-store";
-import { isApiError } from "@/lib/api/types";
+import { ErrorCodes, isApiError } from "@/lib/api/types";
 
 export const authKeys = {
   all: ["auth"] as const,
@@ -23,7 +23,14 @@ export function useLogin() {
     onError: (error: unknown) => {
       let description = "登录时发生未知错误。";
       if (isApiError(error)) {
-        description = error.message;
+        switch (error.error_code) {
+          case ErrorCodes.AUTH.INVALID_CREDENTIALS:
+            description = "账号或密码错误";
+            break;
+          default:
+            description = error.message;
+            break;
+        }
       } else if (error instanceof Error) {
         description = error.message;
       }

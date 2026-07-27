@@ -2760,6 +2760,9 @@ function WorkersTab({
   const [reentryTeamId, setReentryTeamId] = useState("");
   const [reentryEntryTime, setReentryEntryTime] = useState(dateInputToday());
   const [reentrySaving, setReentrySaving] = useState(false);
+  const [editingEntryWorker, setEditingEntryWorker] = useState<Worker | null>(null);
+  const [editingEntryDate, setEditingEntryDate] = useState("");
+  const [editingEntrySaving, setEditingEntrySaving] = useState(false);
   const scopedTeams =
     selection.kind === "team"
       ? activeTeam
@@ -2815,6 +2818,23 @@ function WorkersTab({
       toast.error(error instanceof Error ? error.message : "进场失败");
     } finally {
       setReentrySaving(false);
+    }
+  };
+
+  const submitEditEntryTime = async () => {
+    if (!editingEntryWorker || !editingEntryDate || editingEntrySaving) return;
+    setEditingEntrySaving(true);
+    try {
+      await onRetireWorker({
+        workerId: editingEntryWorker.id,
+        payload: { entry_time: editingEntryDate },
+      });
+      setEditingEntryWorker(null);
+      toast.success("进场日期修改成功");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "修改进场日期失败");
+    } finally {
+      setEditingEntrySaving(false);
     }
   };
 
@@ -3012,6 +3032,10 @@ function WorkersTab({
               worker.status === "离场"
                 ? { label: "进场", icon: LogIn, onSelect: () => openReentry(worker) }
                 : { label: "退场", icon: LogOut, onSelect: () => void retireWorker(worker, onRetireWorker) },
+              { label: "修改进场日期", icon: CalendarDays, onSelect: () => {
+                setEditingEntryWorker(worker);
+                setEditingEntryDate(worker.entryDate || dateInputToday());
+              } },
               { label: "下载合同模板", icon: FileDown, disabled: downloadingWorkerId === worker.id, onSelect: () => void downloadWorkerContract(projectId, worker, setDownloadingWorkerId) },
             ]} />] : []),
           ])}
@@ -3045,6 +3069,34 @@ function WorkersTab({
             <Button type="button" variant="outline" disabled={reentrySaving} onClick={() => setReentryWorker(null)}>取消</Button>
             <Button type="button" disabled={!reentryTeamId || !reentryEntryTime || reentrySaving} className="bg-[#0f6b5d] text-white hover:bg-[#0b5148]" onClick={() => void submitReentry()}>
               {reentrySaving ? "提交中..." : "确认进场"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={Boolean(editingEntryWorker)} onOpenChange={(open) => {
+        if (!open && !editingEntrySaving) setEditingEntryWorker(null);
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>修改进场日期</DialogTitle>
+            <DialogDescription>修改 {editingEntryWorker?.name ?? "该工人"} 的进场日期。</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="grid gap-2 text-sm font-medium text-slate-700 dark:text-foreground">
+              当前进场日期
+              <div className="rounded-md border bg-[#f8faf9] px-3 py-2 text-sm text-slate-900 dark:bg-background dark:text-foreground">
+                {editingEntryWorker?.entryDate || "未设置"}
+              </div>
+            </div>
+            <label className="grid gap-2 text-sm font-medium text-slate-700 dark:text-foreground">
+              新进场日期
+              <Input type="date" value={editingEntryDate} onChange={(event) => setEditingEntryDate(event.target.value)} />
+            </label>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" disabled={editingEntrySaving} onClick={() => setEditingEntryWorker(null)}>取消</Button>
+            <Button type="button" disabled={!editingEntryDate || editingEntrySaving} className="bg-[#0f6b5d] text-white hover:bg-[#0b5148]" onClick={() => void submitEditEntryTime()}>
+              {editingEntrySaving ? "提交中..." : "确认修改"}
             </Button>
           </DialogFooter>
         </DialogContent>

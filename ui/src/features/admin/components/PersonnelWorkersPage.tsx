@@ -1,6 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
-import { ImageIcon, RefreshCw, Search } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { CalendarIcon, ImageIcon, RefreshCw, Search } from "lucide-react";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -46,6 +47,8 @@ export function PersonnelWorkersPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(10);
   const [selectedWorkerId, setSelectedWorkerId] = useState<string | null>(null);
+  const [editingWorker, setEditingWorker] = useState<ConstructionPersonnelWorker | null>(null);
+  const [editingDate, setEditingDate] = useState("");
   const workers = useQuery({
     queryKey: ["management", "personnel-workers", appliedFilters, page, pageSize],
     queryFn: () =>
@@ -63,6 +66,26 @@ export function PersonnelWorkersPage() {
     queryFn: () => constructionProjectService.getPersonnelWorker(selectedWorkerId ?? ""),
     enabled: Boolean(selectedWorkerId),
     staleTime: 30 * 1000,
+  });
+  const queryClient = useQueryClient();
+  const updateEntryTimeMutation = useMutation({
+    mutationFn: ({
+      projectId,
+      workerId,
+      entryTime,
+    }: {
+      projectId: string;
+      workerId: string;
+      entryTime: string;
+    }) => constructionProjectService.updateWorker(projectId, workerId, { entry_time: entryTime }),
+    onSuccess: () => {
+      toast.success("进场日期修改成功");
+      void queryClient.invalidateQueries({ queryKey: ["management", "personnel-workers"] });
+      setEditingWorker(null);
+    },
+    onError: (error) => {
+      toast.error("修改进场日期失败", { description: String(error) });
+    },
   });
   const rows: ConstructionPersonnelWorker[] = workers.data?.items ?? [];
   const total = workers.data?.total ?? 0;
@@ -148,16 +171,17 @@ export function PersonnelWorkersPage() {
               <TableHead>身份证号</TableHead>
               <TableHead>所属项目</TableHead>
               <TableHead>进场时间</TableHead>
+              <TableHead className="text-right">操作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {workers.isLoading ? (
               <TableRow>
-                <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">人员数据加载中</TableCell>
+                <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">人员数据加载中</TableCell>
               </TableRow>
             ) : workers.isError ? (
               <TableRow>
-                <TableCell colSpan={6} className="h-24 text-center text-red-600">人员数据加载失败，请检查登录状态或后端服务</TableCell>
+                <TableCell colSpan={7} className="h-24 text-center text-red-600">人员数据加载失败，请检查登录状态或后端服务</TableCell>
               </TableRow>
             ) : rows.length ? (
               rows.map((worker) => (
@@ -174,11 +198,26 @@ export function PersonnelWorkersPage() {
                   <TableCell>{worker.id_card || "-"}</TableCell>
                   <TableCell>{worker.project_name || "未命名项目"}</TableCell>
                   <TableCell>{worker.entry_time || "-"}</TableCell>
+                  <TableCell className="text-right">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingWorker(worker);
+                        setEditingDate(worker.entry_time ?? "");
+                      }}
+                    >
+                      <CalendarIcon className="mr-1 size-3.5" />
+                      修改进场日期
+                    </Button>
+                  </TableCell>
                 </TableRow>
               ))
             ) : (
               <TableRow>
-                <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">暂无人员数据</TableCell>
+                <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">暂无人员数据</TableCell>
               </TableRow>
             )}
           </TableBody>
@@ -260,6 +299,53 @@ export function PersonnelWorkersPage() {
               </div>
             </div>
           ) : null}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={Boolean(editingWorker)} onOpenChange={(open) => !open && setEditingWorker(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>修改进场日期</DialogTitle>
+            <DialogDescription>
+              修改 {editingWorker?.name || "该工人"} 的进场日期。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-muted-foreground">当前进场日期</label>
+              <div className="rounded-md border bg-[#f8faf9] px-3 py-2 text-sm">
+                {editingWorker?.entry_time || "未设置"}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-muted-foreground">新进场日期</label>
+              <Input
+                type="date"
+                value={editingDate}
+                onChange={(e) => setEditingDate(e.target.value)}
+                className="h-9"
+              />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setEditingWorker(null)}>
+              取消
+            </Button>
+            <Button
+              className="bg-[#0f6b5d] text-white hover:bg-[#0b5148]"
+              disabled={!editingDate || updateEntryTimeMutation.isPending}
+              onClick={() => {
+                if (editingWorker) {
+                  updateEntryTimeMutation.mutate({
+                    projectId: editingWorker.project_id,
+                    workerId: editingWorker.id,
+                    entryTime: editingDate,
+                  });
+                }
+              }}
+            >
+              {updateEntryTimeMutation.isPending ? "提交中..." : "确认修改"}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

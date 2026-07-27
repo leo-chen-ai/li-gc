@@ -14,6 +14,26 @@ function toNumber(value: unknown) {
 }
 
 export function validateWorkerCreatePayload(payload: ConstructionWorkerPayload) {
+  if (isBlank(payload.avatar)) {
+    throw new Error("请上传照片");
+  }
+
+  if (isBlank(payload.ocr_photo)) {
+    throw new Error("请上传识别身份证正面照片");
+  }
+
+  if (isBlank(payload.id_card_back_file)) {
+    throw new Error("请上传识别身份证反面照片");
+  }
+
+  if (isBlank(payload.id_card)) {
+    throw new Error("请填写身份证号");
+  }
+
+  if (isBlank(payload.nation)) {
+    throw new Error("请填写民族");
+  }
+
   if (isBlank(payload.phone)) {
     throw new Error("请填写手机号");
   }
