@@ -12,7 +12,7 @@ INSERT INTO integration_platforms (
 )
 VALUES (
     'yongxin_v2',
-    '甬薪',
+    '甬薪精管开放平台 V2',
     'yongxin_v2',
     'appkey_timestamp_md5',
     jsonb_build_object(
@@ -28,7 +28,7 @@ VALUES (
         ),
         'rate_limit_per_second', 2
     ),
-    '甬薪。项目凭证和功能开关由项目平台配置维护。'
+    '甬薪精管开放平台 V2。项目凭证和功能开关由项目平台配置维护。'
 )
 ON CONFLICT DO NOTHING;
 
