@@ -1,6 +1,7 @@
 pub mod admin;
 pub mod auth;
 pub mod device_mqtt;
+pub mod device_vendor_b;
 pub mod health;
 pub mod integration;
 pub mod miniapp;

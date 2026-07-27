@@ -16,7 +16,10 @@ use uuid::Uuid;
 
 use crate::{
     feature::auth::types::claims::AuthUser,
-    infrastructure::web::response::{ApiError, ApiResult, ApiSuccess},
+    infrastructure::web::{
+        response::{ApiError, ApiResult, ApiSuccess},
+        trimmed_json::TrimmedJson,
+    },
     state::AppState,
 };
 
@@ -184,7 +187,7 @@ pub async fn list_configs(State(state): State<AppState>, uri: Uri) -> ApiResult<
 pub async fn create_config(
     State(state): State<AppState>,
     Extension(auth_user): Extension<AuthUser>,
-    Json(input): Json<ConfigInput>,
+    TrimmedJson(input): TrimmedJson<ConfigInput>,
 ) -> ApiResult<Value> {
     let normalized = validate_config(input, true)?;
     let key = credential_key()?;
@@ -261,7 +264,7 @@ pub async fn update_config(
     State(state): State<AppState>,
     Extension(auth_user): Extension<AuthUser>,
     Path(config_id): Path<Uuid>,
-    Json(input): Json<ConfigInput>,
+    TrimmedJson(input): TrimmedJson<ConfigInput>,
 ) -> ApiResult<Value> {
     fetch_config(state.db.pool(), config_id).await?;
     let normalized = validate_config(input, false)?;

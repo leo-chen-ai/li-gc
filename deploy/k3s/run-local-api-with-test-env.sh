@@ -18,6 +18,13 @@ source "$DEPLOY_ENV"
 source "$ROOT_DIR/api/.env"
 set +a
 
+if [[ "${LOCAL_SQL_LOGGING:-false}" =~ ^(1|true|yes|on)$ ]]; then
+  case ",${RUST_LOG:-info}," in
+    *,sqlx::query=*) ;;
+    *) export RUST_LOG="${RUST_LOG:-info},sqlx::query=debug" ;;
+  esac
+fi
+
 remote() {
   ssh -i "$SSH_KEY" -p "$VPS_SSH_PORT" "$VPS_USER@$VPS_HOST" "$@"
 }
@@ -48,7 +55,11 @@ export JWT_ACCESS_SECRET="$(secret JWT_ACCESS_SECRET)"
 export JWT_REFRESH_SECRET="$(secret JWT_REFRESH_SECRET)"
 export REPORT_FORWARD_CREDENTIAL_KEY="$(secret REPORT_FORWARD_CREDENTIAL_KEY)"
 export SERVER_PORT="${SERVER_PORT:-8080}"
+export BACKGROUND_WORKERS_ENABLED="${BACKGROUND_WORKERS_ENABLED:-false}"
+export NINGBO_HOUSING_ALLOWED_HOSTS="${NINGBO_HOUSING_ALLOWED_HOSTS:-$VPS_HOST}"
 
-echo "Starting local API on http://127.0.0.1:$SERVER_PORT with K3s test database, Redis, and MQTT"
+echo "Starting local API on http://localhost:$SERVER_PORT with K3s database, Redis, and MQTT"
+echo "Background workers enabled: $BACKGROUND_WORKERS_ENABLED"
+echo "SQL query logging enabled: ${LOCAL_SQL_LOGGING:-false}"
 cd "$ROOT_DIR/api"
 cargo run

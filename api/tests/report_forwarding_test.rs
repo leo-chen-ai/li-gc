@@ -47,26 +47,30 @@ fn config_payload(lifecycle_status: &str, is_enabled: bool) -> Value {
     json!({
         "name": "宁波日报送",
         "source_base_url": "http://tg.91jtg.com/path-is-normalized",
-        "source_username": "source-account",
-        "source_password": "source-secret",
+        "source_username": "  source-account  ",
+        "source_password": "  source-secret  ",
         "project_mode": "all",
         "include_projects": [],
         "exclude_projects": ["排除项目"],
         "target_base_url": "https://www.zjzwfw.gov.cn/ignored-path",
-        "target_username": "13800000000",
-        "target_password": "target-secret",
+        "target_username": "  13800000000  ",
+        "target_password": "  target-secret  ",
         "verification_type": "feishu",
         "verification_config": {
             "app_id": "cli_test",
-            "app_secret": "feishu-secret",
+            "app_secret": "  feishu-secret  ",
             "chat_id": "oc_test"
         },
         "schedule_time": "23:00",
         "schedule_timezone": "Asia/Shanghai",
         "lifecycle_status": lifecycle_status,
         "is_enabled": is_enabled,
-        "settings": {"headless": true, "upload_timeout_minutes": 15},
-        "remark": "integration test"
+        "settings": {
+            "headless": true,
+            "upload_timeout_minutes": 15,
+            "label": "  daily report  "
+        },
+        "remark": "  integration test  "
     })
 }
 
@@ -162,6 +166,10 @@ async fn report_forward_config_secrets_and_run_guards_work() {
     let config_id = config["id"].as_str().expect("config id");
     assert_eq!(config["source_base_url"], "http://tg.91jtg.com");
     assert_eq!(config["target_base_url"], "https://www.zjzwfw.gov.cn");
+    assert_eq!(config["source_username"], "source-account");
+    assert_eq!(config["target_username"], "13800000000");
+    assert_eq!(config["settings"]["label"], "daily report");
+    assert_eq!(config["remark"], "integration test");
     assert_eq!(config["source_password_configured"], true);
     assert_eq!(config["target_password_configured"], true);
     assert!(config.get("source_password_cipher").is_none());

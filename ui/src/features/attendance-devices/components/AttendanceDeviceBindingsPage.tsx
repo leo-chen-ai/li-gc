@@ -57,7 +57,10 @@ const directionOptions = [
   { label: "通用", value: "2" },
 ] as const;
 
-const deviceTypeOptions = [{ label: "A厂家", value: "A厂家" }] as const;
+const deviceTypeOptions = [
+  { label: "A厂家", value: "A厂家" },
+  { label: "B厂家", value: "B厂家" },
+] as const;
 const HEARTBEAT_ONLINE_WINDOW_MS = 3 * 60 * 1000;
 
 type DeviceFormState = {
