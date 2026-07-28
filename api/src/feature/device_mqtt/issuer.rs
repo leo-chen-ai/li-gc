@@ -1114,4 +1114,24 @@ mod tests {
     fn project_worker_issue_query_excludes_left_site_workers() {
         assert!(FETCH_PROJECT_WORKERS_SQL.contains("COALESCE(work_status, 1) <> 2"));
     }
+
+    #[test]
+    fn only_b_vendor_bypasses_the_mqtt_issue_path() {
+        let project_id = Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap();
+        let mut device = IssueDeviceSnapshot {
+            id: Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap(),
+            project_id,
+            device_name: Some("测试考勤机".to_string()),
+            serial_number: "1306612".to_string(),
+            device_type: Some("A厂家".to_string()),
+            online_status: "online".to_string(),
+            last_heartbeat_at: Some(Utc::now()),
+        };
+
+        assert!(!is_b_vendor_device(&device));
+        assert!(require_mqtt_broker_url(None).is_err());
+
+        device.device_type = Some(B_VENDOR_DEVICE_TYPE.to_string());
+        assert!(is_b_vendor_device(&device));
+    }
 }

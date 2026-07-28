@@ -379,6 +379,36 @@ async fn b_vendor_quality_feedback_is_visible_as_idempotent_issue_reports() {
     assert_eq!(report.8["event"], "quality");
     let fallback_timestamp_millis = report.7["ts"].as_str().unwrap().parse::<i64>().unwrap();
 
+    sqlx::query(
+        r#"
+        INSERT INTO construction_attendance_device_issue_reports (
+            project_id, worker_id, attendance_device_id,
+            worker_name, device_name, serial_number, device_type,
+            action, status, issued_at, message, remark,
+            request_payload, response_payload, acknowledged_at
+        )
+        SELECT project_id, worker_id, attendance_device_id,
+               worker_name, device_name, serial_number, device_type,
+               'update', status, NOW(), message, 'B厂家设备拉取人员后的照片质量反馈',
+               request_payload, response_payload, NOW()
+        FROM construction_attendance_device_issue_reports
+        WHERE id = $1
+        "#,
+    )
+    .bind(default_report_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let duplicate_count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM construction_attendance_device_issue_reports WHERE worker_id = $1 AND attendance_device_id = $2 AND is_deleted = FALSE",
+    )
+    .bind(worker_id)
+    .bind(device_record_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(duplicate_count, 2);
+
     let (retry_status, retry) = post_quality_json(app.clone(), &failed_payload, None).await;
     assert_eq!(retry_status, axum::http::StatusCode::OK, "{retry}");
     let report_count = sqlx::query_scalar::<_, i64>(
@@ -421,7 +451,7 @@ async fn b_vendor_quality_feedback_is_visible_as_idempotent_issue_reports() {
     .await
     .unwrap();
     statuses.sort();
-    assert_eq!(statuses, vec!["failed", "success"]);
+    assert_eq!(statuses, vec!["success"]);
 
     let device_seen = sqlx::query_scalar::<_, bool>(
         "SELECT last_seen_at IS NOT NULL AND online_status = 'online' FROM construction_attendance_devices WHERE id = $1",

@@ -431,7 +431,6 @@ async fn report_photo_quality(
     headers: HeaderMap,
     payload: Result<Json<PhotoQualityRequest>, JsonRejection>,
 ) -> Result<Json<VendorResponse<Vec<PhotoQualityAck>>>, VendorError> {
-    let has_timestamp_header = headers.contains_key("ts");
     let timestamp_millis = parse_quality_millis_header(&headers, "ts")?;
     let feedback_time = DateTime::from_timestamp_millis(timestamp_millis)
         .ok_or_else(|| quality_bad_request("ts时间戳超出有效范围"))?;
@@ -515,14 +514,9 @@ async fn report_photo_quality(
             "plat": feedback.plat,
             "msg": feedback.msg,
         });
-        let callback_identity = if has_timestamp_header {
-            timestamp_millis.to_string()
-        } else {
-            format!("no-ts:{}:{}:{}", feedback.plat, feedback.code, feedback.msg)
-        };
         let lock_key = format!(
             "b-quality:{}:{}:{}",
-            device_id, feedback.worker_id, callback_identity
+            device_id, feedback.worker_id, feedback.plat
         );
         sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)")
             .bind(lock_key)
@@ -530,45 +524,60 @@ async fn report_photo_quality(
             .await
             .map_err(quality_internal)?;
 
-        let replay_report_id = sqlx::query_scalar::<_, Uuid>(
+        let default_success_report_id = sqlx::query_scalar::<_, Uuid>(
             r#"
             SELECT id
             FROM construction_attendance_device_issue_reports
             WHERE is_deleted = FALSE
               AND attendance_device_id = $1
               AND worker_id = $2
-              AND response_payload ->> 'source' = $3
-              AND (
-                    (
-                        request_payload ->> 'ts' = $4
-                        AND request_payload -> 'data' ->> 'plat' = $5
-                    )
-                    OR (
-                        $6 = FALSE
-                        AND response_payload ->> 'code' = $7
-                        AND response_payload ->> 'plat' = $5
-                        AND COALESCE(response_payload ->> 'msg', '') = $8
-                        AND updated_at >= NOW() - INTERVAL '10 minutes'
-                    )
-              )
-            ORDER BY created_at DESC, id DESC
+              AND device_type = $3
+              AND action <> 'delete'
+              AND mqtt_message_id IS NULL
+              AND response_payload IS NULL
+            ORDER BY issued_at DESC, created_at DESC, id DESC
             LIMIT 1
             FOR UPDATE
             "#,
         )
         .bind(binding.id)
         .bind(feedback.worker_id)
-        .bind(QUALITY_SOURCE)
-        .bind(timestamp_millis.to_string())
-        .bind(&feedback.plat)
-        .bind(has_timestamp_header)
-        .bind(&feedback.code)
-        .bind(&feedback.msg)
+        .bind(B_VENDOR_DEVICE_TYPE)
         .fetch_optional(&mut *tx)
         .await
         .map_err(quality_internal)?;
 
-        if let Some(report_id) = replay_report_id {
+        let quality_report_id = if default_success_report_id.is_some() {
+            None
+        } else {
+            sqlx::query_scalar::<_, Uuid>(
+                r#"
+                SELECT id
+                FROM construction_attendance_device_issue_reports
+                WHERE is_deleted = FALSE
+                  AND attendance_device_id = $1
+                  AND worker_id = $2
+                  AND response_payload ->> 'source' = $3
+                  AND response_payload ->> 'plat' = $4
+                ORDER BY
+                    CASE WHEN remark = $5 THEN 1 ELSE 0 END,
+                    created_at DESC,
+                    id DESC
+                LIMIT 1
+                FOR UPDATE
+                "#,
+            )
+            .bind(binding.id)
+            .bind(feedback.worker_id)
+            .bind(QUALITY_SOURCE)
+            .bind(&feedback.plat)
+            .bind(QUALITY_REMARK)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(quality_internal)?
+        };
+
+        if let Some(report_id) = default_success_report_id.or(quality_report_id) {
             update_photo_quality_report(
                 &mut tx,
                 report_id,
@@ -578,43 +587,17 @@ async fn report_photo_quality(
                 &response_payload,
             )
             .await?;
-        } else {
-            let default_success_report_id = sqlx::query_scalar::<_, Uuid>(
-                r#"
-                SELECT id
-                FROM construction_attendance_device_issue_reports
-                WHERE is_deleted = FALSE
-                  AND attendance_device_id = $1
-                  AND worker_id = $2
-                  AND device_type = $3
-                  AND action <> 'delete'
-                  AND mqtt_message_id IS NULL
-                  AND response_payload IS NULL
-                ORDER BY issued_at DESC, created_at DESC, id DESC
-                LIMIT 1
-                FOR UPDATE
-                "#,
+            delete_duplicate_photo_quality_reports(
+                &mut tx,
+                binding.id,
+                feedback.worker_id,
+                &feedback.plat,
+                report_id,
             )
-            .bind(binding.id)
-            .bind(feedback.worker_id)
-            .bind(B_VENDOR_DEVICE_TYPE)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(quality_internal)?;
-
-            if let Some(report_id) = default_success_report_id {
-                update_photo_quality_report(
-                    &mut tx,
-                    report_id,
-                    status,
-                    &message,
-                    &request_payload,
-                    &response_payload,
-                )
-                .await?;
-            } else {
-                sqlx::query(
-                    r#"
+            .await?;
+        } else {
+            sqlx::query(
+                r#"
                     INSERT INTO construction_attendance_device_issue_reports (
                         project_id, worker_id, attendance_device_id,
                         worker_name, worker_id_card, worker_phone, avatar_url,
@@ -629,28 +612,27 @@ async fn report_photo_quality(
                         'update', $11, $12, $13, $14,
                         $15, $16, NOW(), CASE WHEN $11 = 'failed' THEN $13 ELSE NULL END
                     )
-                    "#,
-                )
-                .bind(binding.project_id)
-                .bind(feedback.worker_id)
-                .bind(binding.id)
-                .bind(worker.0.or(Some(feedback.name.clone())))
-                .bind(worker.1)
-                .bind(worker.2)
-                .bind(worker.3)
-                .bind(&binding.device_name)
-                .bind(&binding.serial_number)
-                .bind(B_VENDOR_DEVICE_TYPE)
-                .bind(status)
-                .bind(feedback_time)
-                .bind(&message)
-                .bind(QUALITY_REMARK)
-                .bind(&request_payload)
-                .bind(&response_payload)
-                .execute(&mut *tx)
-                .await
-                .map_err(quality_internal)?;
-            }
+                "#,
+            )
+            .bind(binding.project_id)
+            .bind(feedback.worker_id)
+            .bind(binding.id)
+            .bind(worker.0.or(Some(feedback.name.clone())))
+            .bind(worker.1)
+            .bind(worker.2)
+            .bind(worker.3)
+            .bind(&binding.device_name)
+            .bind(&binding.serial_number)
+            .bind(B_VENDOR_DEVICE_TYPE)
+            .bind(status)
+            .bind(feedback_time)
+            .bind(&message)
+            .bind(QUALITY_REMARK)
+            .bind(&request_payload)
+            .bind(&response_payload)
+            .execute(&mut *tx)
+            .await
+            .map_err(quality_internal)?;
         }
 
         acknowledgements.push(PhotoQualityAck {
@@ -715,6 +697,37 @@ async fn update_photo_quality_report(
     .bind(QUALITY_REMARK)
     .bind(request_payload)
     .bind(response_payload)
+    .execute(&mut **tx)
+    .await
+    .map_err(quality_internal)?;
+    Ok(())
+}
+
+async fn delete_duplicate_photo_quality_reports(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    attendance_device_id: Uuid,
+    worker_id: Uuid,
+    plat: &str,
+    retained_report_id: Uuid,
+) -> Result<(), VendorError> {
+    sqlx::query(
+        r#"
+        DELETE FROM construction_attendance_device_issue_reports
+        WHERE is_deleted = FALSE
+          AND attendance_device_id = $1
+          AND worker_id = $2
+          AND id <> $3
+          AND response_payload ->> 'source' = $4
+          AND response_payload ->> 'plat' = $5
+          AND remark = $6
+        "#,
+    )
+    .bind(attendance_device_id)
+    .bind(worker_id)
+    .bind(retained_report_id)
+    .bind(QUALITY_SOURCE)
+    .bind(plat)
+    .bind(QUALITY_REMARK)
     .execute(&mut **tx)
     .await
     .map_err(quality_internal)?;
