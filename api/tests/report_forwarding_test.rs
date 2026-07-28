@@ -84,7 +84,7 @@ async fn custom_role_menu_controls_report_forward_access() {
     .await
     .expect("create custom role");
     sqlx::query(
-        "INSERT INTO role_menu_permissions (role_id,menu_key) VALUES ($1,'projects'),($1,'data_reporting')",
+        "INSERT INTO role_menu_permissions (role_id,menu_key) VALUES ($1,'data_reporting')",
     )
     .bind(role_id)
     .execute(&pool)
@@ -109,10 +109,7 @@ async fn custom_role_menu_controls_report_forward_access() {
     .await;
     assert_eq!(status, StatusCode::OK, "{permissions}");
     assert_eq!(permissions["data"]["code"], "shujubaosong");
-    assert_eq!(
-        permissions["data"]["menu_keys"],
-        json!(["projects", "data_reporting"])
-    );
+    assert_eq!(permissions["data"]["menu_keys"], json!(["data_reporting"]));
 
     let (status, summary) = request_json(
         app.clone(),
@@ -123,6 +120,16 @@ async fn custom_role_menu_controls_report_forward_access() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{summary}");
+
+    let (status, projects) = request_json(
+        app.clone(),
+        "GET",
+        "/api/v1/management/projects",
+        &permitted_token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{projects}");
 
     let denied_user_id = sqlx::query_scalar::<_, Uuid>(
         "INSERT INTO users (email,username,role,is_active,email_verified) VALUES ('plain@example.com','plain','user',TRUE,TRUE) RETURNING id",
