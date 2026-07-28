@@ -431,6 +431,7 @@ async fn report_photo_quality(
     headers: HeaderMap,
     payload: Result<Json<PhotoQualityRequest>, JsonRejection>,
 ) -> Result<Json<VendorResponse<Vec<PhotoQualityAck>>>, VendorError> {
+    let has_timestamp_header = headers.contains_key("ts");
     let timestamp_millis = parse_quality_millis_header(&headers, "ts")?;
     let feedback_time = DateTime::from_timestamp_millis(timestamp_millis)
         .ok_or_else(|| quality_bad_request("ts时间戳超出有效范围"))?;
@@ -514,9 +515,14 @@ async fn report_photo_quality(
             "plat": feedback.plat,
             "msg": feedback.msg,
         });
+        let callback_identity = if has_timestamp_header {
+            timestamp_millis.to_string()
+        } else {
+            format!("no-ts:{}:{}:{}", feedback.plat, feedback.code, feedback.msg)
+        };
         let lock_key = format!(
-            "b-quality:{}:{}:{}:{}",
-            device_id, feedback.worker_id, timestamp_millis, feedback.plat
+            "b-quality:{}:{}:{}",
+            device_id, feedback.worker_id, callback_identity
         );
         sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)")
             .bind(lock_key)
@@ -532,8 +538,19 @@ async fn report_photo_quality(
               AND attendance_device_id = $1
               AND worker_id = $2
               AND response_payload ->> 'source' = $3
-              AND request_payload ->> 'ts' = $4
-              AND request_payload -> 'data' ->> 'plat' = $5
+              AND (
+                    (
+                        request_payload ->> 'ts' = $4
+                        AND request_payload -> 'data' ->> 'plat' = $5
+                    )
+                    OR (
+                        $6 = FALSE
+                        AND response_payload ->> 'code' = $7
+                        AND response_payload ->> 'plat' = $5
+                        AND COALESCE(response_payload ->> 'msg', '') = $8
+                        AND updated_at >= NOW() - INTERVAL '10 minutes'
+                    )
+              )
             ORDER BY created_at DESC, id DESC
             LIMIT 1
             FOR UPDATE
@@ -544,6 +561,9 @@ async fn report_photo_quality(
         .bind(QUALITY_SOURCE)
         .bind(timestamp_millis.to_string())
         .bind(&feedback.plat)
+        .bind(has_timestamp_header)
+        .bind(&feedback.code)
+        .bind(&feedback.msg)
         .fetch_optional(&mut *tx)
         .await
         .map_err(quality_internal)?;
@@ -936,10 +956,12 @@ fn parse_required_millis_header(headers: &HeaderMap, name: &str) -> Result<i64, 
 }
 
 fn parse_quality_millis_header(headers: &HeaderMap, name: &str) -> Result<i64, VendorError> {
-    let value = headers
-        .get(name)
-        .and_then(|value| value.to_str().ok())
-        .ok_or_else(|| quality_bad_request(format!("请求头{name}为必传参数")))?;
+    let Some(raw_value) = headers.get(name) else {
+        return Ok(Utc::now().timestamp_millis());
+    };
+    let value = raw_value
+        .to_str()
+        .map_err(|_| quality_bad_request(format!("请求头{name}格式无效")))?;
     let value = quality_required(value, name, 32)?;
     let timestamp = value
         .parse::<i64>()

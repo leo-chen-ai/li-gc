@@ -323,7 +323,6 @@ async fn b_vendor_quality_feedback_is_visible_as_idempotent_issue_reports() {
     .unwrap();
     assert_eq!(mqtt_message_count, 0, "B厂家下发记录不应产生MQTT消息");
 
-    let timestamp_millis = 1_785_217_408_177_i64;
     let failed_payload = serde_json::json!({
         "productId": "1",
         "deviceId": "B-QUALITY-001",
@@ -336,13 +335,7 @@ async fn b_vendor_quality_feedback_is_visible_as_idempotent_issue_reports() {
         }]
     });
 
-    let (missing_ts_status, missing_ts) =
-        post_quality_json(app.clone(), &failed_payload, None).await;
-    assert_eq!(missing_ts_status, axum::http::StatusCode::BAD_REQUEST);
-    assert_eq!(missing_ts["event"], "quality");
-
-    let (status, failed) =
-        post_quality_json(app.clone(), &failed_payload, Some(timestamp_millis)).await;
+    let (status, failed) = post_quality_json(app.clone(), &failed_payload, None).await;
     assert_eq!(status, axum::http::StatusCode::OK, "{failed}");
     assert_eq!(failed["success"], true);
     assert_eq!(failed["event"], "quality");
@@ -384,9 +377,9 @@ async fn b_vendor_quality_feedback_is_visible_as_idempotent_issue_reports() {
     assert_eq!(report.7["data"]["code"], "5");
     assert_eq!(report.8["source"], "device_vendor_b_quality");
     assert_eq!(report.8["event"], "quality");
+    let fallback_timestamp_millis = report.7["ts"].as_str().unwrap().parse::<i64>().unwrap();
 
-    let (retry_status, retry) =
-        post_quality_json(app.clone(), &failed_payload, Some(timestamp_millis)).await;
+    let (retry_status, retry) = post_quality_json(app.clone(), &failed_payload, None).await;
     assert_eq!(retry_status, axum::http::StatusCode::OK, "{retry}");
     let report_count = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM construction_attendance_device_issue_reports WHERE worker_id = $1 AND attendance_device_id = $2 AND is_deleted = FALSE",
@@ -410,7 +403,7 @@ async fn b_vendor_quality_feedback_is_visible_as_idempotent_issue_reports() {
         }
     });
     let (success_status, success) =
-        post_quality_json(app, &success_payload, Some(timestamp_millis + 1)).await;
+        post_quality_json(app, &success_payload, Some(fallback_timestamp_millis + 1)).await;
     assert_eq!(success_status, axum::http::StatusCode::OK, "{success}");
     assert_eq!(success["event"], "quality");
 
