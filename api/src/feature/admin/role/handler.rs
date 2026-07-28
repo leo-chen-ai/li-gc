@@ -251,10 +251,6 @@ fn normalize_menu_keys(menu_keys: Vec<String>) -> Result<Vec<String>, ApiError> 
         }
     }
 
-    if !normalized.iter().any(|key| key == "projects") {
-        normalized.insert(0, "projects".to_string());
-    }
-
     Ok(normalized)
 }
 
@@ -263,4 +259,18 @@ fn invalid_input(message: &str) -> ApiError {
         .with_code(StatusCode::BAD_REQUEST)
         .with_error_code(generic::INVALID_INPUT)
         .with_message(message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_menu_keys;
+
+    #[test]
+    fn menu_permissions_can_exclude_labor_management() {
+        assert_eq!(
+            normalize_menu_keys(vec!["data_reporting".to_string()]).unwrap(),
+            vec!["data_reporting"]
+        );
+        assert!(normalize_menu_keys(Vec::new()).unwrap().is_empty());
+    }
 }

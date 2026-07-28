@@ -79,6 +79,9 @@ function AdminContent() {
   const canUseScopedPage = Boolean(
     currentScopedPage && allowedMenus.has(currentScopedPage.menuKey)
   );
+  const firstAllowedScopedPage = scopedUserPages.find(({ menuKey }) =>
+    allowedMenus.has(menuKey)
+  );
 
   // Note: Authenticated guard is handled by app.tsx 
 
@@ -96,8 +99,16 @@ function AdminContent() {
   }
 
   if (user?.role !== "admin" && !canUseScopedPage) {
-    navigate({ to: "/app" });
-    return null;
+    if (firstAllowedScopedPage) {
+      navigate({ to: firstAllowedScopedPage.path });
+      return null;
+    }
+
+    return (
+      <div className="flex min-h-screen items-center justify-center p-6 text-sm text-muted-foreground">
+        当前角色尚未配置可访问的菜单，请联系管理员。
+      </div>
+    );
   }
 
   return (
