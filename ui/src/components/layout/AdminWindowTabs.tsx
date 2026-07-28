@@ -106,7 +106,11 @@ function parseAdminWindowSearch(path: string) {
   return Object.fromEntries(new URLSearchParams(query).entries());
 }
 
-export function AdminWindowTabs() {
+export function AdminWindowTabs({
+  fallbackPath = ADMIN_WINDOW_FALLBACK_PATH,
+}: {
+  fallbackPath?: string;
+}) {
   const location = useLocation();
   const navigate = useNavigate();
   const currentPath = useMemo(() => {
@@ -174,7 +178,7 @@ export function AdminWindowTabs() {
     const next = visibleWindows.filter((item) => item.path !== path);
 
     if (path === currentPath) {
-      const target = next[currentIndex - 1] ?? next[currentIndex] ?? { path: ADMIN_WINDOW_FALLBACK_PATH };
+      const target = next[currentIndex - 1] ?? next[currentIndex] ?? { path: fallbackPath };
       writeAdminWindowState({ windows: next, activePath: target.path });
       void navigate({
         to: getAdminWindowPathname(target.path),
@@ -206,10 +210,10 @@ export function AdminWindowTabs() {
 
   const closeAllWindows = () => {
     setContextMenu(null);
-    writeAdminWindowState({ windows: [], activePath: ADMIN_WINDOW_FALLBACK_PATH });
+    writeAdminWindowState({ windows: [], activePath: fallbackPath });
 
-    if (currentPath !== ADMIN_WINDOW_FALLBACK_PATH) {
-      void navigate({ to: ADMIN_WINDOW_FALLBACK_PATH });
+    if (currentPath !== fallbackPath) {
+      void navigate({ to: fallbackPath });
       return;
     }
 

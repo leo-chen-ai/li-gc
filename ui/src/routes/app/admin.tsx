@@ -13,7 +13,11 @@ import {
 import { AppSidebar } from "@/components/layout/AppSidebar";
 import { AdminWindowTabs } from "@/components/layout/AdminWindowTabs";
 import { useAuthUser } from "@/stores/use-auth-store";
-import { getMenuKeysForUserRole, type MenuPermissionKey } from "@/features/admin/data/rbac";
+import {
+  getDefaultAdminPath,
+  getMenuKeysForUserRole,
+  type MenuPermissionKey,
+} from "@/features/admin/data/rbac";
 import { useCurrentRolePermissions } from "@/features/admin/hooks/use-roles";
 import { HeaderUserMenu } from "@/components/layout/HeaderUserMenu";
 import {
@@ -82,6 +86,7 @@ function AdminContent() {
   const firstAllowedScopedPage = scopedUserPages.find(({ menuKey }) =>
     allowedMenus.has(menuKey)
   );
+  const defaultAdminPath = getDefaultAdminPath(allowedMenus);
 
   // Note: Authenticated guard is handled by app.tsx 
 
@@ -193,7 +198,7 @@ function AdminContent() {
             <HeaderUserMenu />
           </div>
         </header>
-        <AdminWindowTabs />
+        <AdminWindowTabs fallbackPath={defaultAdminPath} />
 
         {/* Page Content */}
         <main className="admin-surface min-w-0 flex-1 overflow-x-hidden bg-muted/20 p-3 md:p-4">
