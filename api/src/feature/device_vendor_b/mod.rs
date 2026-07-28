@@ -24,7 +24,10 @@ use crate::state::AppState;
 const B_VENDOR_DEVICE_TYPE: &str = "B厂家";
 const WORKERS_EVENT: &str = "workers";
 const PHOTO_EVENT: &str = "photo";
+const QUALITY_EVENT: &str = "quality";
 const PHOTO_SOURCE: &str = "device_vendor_b_photo";
+const QUALITY_SOURCE: &str = "device_vendor_b_quality";
+const QUALITY_REMARK: &str = "B厂家设备拉取人员后的照片质量反馈";
 const PHOTO_JSON_LIMIT_BYTES: usize = 30 * 1024 * 1024;
 const MAX_PHOTO_PIXELS: u64 = 100_000_000;
 
@@ -215,6 +218,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/workers", get(download_workers))
         .route("/photo", post(upload_attendance_photo))
+        .route("/quality", post(report_photo_quality))
         .layer(DefaultBodyLimit::max(PHOTO_JSON_LIMIT_BYTES))
 }
 
@@ -356,11 +360,345 @@ struct AttendancePhotoData {
     path: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PhotoQualityRequest {
+    product_id: VendorText,
+    device_id: VendorText,
+    data: PhotoQualityItems,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum PhotoQualityItems {
+    One(PhotoQualityFeedback),
+    Many(Vec<PhotoQualityFeedback>),
+}
+
+impl PhotoQualityItems {
+    fn into_vec(self) -> Vec<PhotoQualityFeedback> {
+        match self {
+            Self::One(feedback) => vec![feedback],
+            Self::Many(feedbacks) => feedbacks,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PhotoQualityFeedback {
+    worker_id: VendorText,
+    name: String,
+    plat: String,
+    msg: String,
+    code: VendorText,
+}
+
+#[derive(Debug)]
+struct NormalizedPhotoQualityFeedback {
+    worker_id: Uuid,
+    worker_id_text: String,
+    name: String,
+    plat: String,
+    msg: String,
+    code: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PhotoQualityAck {
+    worker_id: String,
+}
+
 #[derive(Debug)]
 struct DeviceBinding {
     id: Uuid,
     project_id: Uuid,
     direction: i16,
+    device_name: Option<String>,
+    serial_number: String,
+}
+
+type QualityWorkerRow = (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
+async fn report_photo_quality(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    payload: Result<Json<PhotoQualityRequest>, JsonRejection>,
+) -> Result<Json<VendorResponse<Vec<PhotoQualityAck>>>, VendorError> {
+    let timestamp_millis = parse_quality_millis_header(&headers, "ts")?;
+    let feedback_time = DateTime::from_timestamp_millis(timestamp_millis)
+        .ok_or_else(|| quality_bad_request("ts时间戳超出有效范围"))?;
+    let Json(payload) = payload.map_err(|_| quality_bad_request("请求体必须是有效的JSON"))?;
+
+    let product_id_value = payload.product_id.into_string();
+    let product_id = quality_required(&product_id_value, "productId", 200)?.to_owned();
+    let device_id_value = payload.device_id.into_string();
+    let device_id = quality_required(&device_id_value, "deviceId", 200)?.to_owned();
+    let feedbacks = payload.data.into_vec();
+    if feedbacks.is_empty() {
+        return Err(quality_bad_request("data至少需要包含一条照片质量反馈"));
+    }
+
+    let mut normalized = Vec::with_capacity(feedbacks.len());
+    for feedback in feedbacks {
+        let worker_id_value = feedback.worker_id.into_string();
+        let worker_id_text = quality_required(&worker_id_value, "data.workerId", 200)?.to_owned();
+        let worker_id = Uuid::parse_str(&worker_id_text)
+            .map_err(|_| quality_bad_request("data.workerId必须是人员UUID"))?;
+        let name = quality_required(&feedback.name, "data.name", 200)?.to_owned();
+        let plat = quality_required(&feedback.plat, "data.plat", 200)?.to_owned();
+        let msg = quality_text(&feedback.msg, "data.msg", 2_000)?;
+        let code_value = feedback.code.into_string();
+        let code = quality_required(&code_value, "data.code", 32)?.to_owned();
+        normalized.push(NormalizedPhotoQualityFeedback {
+            worker_id,
+            worker_id_text,
+            name,
+            plat,
+            msg,
+            code,
+        });
+    }
+
+    let binding = fetch_b_vendor_device(state.db.pool(), &device_id)
+        .await
+        .map_err(|error| error.with_event(QUALITY_EVENT))?;
+    let mut tx = state.db.pool().begin().await.map_err(quality_internal)?;
+    let mut acknowledgements = Vec::with_capacity(normalized.len());
+
+    for feedback in normalized {
+        let worker = sqlx::query_as::<_, QualityWorkerRow>(
+            r#"
+            SELECT name, id_card, phone, avatar
+            FROM construction_workers
+            WHERE id = $1
+              AND project_id = $2
+            "#,
+        )
+        .bind(feedback.worker_id)
+        .bind(binding.project_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(quality_internal)?
+        .ok_or_else(|| quality_not_found("data.workerId对应人员不存在或不属于该设备项目"))?;
+
+        let status = if feedback.code == "0" {
+            "success"
+        } else {
+            "failed"
+        };
+        let message = photo_quality_message(&feedback.code, &feedback.plat, &feedback.msg);
+        let request_payload = serde_json::json!({
+            "productId": product_id,
+            "deviceId": device_id,
+            "ts": timestamp_millis.to_string(),
+            "data": {
+                "workerId": feedback.worker_id_text,
+                "name": feedback.name,
+                "plat": feedback.plat,
+                "msg": feedback.msg,
+                "code": feedback.code,
+            }
+        });
+        let response_payload = serde_json::json!({
+            "source": QUALITY_SOURCE,
+            "event": QUALITY_EVENT,
+            "success": status == "success",
+            "code": feedback.code,
+            "plat": feedback.plat,
+            "msg": feedback.msg,
+        });
+        let lock_key = format!(
+            "b-quality:{}:{}:{}:{}",
+            device_id, feedback.worker_id, timestamp_millis, feedback.plat
+        );
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)")
+            .bind(lock_key)
+            .execute(&mut *tx)
+            .await
+            .map_err(quality_internal)?;
+
+        let replay_report_id = sqlx::query_scalar::<_, Uuid>(
+            r#"
+            SELECT id
+            FROM construction_attendance_device_issue_reports
+            WHERE is_deleted = FALSE
+              AND attendance_device_id = $1
+              AND worker_id = $2
+              AND response_payload ->> 'source' = $3
+              AND request_payload ->> 'ts' = $4
+              AND request_payload -> 'data' ->> 'plat' = $5
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            FOR UPDATE
+            "#,
+        )
+        .bind(binding.id)
+        .bind(feedback.worker_id)
+        .bind(QUALITY_SOURCE)
+        .bind(timestamp_millis.to_string())
+        .bind(&feedback.plat)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(quality_internal)?;
+
+        if let Some(report_id) = replay_report_id {
+            update_photo_quality_report(
+                &mut tx,
+                report_id,
+                status,
+                &message,
+                &request_payload,
+                &response_payload,
+            )
+            .await?;
+        } else {
+            let pending_report_id = sqlx::query_scalar::<_, Uuid>(
+                r#"
+                SELECT id
+                FROM construction_attendance_device_issue_reports
+                WHERE is_deleted = FALSE
+                  AND attendance_device_id = $1
+                  AND worker_id = $2
+                  AND device_type = $3
+                  AND action <> 'delete'
+                  AND status = 'pending'
+                  AND acknowledged_at IS NULL
+                ORDER BY issued_at DESC, created_at DESC, id DESC
+                LIMIT 1
+                FOR UPDATE
+                "#,
+            )
+            .bind(binding.id)
+            .bind(feedback.worker_id)
+            .bind(B_VENDOR_DEVICE_TYPE)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(quality_internal)?;
+
+            if let Some(report_id) = pending_report_id {
+                update_photo_quality_report(
+                    &mut tx,
+                    report_id,
+                    status,
+                    &message,
+                    &request_payload,
+                    &response_payload,
+                )
+                .await?;
+            } else {
+                sqlx::query(
+                    r#"
+                    INSERT INTO construction_attendance_device_issue_reports (
+                        project_id, worker_id, attendance_device_id,
+                        worker_name, worker_id_card, worker_phone, avatar_url,
+                        device_name, serial_number, device_type,
+                        action, status, issued_at, message, remark,
+                        request_payload, response_payload, acknowledged_at, last_error
+                    )
+                    VALUES (
+                        $1, $2, $3,
+                        $4, $5, $6, $7,
+                        $8, $9, $10,
+                        'update', $11, $12, $13, $14,
+                        $15, $16, NOW(), CASE WHEN $11 = 'failed' THEN $13 ELSE NULL END
+                    )
+                    "#,
+                )
+                .bind(binding.project_id)
+                .bind(feedback.worker_id)
+                .bind(binding.id)
+                .bind(worker.0.or(Some(feedback.name.clone())))
+                .bind(worker.1)
+                .bind(worker.2)
+                .bind(worker.3)
+                .bind(&binding.device_name)
+                .bind(&binding.serial_number)
+                .bind(B_VENDOR_DEVICE_TYPE)
+                .bind(status)
+                .bind(feedback_time)
+                .bind(&message)
+                .bind(QUALITY_REMARK)
+                .bind(&request_payload)
+                .bind(&response_payload)
+                .execute(&mut *tx)
+                .await
+                .map_err(quality_internal)?;
+            }
+        }
+
+        acknowledgements.push(PhotoQualityAck {
+            worker_id: feedback.worker_id_text,
+        });
+    }
+
+    sqlx::query(
+        r#"
+        UPDATE construction_attendance_devices
+        SET online_status = 'online',
+            last_seen_at = NOW(),
+            last_online_at = NOW(),
+            updated_at = NOW()
+        WHERE id = $1
+        "#,
+    )
+    .bind(binding.id)
+    .execute(&mut *tx)
+    .await
+    .map_err(quality_internal)?;
+
+    tx.commit().await.map_err(quality_internal)?;
+    Ok(Json(VendorResponse {
+        success: true,
+        code: 0,
+        message: "success".to_owned(),
+        time: Utc::now().timestamp(),
+        data: acknowledgements,
+        event: QUALITY_EVENT,
+    }))
+}
+
+async fn update_photo_quality_report(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    report_id: Uuid,
+    status: &str,
+    message: &str,
+    request_payload: &serde_json::Value,
+    response_payload: &serde_json::Value,
+) -> Result<(), VendorError> {
+    sqlx::query(
+        r#"
+        UPDATE construction_attendance_device_issue_reports
+        SET status = $2,
+            message = $3,
+            remark = COALESCE(remark, $4),
+            request_payload = $5,
+            response_payload = $6,
+            acknowledged_at = NOW(),
+            last_error = CASE WHEN $2 = 'failed' THEN $3 ELSE NULL END,
+            next_retry_at = NULL,
+            retry_locked_until = NULL,
+            updated_at = NOW()
+        WHERE id = $1
+          AND is_deleted = FALSE
+        "#,
+    )
+    .bind(report_id)
+    .bind(status)
+    .bind(message)
+    .bind(QUALITY_REMARK)
+    .bind(request_payload)
+    .bind(response_payload)
+    .execute(&mut **tx)
+    .await
+    .map_err(quality_internal)?;
+    Ok(())
 }
 
 async fn upload_attendance_photo(
@@ -597,6 +935,21 @@ fn parse_required_millis_header(headers: &HeaderMap, name: &str) -> Result<i64, 
     parse_required_millis(value, name)
 }
 
+fn parse_quality_millis_header(headers: &HeaderMap, name: &str) -> Result<i64, VendorError> {
+    let value = headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| quality_bad_request(format!("请求头{name}为必传参数")))?;
+    let value = quality_required(value, name, 32)?;
+    let timestamp = value
+        .parse::<i64>()
+        .map_err(|_| quality_bad_request(format!("{name}必须是毫秒级时间戳")))?;
+    if timestamp <= 0 || DateTime::from_timestamp_millis(timestamp).is_none() {
+        return Err(quality_bad_request(format!("{name}时间戳超出有效范围")));
+    }
+    Ok(timestamp)
+}
+
 fn parse_required_millis(value: &str, field: &str) -> Result<i64, VendorError> {
     let value = photo_required(value, field, 32)?;
     let timestamp = value
@@ -617,6 +970,52 @@ fn photo_required<'a>(value: &'a str, field: &str, max_len: usize) -> Result<&'a
         return Err(photo_bad_request(format!("{field}长度不能超过{max_len}")));
     }
     Ok(value)
+}
+
+fn quality_required<'a>(
+    value: &'a str,
+    field: &str,
+    max_len: usize,
+) -> Result<&'a str, VendorError> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(quality_bad_request(format!("{field}不能为空")));
+    }
+    if value.len() > max_len {
+        return Err(quality_bad_request(format!("{field}长度不能超过{max_len}")));
+    }
+    Ok(value)
+}
+
+fn quality_text(value: &str, field: &str, max_len: usize) -> Result<String, VendorError> {
+    let value = value.trim();
+    if value.len() > max_len {
+        return Err(quality_bad_request(format!("{field}长度不能超过{max_len}")));
+    }
+    Ok(value.to_owned())
+}
+
+fn photo_quality_message(code: &str, plat: &str, msg: &str) -> String {
+    let detail = match code {
+        "0" => "成功",
+        "1" => "没有照片",
+        "2" => "入库失败",
+        "3" => "与其他人员相似度过高",
+        "4" => "下载失败",
+        "5" => "照片太大",
+        "6" => "其他错误",
+        _ => "未知错误",
+    };
+    let suffix = if msg.is_empty() {
+        String::new()
+    } else {
+        format!("：{msg}")
+    };
+    if code == "0" {
+        format!("B厂家照片质量反馈成功（平台：{plat}）{suffix}")
+    } else {
+        format!("B厂家照片质量反馈失败（错误码{code}，{detail}，平台：{plat}）{suffix}")
+    }
 }
 
 fn parse_attendance_direction(
@@ -728,9 +1127,9 @@ async fn fetch_b_vendor_device(
     pool: &PgPool,
     device_id: &str,
 ) -> Result<DeviceBinding, VendorError> {
-    let devices = sqlx::query_as::<_, (Uuid, Uuid, i16)>(
+    let devices = sqlx::query_as::<_, (Uuid, Uuid, i16, Option<String>, String)>(
         r#"
-        SELECT id, project_id, direction
+        SELECT id, project_id, direction, device_name, serial_number
         FROM construction_attendance_devices
         WHERE is_deleted = FALSE
           AND device_type = $1
@@ -747,10 +1146,12 @@ async fn fetch_b_vendor_device(
 
     match devices.as_slice() {
         [] => Err(VendorError::not_found("deviceId对应的B厂家设备不存在")),
-        [(id, project_id, direction)] => Ok(DeviceBinding {
+        [(id, project_id, direction, device_name, serial_number)] => Ok(DeviceBinding {
             id: *id,
             project_id: *project_id,
             direction: *direction,
+            device_name: device_name.clone(),
+            serial_number: serial_number.clone(),
         }),
         _ => Err(VendorError::conflict(
             "deviceId存在重复配置，请检查B厂家设备绑定",
@@ -858,6 +1259,18 @@ fn photo_conflict(message: impl Into<String>) -> VendorError {
 
 fn photo_internal(details: impl std::fmt::Display) -> VendorError {
     VendorError::internal(details).with_event(PHOTO_EVENT)
+}
+
+fn quality_bad_request(message: impl Into<String>) -> VendorError {
+    VendorError::bad_request(message).with_event(QUALITY_EVENT)
+}
+
+fn quality_not_found(message: impl Into<String>) -> VendorError {
+    VendorError::not_found(message).with_event(QUALITY_EVENT)
+}
+
+fn quality_internal(details: impl std::fmt::Display) -> VendorError {
+    VendorError::internal(details).with_event(QUALITY_EVENT)
 }
 
 impl IntoResponse for VendorError {

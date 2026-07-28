@@ -46,6 +46,27 @@ async fn post_photo_json(
     (status, serde_json::from_slice(&bytes).unwrap())
 }
 
+async fn post_quality_json(
+    app: axum::Router,
+    payload: &Value,
+    ts: Option<i64>,
+) -> (axum::http::StatusCode, Value) {
+    let mut request = Request::builder()
+        .method("POST")
+        .uri("/quality")
+        .header("content-type", "application/json");
+    if let Some(ts) = ts {
+        request = request.header("ts", ts.to_string());
+    }
+    let response = app
+        .oneshot(request.body(Body::from(payload.to_string())).unwrap())
+        .await
+        .unwrap();
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    (status, serde_json::from_slice(&bytes).unwrap())
+}
+
 #[tokio::test]
 async fn b_vendor_workers_support_registered_device_full_and_incremental_downloads() {
     let (app, pool, _container) = build_test_app_with_pool().await;
@@ -207,6 +228,175 @@ async fn b_vendor_workers_support_registered_device_full_and_incremental_downloa
     let (status, invalid_update) = get_json(app, "/workers?deviceId=B-DEVICE-001&update=bad").await;
     assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
     assert_eq!(invalid_update["success"], false);
+}
+
+#[tokio::test]
+async fn b_vendor_quality_feedback_is_visible_as_idempotent_issue_reports() {
+    let (app, pool, _container) = build_test_app_with_pool().await;
+
+    let project_id = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO construction_projects (name, status) VALUES ('B厂家照片质量项目', 1) RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let unit_id = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO construction_units (project_id, company_name) VALUES ($1, '照片质量单位') RETURNING id",
+    )
+    .bind(project_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let team_id = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO construction_teams (project_id, unit_id, name, work_type) VALUES ($1, $2, '照片质量班组', 900) RETURNING id",
+    )
+    .bind(project_id)
+    .bind(unit_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let device_record_id = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        INSERT INTO construction_attendance_devices (
+            project_id, device_type, serial_number, device_name, direction
+        ) VALUES ($1, 'B厂家', 'B-QUALITY-001', 'B厂家质量测试机', 0)
+        RETURNING id
+        "#,
+    )
+    .bind(project_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let worker_id = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        INSERT INTO construction_workers (
+            project_id, unit_id, team_id, name, id_card, phone, avatar, work_status
+        ) VALUES (
+            $1, $2, $3, '照片质量人员', '330200199001010044', '13800000000',
+            'https://example.test/quality.jpg', 1
+        )
+        RETURNING id
+        "#,
+    )
+    .bind(project_id)
+    .bind(unit_id)
+    .bind(team_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let timestamp_millis = 1_785_217_408_177_i64;
+    let failed_payload = serde_json::json!({
+        "productId": "1",
+        "deviceId": "B-QUALITY-001",
+        "data": [{
+            "workerId": worker_id,
+            "name": "照片质量人员",
+            "plat": "face",
+            "msg": "image exceeds limit",
+            "code": "5"
+        }]
+    });
+
+    let (missing_ts_status, missing_ts) =
+        post_quality_json(app.clone(), &failed_payload, None).await;
+    assert_eq!(missing_ts_status, axum::http::StatusCode::BAD_REQUEST);
+    assert_eq!(missing_ts["event"], "quality");
+
+    let (status, failed) =
+        post_quality_json(app.clone(), &failed_payload, Some(timestamp_millis)).await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{failed}");
+    assert_eq!(failed["success"], true);
+    assert_eq!(failed["event"], "quality");
+    assert_eq!(failed["data"][0]["workerId"], worker_id.to_string());
+
+    let report = sqlx::query_as::<
+        _,
+        (
+            Uuid,
+            Uuid,
+            String,
+            String,
+            String,
+            Option<chrono::DateTime<chrono::Utc>>,
+            Value,
+            Value,
+        ),
+    >(
+        r#"
+        SELECT worker_id, attendance_device_id, device_type, action, status,
+               acknowledged_at, request_payload, response_payload
+        FROM construction_attendance_device_issue_reports
+        WHERE worker_id = $1 AND attendance_device_id = $2 AND is_deleted = FALSE
+        "#,
+    )
+    .bind(worker_id)
+    .bind(device_record_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(report.0, worker_id);
+    assert_eq!(report.1, device_record_id);
+    assert_eq!(report.2, "B厂家");
+    assert_eq!(report.3, "update");
+    assert_eq!(report.4, "failed");
+    assert!(report.5.is_some());
+    assert_eq!(report.6["data"]["code"], "5");
+    assert_eq!(report.7["source"], "device_vendor_b_quality");
+    assert_eq!(report.7["event"], "quality");
+
+    let (retry_status, retry) =
+        post_quality_json(app.clone(), &failed_payload, Some(timestamp_millis)).await;
+    assert_eq!(retry_status, axum::http::StatusCode::OK, "{retry}");
+    let report_count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM construction_attendance_device_issue_reports WHERE worker_id = $1 AND attendance_device_id = $2 AND is_deleted = FALSE",
+    )
+    .bind(worker_id)
+    .bind(device_record_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(report_count, 1, "同一时间戳的设备重试不应产生重复记录");
+
+    let success_payload = serde_json::json!({
+        "productId": 1,
+        "deviceId": "B-QUALITY-001",
+        "data": {
+            "workerId": worker_id,
+            "name": "照片质量人员",
+            "plat": "face",
+            "msg": "",
+            "code": 0
+        }
+    });
+    let (success_status, success) =
+        post_quality_json(app, &success_payload, Some(timestamp_millis + 1)).await;
+    assert_eq!(success_status, axum::http::StatusCode::OK, "{success}");
+    assert_eq!(success["event"], "quality");
+
+    let statuses = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT status
+        FROM construction_attendance_device_issue_reports
+        WHERE worker_id = $1 AND attendance_device_id = $2 AND is_deleted = FALSE
+        ORDER BY issued_at DESC
+        "#,
+    )
+    .bind(worker_id)
+    .bind(device_record_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(statuses, vec!["success", "failed"]);
+
+    let device_seen = sqlx::query_scalar::<_, bool>(
+        "SELECT last_seen_at IS NOT NULL AND online_status = 'online' FROM construction_attendance_devices WHERE id = $1",
+    )
+    .bind(device_record_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(device_seen);
 }
 
 #[tokio::test]
