@@ -43,7 +43,7 @@ pub async fn serve(state: AppState) -> eyre::Result<()> {
 async fn create_listener(port: u16) -> eyre::Result<TcpListener> {
     let addr_v6 = SocketAddr::from((IpAddr::V6(Ipv6Addr::UNSPECIFIED), port));
 
-    match TcpListener::bind(addr_v6).await {
+    match bind_dual_stack(addr_v6) {
         Ok(listener) => {
             info!(
                 address = %listener.local_addr()?,
@@ -66,6 +66,19 @@ async fn create_listener(port: u16) -> eyre::Result<TcpListener> {
             Ok(listener)
         }
     }
+}
+
+/// Bind an IPv6 socket with IPV6_V6ONLY disabled so IPv4 clients can connect.
+/// On Windows the OS default is v6-only, so a plain `[::]` bind rejects IPv4.
+fn bind_dual_stack(addr: SocketAddr) -> std::io::Result<TcpListener> {
+    use socket2::{Domain, Protocol, Socket, Type};
+
+    let socket = Socket::new(Domain::IPV6, Type::STREAM, Some(Protocol::TCP))?;
+    socket.set_only_v6(false)?;
+    socket.bind(&addr.into())?;
+    socket.listen(1024)?;
+    socket.set_nonblocking(true)?;
+    TcpListener::from_std(socket.into())
 }
 
 async fn shutdown_signal() {

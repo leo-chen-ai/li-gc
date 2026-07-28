@@ -322,8 +322,35 @@ assert.match(onboardingJs, /entry_time: today\(\)/);
 assert.match(onboardingJs, /url: "\/ocr\/id-card"/);
 assert.match(onboardingJs, /title: "身份证识别中", mask: true/);
 assert.match(onboardingJs, /image_url: imageUrl/);
-assert.match(onboardingJs, /inferNativePlaceFromAddress\(fields\.address\)/);
+assert.match(onboardingJs, /inferNativePlace\(\{/);
+
+// 籍贯必须是全国省市两级数据，存储 6 位区划码，推断优先身份证号前 6 位
+const chinaRegions = require(join(root, "utils/china-regions.js"));
+assert.ok(chinaRegions.provinces.length >= 30, "china regions should cover all provinces");
+assert.equal(chinaRegions.nativePlaceLabel(330100), "浙江省杭州市");
+assert.equal(chinaRegions.nativePlaceLabel(110100), "北京市");
+assert.equal(chinaRegions.nativePlaceLabel("320000"), "江苏省");
+assert.equal(chinaRegions.nativePlaceLabel(null, "未填写"), "未填写");
+assert.equal(chinaRegions.inferNativePlace({ idCard: "330106199001011234", address: "江苏省南京市" }), "330100");
+assert.equal(chinaRegions.inferNativePlace({ address: "江苏省淮安市清江浦区" }), "320800");
+assert.equal(chinaRegions.inferNativePlace({}), null);
+assert.match(constructionFieldsJs, /key: "native_place"[^\n]*control: "nativePlace"/);
+const workersWxmlForNative = readText("pages/workers/workers.wxml");
+for (const surface of [onboardingWxml, workersWxmlForNative]) {
+  assert.match(surface, /control === 'nativePlace'/);
+  assert.match(surface, /onNativeProvinceChange/);
+  assert.match(surface, /onNativeCityChange/);
+}
 assert.match(constructionFieldsJs, /visibleWhenWorkerType: "1001"/);
+// 班组工种与管理班组的联动与 Web 端保持一致
+assert.match(constructionFieldsJs, /项目管理部[^\n]*value: "1001"/);
+assert.match(constructionFieldsJs, /key: "work_type"[^\n]*managementTeamType: true[^\n]*options: teamWorkTypeOptions/);
+const formUtilsJsForTeam = readText("utils/form-utils.js");
+assert.match(formUtilsJsForTeam, /field\.managementTeamType/);
+assert.match(formUtilsJsForTeam, /option\.value === "1001" : option\.value !== "1001"/);
+const modulePageJs = readText("utils/module-page.js");
+assert.match(modulePageJs, /changedKey === "is_manage_team"/);
+assert.match(modulePageJs, /form\.is_manage_team === "true" \? "1001" : form\.work_type === "1001" \? "" : form\.work_type/);
 for (const removedLabel of ["新入职人员", "已匹配人员", "重新查询手机号"]) {
   assert.doesNotMatch(onboardingWxml, new RegExp(removedLabel), `onboarding should not render ${removedLabel}`);
 }
@@ -530,7 +557,7 @@ assert.match(assetConfig, /京东云 OSS/);
 const apiConfig = readText("config/api.js");
 const { API_BASE_URL } = require(join(root, "config/api.js"));
 assert.equal(API_BASE_URL, "https://shanhuai.top/api/v1");
-assert.match(apiConfig, /LOCAL_API_BASE_URL = "http:\/\/192\.168\.32\.126:8080\/api\/v1"/);
+assert.match(apiConfig, /LOCAL_API_BASE_URL = "http:\/\/192\.168\.2\.22:8080\/api\/v1"/);
 assert.match(apiConfig, /PRODUCTION_API_BASE_URL = "https:\/\/shanhuai\.top\/api\/v1"/);
 assert.match(apiConfig, /isDevelopEnv\(\) \? LOCAL_API_BASE_URL : PRODUCTION_API_BASE_URL/);
 assert.match(apiConfig, /statusCode !== 401/);
@@ -539,7 +566,28 @@ assert.match(apiConfig, /wx\.reLaunch\(\{/);
 for (const key of ["shanhuai_access_token", "shanhuai_token_expires_at", "shanhuai_user", "shanhuai_managed_projects", "shanhuai_selected_project"]) {
   assert.match(apiConfig, new RegExp(`removeStorageSync\\("${key}"\\)`), `401 should clear ${key}`);
 }
-assert.doesNotMatch(apiConfig, /127\.0\.0\.1/, "miniapp debug API should use the LAN IP for real-device debugging");
+assert.doesNotMatch(
+  apiConfig,
+  /LOCAL_API_BASE_URL = "[^"]*(?:localhost|127\.0\.0\.1)/,
+  "miniapp debug API should use the LAN IP for real-device debugging",
+);
+const { resolveAssetUrl } = require(join(root, "config/api.js"));
+assert.equal(
+  resolveAssetUrl("http://localhost:8080/media/a.png"),
+  "https://shanhuai.top/media/a.png",
+  "resolveAssetUrl should rewrite localhost upload URLs to the API origin",
+);
+assert.equal(
+  resolveAssetUrl("http://127.0.0.1:8080/media/b.png"),
+  "https://shanhuai.top/media/b.png",
+  "resolveAssetUrl should rewrite loopback upload URLs to the API origin",
+);
+assert.equal(
+  resolveAssetUrl("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/x.png"),
+  "https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/x.png",
+  "resolveAssetUrl should keep public URLs untouched",
+);
+assert.equal(resolveAssetUrl(null), "", "resolveAssetUrl should normalize empty values");
 
 const { ASSET_BASE_URL, assetPath } = require(join(root, "config/assets.js"));
 assert.equal(ASSET_BASE_URL, "https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/wx");

@@ -486,6 +486,19 @@
   background: #0a9875;
 }
 
+.signature-entry {
+  margin-top: 12rpx;
+  height: 64rpx;
+  border: 1rpx dashed #0a9875;
+  border-radius: 14rpx;
+  color: #0a9875;
+  font-size: 25rpx;
+  font-weight: 700;
+  line-height: 64rpx;
+  text-align: center;
+  background: #f2faf7;
+}
+
 .signature-box {
   margin-top: 20rpx;
   height: 136rpx;
@@ -623,6 +636,16 @@
   height: 76rpx;
   padding: 0 22rpx;
   line-height: 74rpx;
+}
+
+.native-place-row {
+  display: flex;
+  gap: 14rpx;
+}
+
+.native-place-picker {
+  flex: 1;
+  min-width: 0;
 }
 
 .native-textarea {
@@ -784,6 +807,7 @@
 
 .upload-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12rpx;
   margin-top: 12rpx;
 }
@@ -792,6 +816,7 @@
   display: flex;
   align-items: center;
   gap: 14rpx;
+  min-width: 0;
   min-height: 72rpx;
   padding: 10rpx 14rpx;
   border: 1rpx solid #e0eaec;

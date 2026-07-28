@@ -367,7 +367,7 @@ function createModulePage(fixedModuleKey) {
     if (!field) return;
     try {
       wx.showLoading({ title: "上传中" });
-      const file = await uploadForField(field, {
+      const { file } = await uploadForField(field, {
         bizType: this.data.moduleKey,
         bizId: this.data.editingId || this.data.project.id,
       });
@@ -576,6 +576,14 @@ function buildRecordView(moduleKey, record, lookups = {}) {
 
 function applyDerivedFormValues(moduleKey, form, changedKey, lookups) {
   if (moduleKey !== "teams") return form;
+
+  // 与 Web 端一致：切换管理班组时自动带出/清空项目管理部工种（1001）
+  if (changedKey === "is_manage_team") {
+    return {
+      ...form,
+      work_type: form.is_manage_team === "true" ? "1001" : form.work_type === "1001" ? "" : form.work_type,
+    };
+  }
 
   if (changedKey === "leader_id") {
     const leader = (lookups.workers || []).find((item) => item.id === form.leader_id);

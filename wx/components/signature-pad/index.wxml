@@ -1,0 +1,27 @@
+<view class="signature-overlay" wx:if="{{visible}}" catch:touchmove="noop">
+  <view class="signature-panel">
+    <view class="signature-header">
+      <view class="signature-heading">
+        <view class="signature-title">{{title}}</view>
+        <view class="signature-subtitle">在下方空白区域手写签名，确认后自动上传</view>
+      </view>
+      <view class="signature-close" bind:tap="handleClose">×</view>
+    </view>
+    <canvas
+      id="signaturePad"
+      class="signature-canvas"
+      type="2d"
+      disable-scroll="{{true}}"
+      bind:touchstart="handleTouchStart"
+      bind:touchmove="handleTouchMove"
+      bind:touchend="handleTouchEnd"
+      bind:touchcancel="handleTouchEnd"
+    />
+    <view class="signature-tip" wx:if="{{message}}">{{message}}</view>
+    <view class="signature-actions">
+      <view class="signature-ghost" bind:tap="clearPad">清空</view>
+      <view class="signature-ghost" bind:tap="handleClose">取消</view>
+      <view class="signature-primary {{uploading ? 'disabled' : ''}}" bind:tap="confirmPad">{{uploading ? '上传中...' : '确认并上传'}}</view>
+    </view>
+  </view>
+</view>

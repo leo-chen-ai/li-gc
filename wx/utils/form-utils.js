@@ -1,4 +1,6 @@
+const { resolveAssetUrl } = require("../config/api.js");
 const { uploadConstructionFile } = require("./construction-api.js");
+const { provinces, nativePlaceParts } = require("./china-regions.js");
 
 function buildDefaultForm(fields, record = {}, overrides = {}) {
   return fields.reduce((form, field) => {
@@ -32,12 +34,35 @@ function buildFormFields(fields, form, lookups = {}) {
         uploadItems: uploadPreviewItems(field, value),
         placeholder: field.placeholder || "请输入",
         inputType: field.valueType === "number" ? "number" : "text",
+        ...(field.control === "nativePlace" ? buildNativePlaceField(value) : null),
       };
     });
 }
 
+// 籍贯省/市两级 picker 渲染数据；存储值为 6 位区划码
+function buildNativePlaceField(value) {
+  const { province, city } = nativePlaceParts(value);
+  const cities = province ? province.cities : [];
+  return {
+    nativeProvinceNames: provinces.map((item) => item.name),
+    nativeProvinceIndex: province ? provinces.indexOf(province) : 0,
+    nativeProvinceLabel: province ? province.name : "",
+    nativeCityNames: cities.map((item) => item.name),
+    nativeCityIndex: city ? cities.indexOf(city) : 0,
+    nativeCityLabel: city ? city.name : "",
+  };
+}
+
 function resolveOptions(field, form, lookups) {
-  if (field.options) return field.options;
+  if (field.options) {
+    // 与 Web 端一致：管理班组时工种只能选项目管理部（1001），否则排除它
+    if (field.managementTeamType) {
+      return field.options.filter((option) =>
+        String(form.is_manage_team || "") === "true" ? option.value === "1001" : option.value !== "1001"
+      );
+    }
+    return field.options;
+  }
   if (field.optionsSource === "units") {
     return [{ label: "请选择参建单位", value: "" }].concat((lookups.units || []).map((unit) => ({
       label: unit.company_name || "未命名单位",
@@ -204,7 +229,18 @@ async function uploadForField(field, context = {}) {
     bizId: context.bizId,
     fieldKey: field.key,
   });
-  return file;
+  // 额外返回本地临时路径，供 OCR 等场景读 base64 使用
+  return { file, filePath };
+}
+
+// 读取本地临时文件的 base64；失败时返回空字符串，由调用方回退到 URL 方式
+function readFileBase64(filePath) {
+  if (!filePath) return "";
+  try {
+    return wx.getFileSystemManager().readFileSync(filePath, "base64") || "";
+  } catch (error) {
+    return "";
+  }
 }
 
 function nextUploadValue(field, currentValue, file) {
@@ -236,7 +272,7 @@ function uploadDisplayValue(field, value) {
 function uploadPreviewItems(field, value) {
   if (!value) return [];
   return parseUploadItems(field, value).map((file, index) => {
-    const url = typeof file === "string" ? file : file.public_url || file.url || "";
+    const url = resolveAssetUrl(typeof file === "string" ? file : file.public_url || file.url || "");
     const name = typeof file === "string"
       ? (url ? url.split("/").pop() : "") || `${field.label || "文件"}${index + 1}`
       : file.original_filename || file.name || file.object_key || (url ? url.split("/").pop() : "") || `${field.label || "文件"}${index + 1}`;
@@ -315,6 +351,7 @@ module.exports = {
   nextUploadValue,
   optionLabel,
   previewUploadedFile,
+  readFileBase64,
   today,
   uploadDisplayValue,
   uploadForField,

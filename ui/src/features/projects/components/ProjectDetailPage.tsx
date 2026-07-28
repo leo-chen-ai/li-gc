@@ -1234,7 +1234,14 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
 
       <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-border dark:bg-card">
         {activeTab !== "项目基本信息" && (
-          <div className="border-b border-slate-100 bg-[#f8faf9] px-3 py-2 dark:border-border dark:bg-muted/30">
+          <div
+            className={cn(
+              "border-b px-3 py-2",
+              activeTab === "工资统计"
+                ? "border-[#e8eaec] bg-white dark:border-border dark:bg-background"
+                : "border-slate-100 bg-[#f8faf9] dark:border-border dark:bg-muted/30"
+            )}
+          >
             {activeTab === "工资统计" ? (
               <WageFiltersBar
                 filters={wageFilters}
@@ -2010,25 +2017,23 @@ function WageFiltersBar({
   onChange: (patch: Partial<WageFilters>) => void;
   onReset: () => void;
 }) {
+  // 工资统计采用经典后台风格：label 左置的行内筛选 + 蓝色查询按钮
   return (
-    <div className="grid gap-2 rounded-lg border border-slate-200 bg-white p-2 dark:border-border dark:bg-background sm:grid-cols-2 xl:grid-cols-[minmax(180px,1fr)_minmax(160px,1fr)_auto]">
-      <label className="min-w-0 space-y-1">
-        <span className="text-[11px] font-medium text-slate-500 dark:text-muted-foreground">发放月份</span>
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 py-1">
+      <label className="flex min-w-0 items-center gap-2">
+        <span className="shrink-0 text-sm font-medium text-[#303133] dark:text-foreground">发放月份</span>
         <Input
           type="month"
           value={filters.payrollMonth}
           onChange={(event) => onChange({ payrollMonth: event.target.value })}
-          className="h-8"
+          className="h-8 w-[190px] rounded-sm border-[#dcdfe6] bg-white shadow-none dark:border-border dark:bg-background"
         />
       </label>
-      <label className="min-w-0 space-y-1">
-        <span className="text-[11px] font-medium text-slate-500 dark:text-muted-foreground">状态</span>
+      <label className="flex min-w-0 items-center gap-2">
+        <span className="shrink-0 text-sm font-medium text-[#303133] dark:text-foreground">状态</span>
         <Select value={filters.status} onValueChange={(status) => onChange({ status })}>
-          <SelectTrigger className="h-8 w-full bg-white dark:bg-input/30">
-            <div className="flex min-w-0 items-center gap-2">
-              <SlidersHorizontal className="size-4 shrink-0 text-slate-400" />
-              <SelectValue />
-            </div>
+          <SelectTrigger className="h-8 w-[160px] rounded-sm border-[#dcdfe6] bg-white shadow-none dark:border-border dark:bg-background">
+            <SelectValue />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部</SelectItem>
@@ -2039,14 +2044,19 @@ function WageFiltersBar({
           </SelectContent>
         </Select>
       </label>
-      <div className="flex items-end gap-2 sm:col-span-2 xl:col-span-1 xl:justify-end">
-        <Button type="button" size="sm" variant="outline" className="h-8 gap-2 border-slate-200 bg-white dark:border-border dark:bg-background" onClick={onReset}>
-          <RotateCcw className="size-4" />
-          重置
-        </Button>
-        <Button type="button" size="sm" className="h-8 gap-2 bg-[#0f6b5d] text-white hover:bg-[#0b5148]" onClick={() => onChange({ page: 1 })}>
+      <div className="flex items-center gap-2">
+        <Button type="button" size="sm" className="h-8 rounded-sm bg-[#1890ff] px-4 text-white hover:bg-[#40a9ff]" onClick={() => onChange({ page: 1 })}>
           <Search className="size-4" />
           查询
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-8 rounded-sm border-[#dcdfe6] bg-white px-4 text-[#606266] hover:border-[#1890ff] hover:text-[#1890ff] dark:border-border dark:bg-background dark:text-foreground"
+          onClick={onReset}
+        >
+          重置
         </Button>
       </div>
     </div>
@@ -3646,19 +3656,20 @@ function WageStatisticsTab({
     );
   }
 
+  // 工资统计采用经典后台风格：白底方角卡片 + 细灰边框 + 蓝色主按钮
   return (
     <div className="min-w-0 max-w-full space-y-4">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <MetricCell label="发放人数" value={`${summary.employee_count ?? 0} 人`} helper="筛选范围内" compact />
-        <MetricCell label="累计应发" value={`${formatCentsAsYuan(summary.payable_amount_cents)} 元`} helper="工资合计" compact />
-        <MetricCell label="累计实发" value={`${formatCentsAsYuan(summary.paid_amount_cents)} 元`} helper="已发放" accent="teal" compact />
-        <MetricCell label="累计未发" value={`${formatCentsAsYuan(summary.unpaid_amount_cents)} 元`} helper="待发放" accent="amber" compact />
+        <WageMetricCell label="发放人数" value={`${summary.employee_count ?? 0} 人`} helper="筛选范围内" />
+        <WageMetricCell label="累计应发" value={`${formatCentsAsYuan(summary.payable_amount_cents)} 元`} helper="工资合计" />
+        <WageMetricCell label="累计实发" value={`${formatCentsAsYuan(summary.paid_amount_cents)} 元`} helper="已发放" accent="green" />
+        <WageMetricCell label="累计未发" value={`${formatCentsAsYuan(summary.unpaid_amount_cents)} 元`} helper="待发放" accent="orange" />
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-[#fbfcfc] px-4 py-3 dark:border-border dark:bg-card">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e8eaec] bg-white px-1 pb-3 dark:border-border dark:bg-transparent">
         <div>
-          <h3 className="text-sm font-semibold text-slate-900 dark:text-foreground">工资单列表</h3>
-          <p className="mt-0.5 text-xs text-slate-500 dark:text-muted-foreground">
+          <h3 className="text-sm font-semibold text-[#303133] dark:text-foreground">工资单列表</h3>
+          <p className="mt-0.5 text-xs text-[#909399] dark:text-muted-foreground">
             按发放月份汇总企业工资单与发放金额。
           </p>
         </div>
@@ -3677,8 +3688,7 @@ function WageStatisticsTab({
           <Button
             type="button"
             size="sm"
-            variant="outline"
-            className="gap-2 border-slate-200 bg-white dark:border-border dark:bg-background"
+            className="gap-2 rounded-sm bg-[#1890ff] text-white shadow-none hover:bg-[#40a9ff]"
             onClick={() => fileInputRef.current?.click()}
           >
             <Upload className="size-4" />
@@ -3688,6 +3698,7 @@ function WageStatisticsTab({
       </div>
 
       <DataTable
+        classic
         tableClassName="min-w-0 w-full table-fixed"
         cellClassNames={[
           "w-[7%]",
@@ -3730,7 +3741,27 @@ function WageStatisticsTab({
           item.created_by_name ?? "系统",
           formatDateTime(item.created_at),
           <ProjectStatusBadge key={`${item.id}-status`} value={getWageStatusLabel(item.status)} />,
-          ...(editable ? [<RowActions key={`${item.id}-actions`} onEdit={() => onEdit(item.id)} onDelete={() => onDelete(item.id)} />] : []),
+          ...(editable
+            ? [
+                // 操作直接外露为文字按钮，不再收进下拉菜单
+                <div key={`${item.id}-actions`} className="flex items-center justify-center gap-3">
+                  <button
+                    type="button"
+                    className="text-[#1890ff] hover:text-[#40a9ff]"
+                    onClick={() => onEdit(item.id)}
+                  >
+                    编辑
+                  </button>
+                  <button
+                    type="button"
+                    className="text-[#f56c6c] hover:text-[#f78989]"
+                    onClick={() => onDelete(item.id)}
+                  >
+                    删除
+                  </button>
+                </div>,
+              ]
+            : []),
         ])}
         pagination={
           data
@@ -3743,6 +3774,33 @@ function WageStatisticsTab({
             : undefined
         }
       />
+    </div>
+  );
+}
+
+// 工资统计专用的经典风格汇总卡片：白底方角 + 细灰边框，不影响其他页面共用的 MetricCell
+function WageMetricCell({
+  label,
+  value,
+  helper,
+  accent = "default",
+}: {
+  label: string;
+  value: string;
+  helper?: string;
+  accent?: "default" | "green" | "orange";
+}) {
+  const accentClass = {
+    default: "text-[#303133] dark:text-foreground",
+    green: "text-[#52c41a] dark:text-green-400",
+    orange: "text-[#fa8c16] dark:text-amber-300",
+  }[accent];
+
+  return (
+    <div className="min-w-0 rounded-sm border border-[#e8eaec] bg-white px-4 py-3 dark:border-border dark:bg-card">
+      <div className="text-xs text-[#909399] dark:text-muted-foreground">{label}</div>
+      <div className={cn("mt-1 truncate text-xl font-semibold tracking-normal", accentClass)}>{value}</div>
+      {helper ? <div className="mt-0.5 text-xs text-[#c0c4cc] dark:text-muted-foreground">{helper}</div> : null}
     </div>
   );
 }
@@ -4115,6 +4173,7 @@ function DataTable({
   tableClassName,
   cellClassNames,
   scrollX = false,
+  classic = false,
 }: {
   headers: string[];
   rows: ReactNode[][];
@@ -4123,6 +4182,8 @@ function DataTable({
   tableClassName?: string;
   cellClassNames?: string[];
   scrollX?: boolean;
+  // 经典后台风格：白底表头黑字、细灰边框全格线、内容居中，目前仅工资统计启用
+  classic?: boolean;
 }) {
   const [localPage, setLocalPage] = useState(1);
   const total = pagination?.total ?? rows.length;
@@ -4156,13 +4217,31 @@ function DataTable({
   };
 
   return (
-    <div className="min-w-0 max-w-full overflow-hidden rounded-lg border border-slate-200 dark:border-border">
+    <div className={cn(
+      "min-w-0 max-w-full overflow-hidden border",
+      classic ? "rounded-sm border-[#e8eaec] dark:border-border" : "rounded-lg border-slate-200 dark:border-border"
+    )}>
       <div className={cn("max-w-full", scrollX ? "overflow-x-auto" : "overflow-x-hidden")}>
         <Table className={cn("w-full table-fixed", tableClassName)}>
           <TableHeader>
-            <TableRow className="bg-[#f8faf9] hover:bg-[#f8faf9] dark:bg-muted/30 dark:hover:bg-muted/30">
+            <TableRow
+              className={cn(
+                classic
+                  ? "border-b border-[#e8eaec] bg-white hover:bg-white dark:border-border dark:bg-background dark:hover:bg-background"
+                  : "bg-[#f8faf9] hover:bg-[#f8faf9] dark:bg-muted/30 dark:hover:bg-muted/30"
+              )}
+            >
               {headers.map((header, index) => (
-                <TableHead key={header} className={cn("px-4 text-slate-500 dark:text-muted-foreground", cellClassNames?.[index])}>
+                <TableHead
+                  key={header}
+                  className={cn(
+                    "px-4",
+                    classic
+                      ? "border-r border-[#e8eaec] text-center font-semibold text-[#303133] last:border-r-0 dark:border-border dark:text-foreground"
+                      : "text-slate-500 dark:text-muted-foreground",
+                    cellClassNames?.[index]
+                  )}
+                >
                   <span className="block truncate" title={header}>
                     {header}
                   </span>
@@ -4179,9 +4258,23 @@ function DataTable({
               </TableRow>
             ) : (
               visibleRows.map((row, rowIndex) => (
-                <TableRow key={`${currentPage}-${rowIndex}`} className="hover:bg-[#f8faf9]/70 dark:hover:bg-muted/30">
+                <TableRow
+                  key={`${currentPage}-${rowIndex}`}
+                  className={cn(
+                    classic
+                      ? "border-b border-[#ebeef5] text-[#606266] hover:bg-[#f5f7fa] dark:border-border dark:text-foreground dark:hover:bg-muted/30"
+                      : "hover:bg-[#f8faf9]/70 dark:hover:bg-muted/30"
+                  )}
+                >
                   {row.map((cell, cellIndex) => (
-                    <TableCell key={cellIndex} className={cn("whitespace-nowrap px-2", cellClassNames?.[cellIndex])}>
+                    <TableCell
+                      key={cellIndex}
+                      className={cn(
+                        "whitespace-nowrap px-2",
+                        classic && "border-r border-[#ebeef5] text-center last:border-r-0 dark:border-border",
+                        cellClassNames?.[cellIndex]
+                      )}
+                    >
                       <div className="min-w-0 truncate">{cell}</div>
                     </TableCell>
                   ))}
@@ -4192,7 +4285,14 @@ function DataTable({
         </Table>
       </div>
       {shouldPaginate ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-[#f8faf9] px-4 py-3 text-sm text-slate-500 dark:border-border dark:bg-muted/30 dark:text-muted-foreground">
+        <div
+          className={cn(
+            "flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3 text-sm",
+            classic
+              ? "border-[#e8eaec] bg-white text-[#606266] dark:border-border dark:bg-background dark:text-muted-foreground"
+              : "border-slate-200 bg-[#f8faf9] text-slate-500 dark:border-border dark:bg-muted/30 dark:text-muted-foreground"
+          )}
+        >
           <span>
             显示 {from}-{to} 条，共 {total} 条
           </span>
@@ -4201,21 +4301,31 @@ function DataTable({
               type="button"
               size="sm"
               variant="outline"
-              className="h-8 gap-1 border-slate-200 bg-white dark:border-border dark:bg-background"
+              className={cn(
+                "h-8 gap-1 bg-white dark:bg-background",
+                classic
+                  ? "rounded-sm border-[#dcdfe6] text-[#606266] hover:border-[#1890ff] hover:text-[#1890ff] dark:border-border dark:text-foreground"
+                  : "border-slate-200 dark:border-border"
+              )}
               disabled={currentPage <= 1}
               onClick={() => changePage(currentPage - 1)}
             >
               <ChevronLeft className="size-4" />
               上一页
             </Button>
-            <span className="min-w-12 text-center text-xs font-medium text-slate-600 dark:text-muted-foreground">
+            <span className={cn("min-w-12 text-center text-xs font-medium", classic ? "text-[#1890ff]" : "text-slate-600 dark:text-muted-foreground")}>
               {currentPage} / {getTotalPages(total, pageSize)}
             </span>
             <Button
               type="button"
               size="sm"
               variant="outline"
-              className="h-8 gap-1 border-slate-200 bg-white dark:border-border dark:bg-background"
+              className={cn(
+                "h-8 gap-1 bg-white dark:bg-background",
+                classic
+                  ? "rounded-sm border-[#dcdfe6] text-[#606266] hover:border-[#1890ff] hover:text-[#1890ff] dark:border-border dark:text-foreground"
+                  : "border-slate-200 dark:border-border"
+              )}
               disabled={currentPage >= getTotalPages(total, pageSize)}
               onClick={() => changePage(currentPage + 1)}
             >

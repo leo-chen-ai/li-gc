@@ -5,14 +5,17 @@ const {
   getSelectedProject,
   listResource,
   updateResource,
+  uploadConstructionFile,
 } = require("../../utils/construction-api.js");
-const { fieldSets, inferNativePlaceFromAddress } = require("../../utils/construction-fields.js");
+const { fieldSets } = require("../../utils/construction-fields.js");
+const { provinces, nativePlaceParts, inferNativePlace } = require("../../utils/china-regions.js");
 const {
   buildDefaultForm,
   buildFormFields,
   buildPayloadFromForm,
   nextUploadValue,
   previewUploadedFile,
+  readFileBase64,
   today,
   uploadForField,
 } = require("../../utils/form-utils.js");
@@ -70,6 +73,8 @@ Page({
     formSections: [],
     submitNotice: "",
     saving: false,
+    signatureVisible: false,
+    signatureUploading: false,
   },
 
   async onLoad() {
@@ -182,6 +187,17 @@ Page({
     this.updateFormValue(key, option && option.value || "");
   },
 
+  onNativeProvinceChange(event) {
+    const province = provinces[Number(event.detail.value)];
+    if (province) this.updateFormValue("native_place", `${province.code}0000`);
+  },
+
+  onNativeCityChange(event) {
+    const { province } = nativePlaceParts(this.data.form.native_place);
+    const city = province && province.cities[Number(event.detail.value)];
+    if (city) this.updateFormValue("native_place", `${city.code}00`);
+  },
+
   updateFormValue(key, value) {
     const form = { ...this.data.form, [key]: value };
     if (key === "unit_id") {
@@ -197,7 +213,7 @@ Page({
     if (!field) return;
     try {
       wx.showLoading({ title: "上传中", mask: true });
-      const file = await uploadForField(field, {
+      const { file, filePath } = await uploadForField(field, {
         bizType: "workers",
         bizId: this.data.editingId || this.data.project.id,
       });
@@ -205,7 +221,7 @@ Page({
       this.applyForm({ ...this.data.form, [key]: value }, { submitNotice: "" });
       wx.hideLoading();
       if (key === "ocr_photo" || key === "id_card_back_file") {
-        await this.recognizeIdCard(key, file.public_url || value);
+        await this.recognizeIdCard(key, file.public_url || value, filePath);
       } else {
         wx.showToast({ title: "上传成功", icon: "success" });
       }
@@ -215,20 +231,27 @@ Page({
     }
   },
 
-  async recognizeIdCard(key, imageUrl) {
+  async recognizeIdCard(key, imageUrl, localFilePath) {
     wx.showLoading({ title: "身份证识别中", mask: true });
     try {
+      // 本地开发时上传图片的 URL 是 localhost/内网地址，OCR 供应商拉不到图；
+      // 优先读本地临时文件的 base64，读不到时再回退到 image_url
+      const imageBase64 = readFileBase64(localFilePath);
       const result = await request({
         url: "/ocr/id-card",
         method: "POST",
         data: {
           side: key === "ocr_photo" ? "front" : "back",
-          image_url: imageUrl,
+          ...(imageBase64 ? { image_base64: imageBase64 } : { image_url: imageUrl }),
         },
       });
       const fields = result && result.fields ? result.fields : {};
-      if (!fields.native_place && fields.address) {
-        const nativePlace = inferNativePlaceFromAddress(fields.address);
+      if (!fields.native_place) {
+        // 籍贯优先按身份证号前 6 位（户籍地区划码）推断，其次才用住址文本匹配
+        const nativePlace = inferNativePlace({
+          idCard: fields.id_card || this.data.form.id_card,
+          address: fields.address,
+        });
         if (nativePlace) fields.native_place = nativePlace;
       }
       this.applyForm(
@@ -239,6 +262,8 @@ Page({
       wx.showToast({ title: "识别完成", icon: "success" });
     } catch (error) {
       wx.hideLoading();
+      // 识别失败时移除刚上传的证件照，避免无效图片残留在表单里
+      this.applyForm({ ...this.data.form, [key]: "" }, { submitNotice: "身份证识别失败，请重新上传清晰的证件照。" });
       wx.showToast({ title: error.message || "身份证识别失败", icon: "none" });
     }
   },
@@ -246,6 +271,35 @@ Page({
   previewUpload(event) {
     const { url, name, isImage } = event.currentTarget.dataset;
     previewUploadedFile({ url, name, isImage: isImage === true || isImage === "true" });
+  },
+
+  openFormSignature() {
+    this.setData({ signatureVisible: true });
+  },
+
+  closeSignaturePad() {
+    if (this.data.signatureUploading) return;
+    this.setData({ signatureVisible: false });
+  },
+
+  async onSignatureConfirm(event) {
+    const tempFilePath = event.detail && event.detail.tempFilePath;
+    if (!tempFilePath || this.data.signatureUploading) return;
+    this.setData({ signatureUploading: true });
+    try {
+      const file = await uploadConstructionFile(tempFilePath, {
+        bizType: "workers",
+        bizId: this.data.editingId || this.data.project.id,
+        fieldKey: "signature_photo",
+      });
+      const url = file.public_url || file.object_key || "";
+      this.applyForm({ ...this.data.form, signature_photo: url }, { submitNotice: "" });
+      this.setData({ signatureUploading: false, signatureVisible: false });
+      wx.showToast({ title: "签字已上传", icon: "success" });
+    } catch (error) {
+      this.setData({ signatureUploading: false });
+      wx.showToast({ title: error.message || "签字上传失败", icon: "none" });
+    }
   },
 
   async submitOnboarding() {

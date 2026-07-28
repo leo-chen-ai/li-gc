@@ -1,11 +1,14 @@
 const { assetPath } = require("../../config/assets.js");
+const { resolveAssetUrl } = require("../../config/api.js");
 const {
   getSelectedProject,
   deleteResource,
   listResource,
   updateResource,
+  uploadConstructionFile,
 } = require("../../utils/construction-api.js");
 const { fieldSets, optionLabel } = require("../../utils/construction-fields.js");
+const { provinces, nativePlaceParts, nativePlaceLabel } = require("../../utils/china-regions.js");
 const {
   buildDefaultForm,
   buildFormFields,
@@ -70,6 +73,9 @@ Page({
     reentryTeamName: "",
     reentryEntryTime: today(),
     reentrySaving: false,
+    signatureVisible: false,
+    signatureUploading: false,
+    signatureMode: "",
   },
 
   async onLoad(options = {}) {
@@ -183,11 +189,11 @@ Page({
       idCard: worker.id_card || "",
       issuingAuthority: worker.visa_office || "",
       validPeriod: [worker.validity_period, worker.validity_period_end].filter(Boolean).join(" 至 "),
-      nativePlace: optionLabel(fieldSets.workers, "native_place", worker.native_place, ""),
-      avatarUrl: worker.avatar || assetPath("/module-workers.png"),
-      idCardFrontUrl: worker.ocr_photo || "",
-      idCardBackUrl: worker.id_card_back_file || "",
-      signatureUrl: worker.signature_photo || "",
+      nativePlace: nativePlaceLabel(worker.native_place, ""),
+      avatarUrl: resolveAssetUrl(worker.avatar) || assetPath("/module-workers.png"),
+      idCardFrontUrl: resolveAssetUrl(worker.ocr_photo),
+      idCardBackUrl: resolveAssetUrl(worker.id_card_back_file),
+      signatureUrl: resolveAssetUrl(worker.signature_photo),
       statusText: worker.work_status === 2 ? "离场" : "在场",
     };
   },
@@ -354,6 +360,17 @@ Page({
     this.updateFormValue(key, option && option.value || "");
   },
 
+  onNativeProvinceChange(event) {
+    const province = provinces[Number(event.detail.value)];
+    if (province) this.updateFormValue("native_place", `${province.code}0000`);
+  },
+
+  onNativeCityChange(event) {
+    const { province } = nativePlaceParts(this.data.form.native_place);
+    const city = province && province.cities[Number(event.detail.value)];
+    if (city) this.updateFormValue("native_place", `${city.code}00`);
+  },
+
   updateFormValue(key, value) {
     const form = { ...this.data.form, [key]: value };
     if (key === "unit_id") {
@@ -372,7 +389,7 @@ Page({
     if (!field) return;
     try {
       wx.showLoading({ title: "上传中" });
-      const file = await uploadForField(field, {
+      const { file } = await uploadForField(field, {
         bizType: "workers",
         bizId: this.data.editId || this.data.project.id,
       });
@@ -388,6 +405,52 @@ Page({
   previewUpload(event) {
     const { url, name, isImage } = event.currentTarget.dataset;
     previewUploadedFile({ url, name, isImage: isImage === true || isImage === "true" });
+  },
+
+  openFormSignature() {
+    this.setData({ signatureVisible: true, signatureMode: "form" });
+  },
+
+  openDetailSignature() {
+    if (!this.data.currentWorker) return;
+    this.setData({ signatureVisible: true, signatureMode: "detail" });
+  },
+
+  closeSignaturePad() {
+    if (this.data.signatureUploading) return;
+    this.setData({ signatureVisible: false, signatureMode: "" });
+  },
+
+  async onSignatureConfirm(event) {
+    const tempFilePath = event.detail && event.detail.tempFilePath;
+    if (!tempFilePath || this.data.signatureUploading) return;
+    const mode = this.data.signatureMode;
+    const worker = this.data.currentWorker;
+    this.setData({ signatureUploading: true });
+    try {
+      const file = await uploadConstructionFile(tempFilePath, {
+        bizType: "workers",
+        bizId: (mode === "detail" ? worker && worker.id : this.data.editId) || this.data.project.id,
+        fieldKey: "signature_photo",
+      });
+      const url = file.public_url || file.object_key || "";
+      if (mode === "form") {
+        this.updateFormValue("signature_photo", url);
+        this.setData({ signatureUploading: false, signatureVisible: false, signatureMode: "" });
+        wx.showToast({ title: "签字已上传", icon: "success" });
+        return;
+      }
+      await updateResource(this.data.project.id, "workers", worker.id, {
+        signature_photo: url,
+        signature_time: today(),
+      });
+      this.setData({ signatureUploading: false, signatureVisible: false, signatureMode: "" });
+      await this.reloadWorkers({ append: false });
+      wx.showToast({ title: "签字已保存", icon: "success" });
+    } catch (error) {
+      this.setData({ signatureUploading: false });
+      wx.showToast({ title: error.message || "签字上传失败", icon: "none" });
+    }
   },
 
   async submitEditWorker() {

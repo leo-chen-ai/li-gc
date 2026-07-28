@@ -24,6 +24,7 @@
                 <view class="upload-main">{{field.uploadDisplay}}</view>
                 <view class="upload-action">{{field.uploadActionText}}</view>
               </view>
+              <view wx:if="{{field.signaturePad}}" class="signature-entry" data-key="{{field.key}}" bind:tap="openFormSignature">手写签字</view>
               <view class="upload-list" wx:if="{{field.uploadItems.length}}">
                 <view
                   class="upload-item"
@@ -46,6 +47,16 @@
               <picker range="{{field.options}}" range-key="label" value="{{field.optionIndex}}" data-key="{{field.key}}" bindchange="onPickerChange">
                 <view class="select-value {{field.valueLabel ? '' : 'placeholder'}}">{{field.displayValue}}</view>
               </picker>
+            </block>
+            <block wx:elif="{{field.control === 'nativePlace'}}">
+              <view class="native-place-row">
+                <picker class="native-place-picker" range="{{field.nativeProvinceNames}}" value="{{field.nativeProvinceIndex}}" bindchange="onNativeProvinceChange">
+                  <view class="select-value {{field.nativeProvinceLabel ? '' : 'placeholder'}}">{{field.nativeProvinceLabel || '选择省'}}</view>
+                </picker>
+                <picker class="native-place-picker" range="{{field.nativeCityNames}}" value="{{field.nativeCityIndex}}" disabled="{{!field.nativeProvinceLabel}}" bindchange="onNativeCityChange">
+                  <view class="select-value {{field.nativeCityLabel ? '' : 'placeholder'}}">{{field.nativeCityLabel || '选择市'}}</view>
+                </picker>
+              </view>
             </block>
             <block wx:elif="{{field.control === 'textarea'}}">
               <textarea class="field-textarea" value="{{field.value}}" data-key="{{field.key}}" placeholder="{{field.placeholder}}" placeholder-class="muted-placeholder" bindinput="onFormInput" />
@@ -80,4 +91,11 @@
       <view class="modal-primary" bind:tap="confirmPhoneLookup">确认并填写</view>
     </view>
   </view>
+
+  <signature-pad
+    visible="{{signatureVisible}}"
+    uploading="{{signatureUploading}}"
+    bind:close="closeSignaturePad"
+    bind:confirm="onSignatureConfirm"
+  />
 </view>

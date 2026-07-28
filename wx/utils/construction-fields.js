@@ -1,3 +1,6 @@
+// 籍贯推断改用全国省市数据，保留同名导出供旧调用方使用
+const { inferNativePlaceFromAddress } = require("./china-regions.js");
+
 const yesNoOptions = [
   { label: "是", value: "true" },
   { label: "否", value: "false" },
@@ -64,6 +67,9 @@ const workTypeOptions = [
   { label: "其他", value: "900" },
 ];
 
+// 班组工种多一个项目管理部（1001），与 Web 端保持一致：管理班组时只能选它
+const teamWorkTypeOptions = [{ label: "项目管理部", value: "1001" }].concat(workTypeOptions);
+
 const workerTypeOptions = [
   { label: "建筑工人", value: "1" },
   { label: "管理人员", value: "1001" },
@@ -101,22 +107,6 @@ const educationOptions = [
   { label: "本科", value: "6" },
   { label: "硕士及以上", value: "7" },
   { label: "其他", value: "9" },
-];
-
-const nativePlaceOptions = [
-  { label: "江苏省", value: "320000" },
-  { label: "淮安市", value: "320800" },
-  { label: "南京市", value: "320100" },
-  { label: "宿迁市", value: "321300" },
-  { label: "徐州市", value: "320300" },
-  { label: "盐城市", value: "320900" },
-  { label: "浙江省", value: "330000" },
-  { label: "杭州市", value: "330100" },
-  { label: "宁波市", value: "330200" },
-  { label: "安徽省", value: "340000" },
-  { label: "山东省", value: "370000" },
-  { label: "河南省", value: "410000" },
-  { label: "其他", value: "0" },
 ];
 
 const salaryBankOptions = [
@@ -176,10 +166,10 @@ const unitFields = [
 ];
 
 const teamFields = [
+  { key: "is_manage_team", label: "是否管理班组", valueType: "boolean", control: "select", defaultValue: "false", section: "基础信息", options: yesNoOptions },
   { key: "unit_id", label: "参建单位", valueType: "string", control: "select", required: true, section: "基础信息", optionsSource: "units" },
   { key: "name", label: "班组名称", valueType: "string", required: true, section: "基础信息" },
-  { key: "work_type", label: "工种", valueType: "number", control: "select", section: "基础信息", options: workTypeOptions },
-  { key: "is_manage_team", label: "是否管理班组", valueType: "boolean", control: "select", defaultValue: "false", section: "基础信息", options: yesNoOptions },
+  { key: "work_type", label: "工种", valueType: "number", control: "select", managementTeamType: true, section: "基础信息", options: teamWorkTypeOptions },
   { key: "settlement_type", label: "结算方式", valueType: "number", control: "select", section: "结算考勤", options: salaryCalcTypeOptions },
   { key: "quantity_unit_type", label: "计量单位", valueType: "number", control: "select", section: "结算考勤", options: quantityUnitTypeOptions },
   { key: "attendance_start_time", label: "考勤开始时间", valueType: "string", defaultValue: "06:00", section: "结算考勤" },
@@ -198,7 +188,7 @@ const workerFields = [
   { key: "avatar", label: "照片", valueType: "string", control: "upload", uploadKind: "image", section: "证件照片" },
   { key: "ocr_photo", label: "识别身份证正面", valueType: "string", control: "upload", uploadKind: "image", section: "证件照片" },
   { key: "id_card_back_file", label: "识别身份证反面", valueType: "string", control: "upload", uploadKind: "image", section: "证件照片" },
-  { key: "signature_photo", label: "人员签字", valueType: "string", control: "upload", uploadKind: "image", section: "证件照片" },
+  { key: "signature_photo", label: "人员签字", valueType: "string", control: "upload", uploadKind: "image", signaturePad: true, section: "证件照片" },
   { key: "signature_time", label: "签名日期", valueType: "date", section: "证件照片" },
   { key: "name", label: "姓名", valueType: "string", required: true, section: "基础信息" },
   { key: "phone", label: "电话", valueType: "string", required: true, section: "基础信息" },
@@ -206,7 +196,7 @@ const workerFields = [
   { key: "id_card", label: "身份证号", valueType: "string", section: "基础信息" },
   { key: "nation", label: "民族", valueType: "string", section: "基础信息" },
   { key: "address", label: "住址", valueType: "string", control: "textarea", section: "基础信息", wide: true },
-  { key: "native_place", label: "籍贯", valueType: "number", control: "select", section: "基础信息", options: nativePlaceOptions },
+  { key: "native_place", label: "籍贯", valueType: "number", control: "nativePlace", section: "基础信息" },
   { key: "validity_period", label: "开始日期", valueType: "string", section: "基础信息" },
   { key: "validity_period_end", label: "结束日期", valueType: "string", section: "基础信息" },
   { key: "visa_office", label: "签发机关", valueType: "string", section: "基础信息" },
@@ -280,25 +270,6 @@ function optionLabel(fields, key, value, fallback = "未填写") {
   const field = fields.find((item) => item.key === key);
   const option = (field && field.options || []).find((item) => item.value === String(value));
   return option ? option.label : String(value);
-}
-
-function inferNativePlaceFromAddress(address) {
-  const normalized = String(address || "").trim();
-  if (!normalized) return null;
-
-  const option = nativePlaceOptions
-    .filter((item) => item.value !== "0")
-    .sort((left, right) => {
-      const leftIsCity = Number(left.value) % 10000 !== 0 ? 1 : 0;
-      const rightIsCity = Number(right.value) % 10000 !== 0 ? 1 : 0;
-      return rightIsCity - leftIsCity || right.label.length - left.label.length;
-    })
-    .find((item) => {
-      const shortLabel = item.label.replace(/[省市]$/, "");
-      return normalized.includes(item.label) || normalized.includes(shortLabel);
-    });
-
-  return option ? option.value : null;
 }
 
 module.exports = {

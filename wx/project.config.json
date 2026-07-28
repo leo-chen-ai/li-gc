@@ -1,7 +1,7 @@
 {
   "appid": "wx27135eec1b9aedbd",
   "compileType": "miniprogram",
-  "libVersion": "latest",
+  "libVersion": "3.15.2",
   "miniprogramRoot": "./",
   "projectname": "shanhuai-wx",
   "setting": {

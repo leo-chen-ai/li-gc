@@ -1,3 +1,6 @@
+// Node 直跑测试时 JSON 导入必须带 import 属性；Vite/esbuild 同样支持
+import addressData from "./china-address.json" with { type: "json" };
+
 type JsonValue =
   | string
   | number
@@ -17,7 +20,7 @@ export type ConstructionFormField = {
   key: string;
   label: string;
   valueType: "string" | "number" | "boolean" | "json" | "date" | "datetime";
-  control?: "input" | "select" | "textarea" | "upload" | "region";
+  control?: "input" | "select" | "textarea" | "upload" | "region" | "nativePlace";
   uploadKind?: "image" | "file";
   uploadMultiple?: boolean;
   signaturePad?: boolean;
@@ -291,39 +294,64 @@ const educationOptions: ConstructionFormOption[] = [
   { label: "其他", value: "9" },
 ];
 
-export const nativePlaceOptions: ConstructionFormOption[] = [
-  { label: "江苏省", value: "320000" },
-  { label: "淮安市", value: "320800" },
-  { label: "南京市", value: "320100" },
-  { label: "宿迁市", value: "321300" },
-  { label: "徐州市", value: "320300" },
-  { label: "盐城市", value: "320900" },
-  { label: "浙江省", value: "330000" },
-  { label: "杭州市", value: "330100" },
-  { label: "宁波市", value: "330200" },
-  { label: "安徽省", value: "340000" },
-  { label: "山东省", value: "370000" },
-  { label: "河南省", value: "410000" },
-  { label: "其他", value: "0" },
-];
+// 籍贯使用全国省市两级数据，存储值为 6 位区划码（市级如 330100，省级如 330000）
+type NativePlaceRegion = { code: string; name: string; children?: NativePlaceRegion[] };
+
+export const nativePlaceProvinces = (addressData as NativePlaceRegion[]).map((province) => ({
+  code: province.code,
+  name: province.name,
+  cities: (province.children ?? []).map((city) => ({ code: city.code, name: city.name })),
+}));
+
+export function nativePlaceParts(value: string | number | null | undefined) {
+  const code = String(value ?? "").trim();
+  if (!/^\d{6}$/.test(code)) return { province: null, city: null };
+  const province = nativePlaceProvinces.find((item) => item.code === code.slice(0, 2)) ?? null;
+  const city = province?.cities.find((item) => item.code === code.slice(0, 4)) ?? null;
+  return { province, city };
+}
+
+export function nativePlaceLabel(value: string | number | null | undefined, fallback = ""): string {
+  const { province, city } = nativePlaceParts(value);
+  if (!province) return fallback;
+  // 直辖市的市级节点是“市辖区”，展示时只保留省级名称
+  if (!city || city.name === "市辖区") return province.name;
+  return `${province.name}${city.name}`;
+}
+
+// 优先用身份证号前 6 位（户籍地区划码）推断籍贯，识别不到再回退地址文本匹配
+export function inferNativePlace({ idCard, address }: { idCard?: string; address?: string }): string | null {
+  const idPrefix = String(idCard ?? "").trim().slice(0, 6);
+  if (/^\d{6}$/.test(idPrefix)) {
+    const { province, city } = nativePlaceParts(idPrefix);
+    if (city) return `${city.code}00`;
+    if (province) return `${province.code}0000`;
+  }
+  return inferNativePlaceFromAddress(address ?? "");
+}
 
 export function inferNativePlaceFromAddress(address: string): string | null {
-  const normalized = address.trim();
-  if (!normalized) return null;
+  const text = address.trim();
+  if (!text) return null;
 
-  const matched = nativePlaceOptions
-    .filter((option) => option.value !== "0")
-    .sort((left, right) => {
-      const leftIsCity = Number(left.value) % 10_000 !== 0 ? 1 : 0;
-      const rightIsCity = Number(right.value) % 10_000 !== 0 ? 1 : 0;
-      return rightIsCity - leftIsCity || right.label.length - left.label.length;
-    })
-    .find((option) => {
-      const shortLabel = option.label.replace(/[省市]$/, "");
-      return normalized.includes(option.label) || normalized.includes(shortLabel);
-    });
+  let matchedCity: { code: string; name: string } | null = null;
+  for (const province of nativePlaceProvinces) {
+    for (const city of province.cities) {
+      if (city.name === "市辖区" || city.name === "县") continue;
+      const shortName = city.name.replace(/[市]$/, "");
+      if (shortName.length < 2) continue;
+      if (text.includes(city.name) || text.includes(shortName)) {
+        if (!matchedCity || city.name.length > matchedCity.name.length) matchedCity = city;
+      }
+    }
+  }
+  if (matchedCity) return `${matchedCity.code}00`;
 
-  return matched?.value ?? null;
+  const matchedProvince = nativePlaceProvinces.find((province) => {
+    const shortName = province.name.replace(/(省|市|壮族自治区|回族自治区|维吾尔自治区|自治区|特别行政区)$/, "");
+    return text.includes(shortName);
+  });
+  return matchedProvince ? `${matchedProvince.code}0000` : null;
 }
 
 const salaryBankOptions: ConstructionFormOption[] = [
@@ -542,7 +570,7 @@ export const workerFormFields: ConstructionFormField[] = [
   { key: "id_card", label: "身份证号", valueType: "string", required: true, section: "基础信息" },
   { key: "nation", label: "民族", valueType: "string", required: true, section: "基础信息" },
   { key: "address", label: "住址", valueType: "string", section: "基础信息", wide: true },
-  { key: "native_place", label: "籍贯", valueType: "number", control: "select", section: "基础信息", options: nativePlaceOptions },
+  { key: "native_place", label: "籍贯", valueType: "number", control: "nativePlace", section: "基础信息" },
   { key: "validity_period", label: "开始日期", valueType: "string", section: "基础信息" },
   { key: "validity_period_end", label: "结束日期", valueType: "string", section: "基础信息" },
   { key: "visa_office", label: "签发机关", valueType: "string", section: "基础信息" },

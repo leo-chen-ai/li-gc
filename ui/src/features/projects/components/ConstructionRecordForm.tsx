@@ -5,7 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import {
-  inferNativePlaceFromAddress,
+  inferNativePlace,
+  nativePlaceParts,
+  nativePlaceProvinces,
   getFieldsBySection,
   type ConstructionFormField,
   type ConstructionFormOption,
@@ -116,6 +118,8 @@ function RecordFormField({
       </span>
       {field.control === "region" ? (
         <RegionField value={value} state={state} onChange={onChange} onBulkChange={onBulkChange} />
+      ) : field.control === "nativePlace" ? (
+        <NativePlaceField value={value} onChange={onChange} />
       ) : field.control === "upload" ? (
         <UploadField field={field} value={value} onChange={onChange} onBulkChange={onBulkChange} uploadContext={uploadContext} />
       ) : field.control === "select" ? (
@@ -154,6 +158,51 @@ function RecordFormField({
         />
       )}
     </label>
+  );
+}
+
+// 籍贯省/市两级级联选择；存储值为 6 位区划码（市级如 330100，省级如 330000）
+function NativePlaceField({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const { province, city } = nativePlaceParts(value);
+  const selectClassName =
+    "h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm outline-none focus:border-[#0f6b5d] focus:ring-2 focus:ring-[#0f6b5d]/15 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400 dark:border-border dark:bg-background dark:disabled:bg-muted";
+
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      <select
+        value={province?.code ?? ""}
+        onChange={(event) => onChange(event.target.value ? `${event.target.value}0000` : "")}
+        className={selectClassName}
+      >
+        <option value="">选择省</option>
+        {nativePlaceProvinces.map((option) => (
+          <option key={option.code} value={option.code}>
+            {option.name}
+          </option>
+        ))}
+      </select>
+      <select
+        value={city?.code ?? ""}
+        disabled={!province}
+        onChange={(event) =>
+          onChange(event.target.value ? `${event.target.value}00` : province ? `${province.code}0000` : "")
+        }
+        className={selectClassName}
+      >
+        <option value="">选择市</option>
+        {(province?.cities ?? []).map((option) => (
+          <option key={option.code} value={option.code}>
+            {option.name}
+          </option>
+        ))}
+      </select>
+    </div>
   );
 }
 
@@ -394,6 +443,11 @@ function UploadField({
         onChange(JSON.stringify(nextItems.map(toUploadValue), null, 2));
       } else {
         onChange(uploaded[0]?.public_url ?? "");
+        // 身份证正反面上传完成后自动识别并回填，无需再手动点识别按钮
+        const uploadedUrl = uploaded[0]?.public_url;
+        if (idCardSide && uploadedUrl) {
+          void recognizeIdCard(uploadedUrl, uploadedBase64[uploadedUrl]);
+        }
       }
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : "上传失败");
@@ -434,9 +488,10 @@ function UploadField({
     onChange("");
   };
 
-  const recognizeIdCard = async () => {
-    const imageUrl = items[0]?.public_url;
-    if (!idCardSide || !imageUrl) return;
+  const recognizeIdCard = async (imageUrl?: string, imageBase64?: string) => {
+    const targetUrl = imageUrl ?? items[0]?.public_url;
+    const targetBase64 = imageBase64 ?? (targetUrl ? base64ByUrl[targetUrl] : undefined);
+    if (!idCardSide || !targetUrl) return;
 
     setIsRecognizing(true);
     setError(null);
@@ -445,12 +500,16 @@ function UploadField({
     try {
       const result = await constructionProjectService.recognizeIdCard({
         side: idCardSide,
-        imageUrl: base64ByUrl[imageUrl] ? undefined : imageUrl,
-        imageBase64: base64ByUrl[imageUrl],
+        imageUrl: targetBase64 ? undefined : targetUrl,
+        imageBase64: targetBase64,
       });
       const recognizedFields = { ...(result.fields ?? {}) };
-      if (!recognizedFields.native_place && recognizedFields.address) {
-        const nativePlace = inferNativePlaceFromAddress(recognizedFields.address);
+      if (!recognizedFields.native_place) {
+        // 籍贯优先按身份证号前 6 位（户籍地区划码）推断，其次才用住址文本匹配
+        const nativePlace = inferNativePlace({
+          idCard: recognizedFields.id_card,
+          address: recognizedFields.address,
+        });
         if (nativePlace) recognizedFields.native_place = nativePlace;
       }
       const entries = Object.entries(recognizedFields).filter(([, value]) => value != null && value !== "");
@@ -508,7 +567,7 @@ function UploadField({
             onClick={() => void recognizeIdCard()}
           >
             {isRecognizing ? <Loader2 className="size-4 animate-spin" /> : <ImageIcon className="size-4" />}
-            {isRecognizing ? "识别中" : idCardSide === "front" ? "识别正面" : "识别背面"}
+            {isRecognizing ? "识别中" : idCardSide === "front" ? "重新识别正面" : "重新识别背面"}
           </Button>
         )}
         {field.signaturePad && (
@@ -692,8 +751,14 @@ function SignaturePadDialog({
     }, "image/png");
   };
 
+  // 弹窗处在外层 <label> 内部，label 会把点击转发给隐藏的文件 input，
+  // 导致点签字板弹出文件选择框；用 preventDefault 阻止 label 的默认转发行为。
+  // 注意不能 Portal 到 body：外层表单是 Radix modal Dialog，会屏蔽其内容之外的指针事件。
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 p-4">
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 p-4"
+      onClick={(event) => event.preventDefault()}
+    >
       <div className="w-full max-w-5xl rounded-lg bg-white shadow-xl dark:bg-card">
         <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-border">
           <div>

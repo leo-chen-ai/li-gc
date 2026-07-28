@@ -1,4 +1,4 @@
-const LOCAL_API_BASE_URL = "http://192.168.32.126:8080/api/v1";
+const LOCAL_API_BASE_URL = "http://192.168.2.22:8080/api/v1";
 const PRODUCTION_API_BASE_URL = "https://shanhuai.top/api/v1";
 
 function isDevelopEnv() {
@@ -12,10 +12,18 @@ function isDevelopEnv() {
 }
 
 const API_BASE_URL = isDevelopEnv() ? LOCAL_API_BASE_URL : PRODUCTION_API_BASE_URL;
+const API_ORIGIN = API_BASE_URL.replace(/^(https?:\/\/[^/]+)[\s\S]*$/, "$1");
 let redirectingToLogin = false;
 
 function apiUrl(path) {
   return `${API_BASE_URL.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
+}
+
+// 本地开发后端 UPLOAD_BASE_URL 常配为 localhost，真机上 localhost 指向手机自身无法访问，
+// 展示图片前把 localhost/127.0.0.1 域重写为当前 API 域名
+function resolveAssetUrl(url) {
+  if (!url || typeof url !== "string") return "";
+  return url.replace(/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i, API_ORIGIN);
 }
 
 function handleUnauthorized(url, statusCode) {
@@ -119,5 +127,6 @@ function uploadFile({ url = "/uploads", filePath, name = "file", formData = {}, 
 module.exports = {
   API_BASE_URL,
   request,
+  resolveAssetUrl,
   uploadFile,
 };

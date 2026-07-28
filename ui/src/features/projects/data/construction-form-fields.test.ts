@@ -3,7 +3,9 @@ import test from "node:test";
 
 import {
   getFieldsBySection,
+  inferNativePlace,
   inferNativePlaceFromAddress,
+  nativePlaceLabel,
   teamFormFields,
   unitFormFields,
   workerFormFields,
@@ -17,7 +19,6 @@ const selectFieldExpectations = [
   ["team.work_type", teamFormFields, "work_type"],
   ["team.settlement_type", teamFormFields, "settlement_type"],
   ["team.quantity_unit_type", teamFormFields, "quantity_unit_type"],
-  ["worker.native_place", workerFormFields, "native_place"],
   ["worker.work_type", workerFormFields, "work_type"],
   ["worker.worker_type", workerFormFields, "worker_type"],
   ["worker.political_status", workerFormFields, "political_status"],
@@ -37,6 +38,13 @@ test("construction ledger dictionary fields render as selects", () => {
     assert.equal(field.control, "select", `${name} should use select control`);
     assert.ok(field.options && field.options.length > 0, `${name} should define options`);
   }
+});
+
+test("worker native place uses the province/city cascading control", () => {
+  const field = workerFormFields.find((item) => item.key === "native_place");
+
+  assert.ok(field, "worker.native_place field exists");
+  assert.equal(field.control, "nativePlace");
 });
 
 test("unit form hides legacy timer settings and keeps date picker registration date", () => {
@@ -143,5 +151,22 @@ test("worker form hides real-name authentication bookkeeping fields", () => {
 test("worker native place is inferred from recognized address", () => {
   assert.equal(inferNativePlaceFromAddress("杭州市西湖区桑园地村4组25号"), "330100");
   assert.equal(inferNativePlaceFromAddress("江苏省淮安市清江浦区北京北路"), "320800");
+  assert.equal(inferNativePlaceFromAddress("内蒙古赤峰市松山区"), "150400");
   assert.equal(inferNativePlaceFromAddress(""), null);
+});
+
+test("worker native place prefers the id card region code", () => {
+  // 身份证前 6 位是户籍地区划码，住址只是回退
+  assert.equal(inferNativePlace({ idCard: "330106199001011234", address: "江苏省南京市" }), "330100");
+  assert.equal(inferNativePlace({ idCard: "", address: "江苏省宿迁市沭阳县" }), "321300");
+  assert.equal(inferNativePlace({}), null);
+});
+
+test("native place label renders province and city", () => {
+  assert.equal(nativePlaceLabel(330100), "浙江省杭州市");
+  assert.equal(nativePlaceLabel("320800"), "江苏省淮安市");
+  assert.equal(nativePlaceLabel(320000), "江苏省");
+  // 直辖市只展示省级名称
+  assert.equal(nativePlaceLabel(110100), "北京市");
+  assert.equal(nativePlaceLabel(null, "未填写"), "未填写");
 });

@@ -159,7 +159,7 @@
         <view class="id-line">有效期限　{{currentWorker.validPeriod}}</view>
       </view>
       <view class="file-label">人员签字</view>
-      <view class="signature-button" data-name="人员签字" bind:tap="showAction">签字</view>
+      <view class="signature-button" bind:tap="openDetailSignature">签字</view>
       <image
         wx:if="{{currentWorker.signatureUrl}}"
         class="signature-image"
@@ -196,6 +196,7 @@
               <view class="upload-main">{{item.uploadDisplay}}</view>
               <view class="upload-action">{{item.uploadActionText}}</view>
             </view>
+            <view wx:if="{{item.signaturePad}}" class="signature-entry" data-key="{{item.key}}" bind:tap="openFormSignature">手写签字</view>
             <view class="upload-list" wx:if="{{item.uploadItems.length}}">
               <view
                 class="upload-item"
@@ -218,6 +219,16 @@
             <picker range="{{item.options}}" range-key="label" value="{{item.optionIndex}}" data-key="{{item.key}}" bindchange="onPickerChange">
               <view class="select-value {{item.valueLabel ? '' : 'placeholder'}}">{{item.displayValue}}</view>
             </picker>
+          </block>
+          <block wx:elif="{{item.control === 'nativePlace'}}">
+            <view class="native-place-row">
+              <picker class="native-place-picker" range="{{item.nativeProvinceNames}}" value="{{item.nativeProvinceIndex}}" bindchange="onNativeProvinceChange">
+                <view class="select-value {{item.nativeProvinceLabel ? '' : 'placeholder'}}">{{item.nativeProvinceLabel || '选择省'}}</view>
+              </picker>
+              <picker class="native-place-picker" range="{{item.nativeCityNames}}" value="{{item.nativeCityIndex}}" disabled="{{!item.nativeProvinceLabel}}" bindchange="onNativeCityChange">
+                <view class="select-value {{item.nativeCityLabel ? '' : 'placeholder'}}">{{item.nativeCityLabel || '选择市'}}</view>
+              </picker>
+            </view>
           </block>
           <block wx:elif="{{item.control === 'textarea'}}">
             <textarea class="native-textarea" value="{{item.value}}" placeholder="{{item.placeholder}}" placeholder-class="muted-placeholder" data-key="{{item.key}}" bindinput="onFormInput" />
@@ -256,4 +267,11 @@
       <view class="reentry-submit {{reentrySaving ? 'disabled' : ''}}" bind:tap="submitReentry">{{reentrySaving ? '提交中...' : '确认进场'}}</view>
     </view>
   </view>
+
+  <signature-pad
+    visible="{{signatureVisible}}"
+    uploading="{{signatureUploading}}"
+    bind:close="closeSignaturePad"
+    bind:confirm="onSignatureConfirm"
+  />
 </view>
