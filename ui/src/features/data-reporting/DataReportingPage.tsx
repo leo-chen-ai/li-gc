@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useAuthUser } from "@/stores/use-auth-store";
 import { reportService } from "./service";
 import type { LifecycleStatus, ReportConfig, ReportConfigPayload, ReportItem, ReportRun, ResultCounts, RunMode, RunProject } from "./types";
 
@@ -47,7 +48,13 @@ const testCases: Array<{ mode: RunMode; title: string; description: string; dang
 
 export function DataReportingPage() {
   const client = useQueryClient();
-  const [tab, setTab] = useState<Tab>("dashboard");
+  const user = useAuthUser();
+  // 非管理员（如数据报送角色）只能看运行任务；工作台/报送配置/测试中心/报送数据仅管理员可见
+  const isAdmin = user?.role === "admin";
+  const visibleTabs: Tab[] = isAdmin ? ["dashboard", "configs", "tests", "runs", "data"] : ["runs"];
+  const [tab, setTab] = useState<Tab>(isAdmin ? "dashboard" : "runs");
+  // 角色信息异步就绪后可能停在不可见 tab，渲染时直接收敛到运行任务
+  const activeTab: Tab = visibleTabs.includes(tab) ? tab : "runs";
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<ReportConfig | null>(null);
   const [form, setForm] = useState<ConfigForm>(emptyForm);
@@ -194,19 +201,19 @@ export function DataReportingPage() {
       <header className="rounded-2xl border bg-gradient-to-br from-emerald-950 via-[#0f6b5d] to-emerald-700 p-5 text-white shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex items-center gap-2 text-xs font-medium text-emerald-100"><Send className="size-4" />数据报送中心</div>
-          <div className="flex gap-2"><Button variant="secondary" size="sm" onClick={() => void invalidate()}><RefreshCw className="mr-2 size-4" />刷新</Button><Button size="sm" className="bg-white text-emerald-900 hover:bg-emerald-50" onClick={openCreate}><Plus className="mr-2 size-4" />新增配置</Button></div>
+          <div className="flex gap-2"><Button variant="secondary" size="sm" onClick={() => void invalidate()}><RefreshCw className="mr-2 size-4" />刷新</Button>{isAdmin && <Button size="sm" className="bg-white text-emerald-900 hover:bg-emerald-50" onClick={openCreate}><Plus className="mr-2 size-4" />新增配置</Button>}</div>
         </div>
       </header>
 
       <nav className="flex flex-wrap gap-1 rounded-xl border bg-white p-1.5">
-        {(["dashboard", "configs", "tests", "runs", "data"] as Tab[]).map((key) => <Button key={key} size="sm" variant={tab === key ? "default" : "ghost"} className={tab === key ? "bg-[#0f6b5d]" : ""} onClick={() => setTab(key)}>{tabLabel(key)}</Button>)}
+        {visibleTabs.map((key) => <Button key={key} size="sm" variant={activeTab === key ? "default" : "ghost"} className={activeTab === key ? "bg-[#0f6b5d]" : ""} onClick={() => setTab(key)}>{tabLabel(key)}</Button>)}
       </nav>
 
-      {tab === "dashboard" && <Dashboard summary={summary.data} runs={runRows.slice(0, 6)} onRun={setDetailRunId} />}
-      {tab === "configs" && <ConfigTable rows={configRows} loading={configs.isLoading} onEdit={openEdit} onRun={startProduction} onDelete={async (config) => { if (!window.confirm(`确认删除“${config.name}”？历史数据仍会保留。`)) return; try { await deleteConfig.mutateAsync(config.id); toast.success("配置已删除"); } catch (error) { toast.error(errorMessage(error)); } }} />}
-      {tab === "tests" && <TestCenter configs={configRows} selectedConfig={selectedTestConfigId} onConfig={setTestConfigId} sourceRun={sourceRunId} onSourceRun={setSourceRunId} rawRuns={rawSourceRuns} convertedRuns={convertedSourceRuns} running={createRun.isPending} onRun={runTest} />}
-      {tab === "runs" && <RunsTable rows={runRows} loading={runs.isLoading} onDetail={setDetailRunId} onCancel={async (run) => { try { await cancelRun.mutateAsync(run.id); toast.success("已请求取消任务"); } catch (error) { toast.error(errorMessage(error)); } }} onRetry={async (run) => { if (["production", "test_submit", "test_full"].includes(run.run_mode) && !window.confirm("该任务可能已经产生过真实提交，重试可能再次向政务网提交数据，确认继续吗？")) return; try { await retryRun.mutateAsync(run.id); toast.success("重试任务已进入队列"); } catch (error) { toast.error(errorMessage(error)); } }} />}
-      {tab === "data" && <DataPanel runs={completedDataRuns} runId={dataRunId} onRun={(id) => { setDataRunId(id); setDataPage(1); setDataOutcome("all"); }} result={items.data} loading={items.isLoading} page={dataPage} onPage={setDataPage} outcome={dataOutcome} onOutcome={(value) => { setDataOutcome(value); setDataPage(1); }} onExport={() => void exportItems(dataRunId, dataOutcome)} />}
+      {activeTab === "dashboard" && isAdmin && <Dashboard summary={summary.data} runs={runRows.slice(0, 6)} onRun={setDetailRunId} />}
+      {activeTab === "configs" && isAdmin && <ConfigTable rows={configRows} loading={configs.isLoading} onEdit={openEdit} onRun={startProduction} onDelete={async (config) => { if (!window.confirm(`确认删除“${config.name}”？历史数据仍会保留。`)) return; try { await deleteConfig.mutateAsync(config.id); toast.success("配置已删除"); } catch (error) { toast.error(errorMessage(error)); } }} />}
+      {activeTab === "tests" && isAdmin && <TestCenter configs={configRows} selectedConfig={selectedTestConfigId} onConfig={setTestConfigId} sourceRun={sourceRunId} onSourceRun={setSourceRunId} rawRuns={rawSourceRuns} convertedRuns={convertedSourceRuns} running={createRun.isPending} onRun={runTest} />}
+      {activeTab === "runs" && <RunsTable rows={runRows} loading={runs.isLoading} onDetail={setDetailRunId} onCancel={async (run) => { try { await cancelRun.mutateAsync(run.id); toast.success("已请求取消任务"); } catch (error) { toast.error(errorMessage(error)); } }} onRetry={async (run) => { if (["production", "test_submit", "test_full"].includes(run.run_mode) && !window.confirm("该任务可能已经产生过真实提交，重试可能再次向政务网提交数据，确认继续吗？")) return; try { await retryRun.mutateAsync(run.id); toast.success("重试任务已进入队列"); } catch (error) { toast.error(errorMessage(error)); } }} />}
+      {activeTab === "data" && isAdmin && <DataPanel runs={completedDataRuns} runId={dataRunId} onRun={(id) => { setDataRunId(id); setDataPage(1); setDataOutcome("all"); }} result={items.data} loading={items.isLoading} page={dataPage} onPage={setDataPage} outcome={dataOutcome} onOutcome={(value) => { setDataOutcome(value); setDataPage(1); }} onExport={() => void exportItems(dataRunId, dataOutcome)} />}
 
       <ConfigDialog open={formOpen} onOpen={setFormOpen} editing={editing} form={form} setForm={setForm} submit={submitConfig} saving={createConfig.isPending || updateConfig.isPending} />
       <RunDetail open={Boolean(detailRunId)} onOpen={(open) => { if (!open) setDetailRunId(null); }} run={detail.data} loading={detail.isLoading} onDownload={(id, name) => void reportService.downloadArtifact(id, name)} itemResult={detailItems.data} itemsLoading={detailItems.isLoading} itemPage={detailItemPage} onItemPage={setDetailItemPage} outcome={detailOutcome} onOutcome={(value) => { setDetailOutcome(value); setDetailItemPage(1); }} onExport={() => detailRunId && void exportItems(detailRunId, detailOutcome)} />
