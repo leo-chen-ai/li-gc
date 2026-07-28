@@ -559,7 +559,7 @@ async fn report_photo_quality(
             )
             .await?;
         } else {
-            let pending_report_id = sqlx::query_scalar::<_, Uuid>(
+            let default_success_report_id = sqlx::query_scalar::<_, Uuid>(
                 r#"
                 SELECT id
                 FROM construction_attendance_device_issue_reports
@@ -568,8 +568,8 @@ async fn report_photo_quality(
                   AND worker_id = $2
                   AND device_type = $3
                   AND action <> 'delete'
-                  AND status = 'pending'
-                  AND acknowledged_at IS NULL
+                  AND mqtt_message_id IS NULL
+                  AND response_payload IS NULL
                 ORDER BY issued_at DESC, created_at DESC, id DESC
                 LIMIT 1
                 FOR UPDATE
@@ -582,7 +582,7 @@ async fn report_photo_quality(
             .await
             .map_err(quality_internal)?;
 
-            if let Some(report_id) = pending_report_id {
+            if let Some(report_id) = default_success_report_id {
                 update_photo_quality_report(
                     &mut tx,
                     report_id,

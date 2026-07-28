@@ -7,7 +7,10 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use common::{BodyExt, ServiceExt, build_test_app_with_pool, build_test_state_with_pool};
-use quax::{infrastructure::storage::LocalStorage, routes::app_routes};
+use quax::{
+    feature::device_mqtt::issuer::issue_single_worker_via_broker,
+    infrastructure::storage::LocalStorage, routes::app_routes,
+};
 
 async fn get_json(app: axum::Router, uri: &str) -> (axum::http::StatusCode, Value) {
     let response = app
@@ -273,7 +276,7 @@ async fn b_vendor_quality_feedback_is_visible_as_idempotent_issue_reports() {
             project_id, unit_id, team_id, name, id_card, phone, avatar, work_status
         ) VALUES (
             $1, $2, $3, '照片质量人员', '330200199001010044', '13800000000',
-            'https://example.test/quality.jpg', 1
+            NULL, 1
         )
         RETURNING id
         "#,
@@ -284,6 +287,41 @@ async fn b_vendor_quality_feedback_is_visible_as_idempotent_issue_reports() {
     .fetch_one(&pool)
     .await
     .unwrap();
+
+    let default_report_id = issue_single_worker_via_broker(
+        &pool,
+        None,
+        project_id,
+        worker_id,
+        device_record_id,
+        "create",
+        None,
+        Some("人员新增后自动下发"),
+    )
+    .await
+    .unwrap();
+    let default_report = sqlx::query_as::<_, (String, Option<String>, Option<Value>)>(
+        r#"
+        SELECT status, mqtt_message_id, request_payload
+        FROM construction_attendance_device_issue_reports
+        WHERE id = $1
+        "#,
+    )
+    .bind(default_report_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(default_report.0, "success");
+    assert!(default_report.1.is_none());
+    assert!(default_report.2.is_none());
+    let mqtt_message_count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM device_mqtt_messages WHERE attendance_device_id = $1",
+    )
+    .bind(device_record_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(mqtt_message_count, 0, "B厂家下发记录不应产生MQTT消息");
 
     let timestamp_millis = 1_785_217_408_177_i64;
     let failed_payload = serde_json::json!({
@@ -315,6 +353,7 @@ async fn b_vendor_quality_feedback_is_visible_as_idempotent_issue_reports() {
         (
             Uuid,
             Uuid,
+            Uuid,
             String,
             String,
             String,
@@ -324,7 +363,7 @@ async fn b_vendor_quality_feedback_is_visible_as_idempotent_issue_reports() {
         ),
     >(
         r#"
-        SELECT worker_id, attendance_device_id, device_type, action, status,
+        SELECT id, worker_id, attendance_device_id, device_type, action, status,
                acknowledged_at, request_payload, response_payload
         FROM construction_attendance_device_issue_reports
         WHERE worker_id = $1 AND attendance_device_id = $2 AND is_deleted = FALSE
@@ -335,15 +374,16 @@ async fn b_vendor_quality_feedback_is_visible_as_idempotent_issue_reports() {
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(report.0, worker_id);
-    assert_eq!(report.1, device_record_id);
-    assert_eq!(report.2, "B厂家");
-    assert_eq!(report.3, "update");
-    assert_eq!(report.4, "failed");
-    assert!(report.5.is_some());
-    assert_eq!(report.6["data"]["code"], "5");
-    assert_eq!(report.7["source"], "device_vendor_b_quality");
-    assert_eq!(report.7["event"], "quality");
+    assert_eq!(report.0, default_report_id);
+    assert_eq!(report.1, worker_id);
+    assert_eq!(report.2, device_record_id);
+    assert_eq!(report.3, "B厂家");
+    assert_eq!(report.4, "create");
+    assert_eq!(report.5, "failed");
+    assert!(report.6.is_some());
+    assert_eq!(report.7["data"]["code"], "5");
+    assert_eq!(report.8["source"], "device_vendor_b_quality");
+    assert_eq!(report.8["event"], "quality");
 
     let (retry_status, retry) =
         post_quality_json(app.clone(), &failed_payload, Some(timestamp_millis)).await;
@@ -374,7 +414,7 @@ async fn b_vendor_quality_feedback_is_visible_as_idempotent_issue_reports() {
     assert_eq!(success_status, axum::http::StatusCode::OK, "{success}");
     assert_eq!(success["event"], "quality");
 
-    let statuses = sqlx::query_scalar::<_, String>(
+    let mut statuses = sqlx::query_scalar::<_, String>(
         r#"
         SELECT status
         FROM construction_attendance_device_issue_reports
@@ -387,7 +427,8 @@ async fn b_vendor_quality_feedback_is_visible_as_idempotent_issue_reports() {
     .fetch_all(&pool)
     .await
     .unwrap();
-    assert_eq!(statuses, vec!["success", "failed"]);
+    statuses.sort();
+    assert_eq!(statuses, vec!["failed", "success"]);
 
     let device_seen = sqlx::query_scalar::<_, bool>(
         "SELECT last_seen_at IS NOT NULL AND online_status = 'online' FROM construction_attendance_devices WHERE id = $1",
