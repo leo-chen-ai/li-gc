@@ -28,14 +28,14 @@ pub async fn get_me(
                 .with_message("User not found")
         })?;
 
-    let user_role = user_with_profile.role();
+    let user_role = user_with_profile.role.clone();
     Ok(ApiSuccess::default().with_data(UserProfileResponse {
         id: user_with_profile.id,
         email: user_with_profile.email,
         username: user_with_profile.username,
         name: user_with_profile.full_name.unwrap_or_default(),
         avatar_url: user_with_profile.avatar_url,
-        role: user_role.to_string(),
+        role: user_role,
     }))
 }
 
@@ -93,7 +93,7 @@ pub async fn update_me(
         .ok()
         .flatten();
 
-    let user_role = user.role().to_string();
+    let user_role = user.role.clone();
     Ok(ApiSuccess::default()
         .with_data(UserProfileResponse {
             id: user.id,

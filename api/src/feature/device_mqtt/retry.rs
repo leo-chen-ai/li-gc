@@ -31,6 +31,7 @@ const FAIL_INELIGIBLE_RETRY_REPORTS_SQL: &str = r#"
           AND r.acknowledged_at IS NULL
           AND r.request_payload IS NOT NULL
           AND r.mqtt_message_id IS NOT NULL
+          AND COALESCE(r.device_type, '') <> 'B厂家'
           AND r.status IN ('pending', 'failed')
           AND (w.is_deleted = TRUE OR COALESCE(w.work_status, 1) = 2)
         "#;
@@ -47,6 +48,7 @@ const FAIL_EXHAUSTED_RETRY_REPORTS_SQL: &str = r#"
           AND acknowledged_at IS NULL
           AND request_payload IS NOT NULL
           AND mqtt_message_id IS NOT NULL
+          AND COALESCE(device_type, '') <> 'B厂家'
           AND status IN ('pending', 'failed')
           AND retry_count >= max_retries
           AND next_retry_at IS NOT NULL
@@ -72,6 +74,7 @@ const CLAIM_RETRY_REPORTS_SQL: &str = r#"
               AND due.acknowledged_at IS NULL
               AND due.request_payload IS NOT NULL
               AND due.mqtt_message_id IS NOT NULL
+              AND COALESCE(due.device_type, d.device_type, '') <> 'B厂家'
               AND due.serial_number IS NOT NULL
               AND due.status IN ('pending', 'failed')
               AND due.retry_count < due.max_retries
@@ -425,6 +428,8 @@ mod tests {
         assert!(CLAIM_RETRY_REPORTS_SQL.contains("COALESCE(w.work_status, 1) <> 2"));
         assert!(FAIL_INELIGIBLE_RETRY_REPORTS_SQL.contains("w.is_deleted = TRUE"));
         assert!(FAIL_INELIGIBLE_RETRY_REPORTS_SQL.contains("COALESCE(w.work_status, 1) = 2"));
+        assert!(CLAIM_RETRY_REPORTS_SQL.contains("<> 'B厂家'"));
+        assert!(FAIL_INELIGIBLE_RETRY_REPORTS_SQL.contains("<> 'B厂家'"));
     }
 
     #[test]
@@ -432,6 +437,7 @@ mod tests {
         assert!(FAIL_EXHAUSTED_RETRY_REPORTS_SQL.contains("acknowledged_at IS NULL"));
         assert!(FAIL_EXHAUSTED_RETRY_REPORTS_SQL.contains("retry_count >= max_retries"));
         assert!(FAIL_EXHAUSTED_RETRY_REPORTS_SQL.contains("next_retry_at <= NOW()"));
+        assert!(FAIL_EXHAUSTED_RETRY_REPORTS_SQL.contains("<> 'B厂家'"));
         assert_eq!(ACK_TIMEOUT_MESSAGE, "设备未回执，已达到最大重试次数");
     }
 }

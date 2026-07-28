@@ -10,6 +10,9 @@ use super::publisher::publish_json;
 
 // 厂家协议 personType: 0=白名单, 1=黑名单。本项目不使用黑名单。
 const FACE_PERSON_TYPE_WHITELIST: i32 = 0;
+const B_VENDOR_DEVICE_TYPE: &str = "B厂家";
+const B_VENDOR_DEFAULT_SUCCESS_MESSAGE: &str =
+    "B厂家由设备主动拉取人员；未收到照片质量失败反馈，按成功显示";
 const MISSING_FACE_PHOTO_MESSAGE: &str = "工人未上传人脸照片，无法下发";
 const FETCH_PROJECT_WORKERS_SQL: &str = r#"
         SELECT id, name, id_card, phone, avatar, is_deleted, work_status
@@ -55,7 +58,7 @@ pub struct IssueWorkersSummary {
 
 pub async fn issue_single_worker_via_broker(
     pool: &PgPool,
-    broker_url: &str,
+    broker_url: Option<&str>,
     project_id: Uuid,
     worker_id: Uuid,
     attendance_device_id: Uuid,
@@ -65,6 +68,12 @@ pub async fn issue_single_worker_via_broker(
 ) -> Result<Uuid, String> {
     let worker = fetch_issue_worker(pool, project_id, worker_id).await?;
     let device = fetch_issue_device(pool, project_id, attendance_device_id).await?;
+    if is_b_vendor_device(&device) {
+        return insert_b_vendor_success_report(
+            pool, project_id, &worker, &device, action, issued_at, remark,
+        )
+        .await;
+    }
     if let Some(error) = issue_preflight_error(action, &worker) {
         insert_failed_issue_report(pool, project_id, &worker, &device, action, error, remark)
             .await?;
@@ -72,14 +81,21 @@ pub async fn issue_single_worker_via_broker(
     }
 
     issue_worker_snapshot_via_broker(
-        pool, broker_url, project_id, &worker, &device, action, issued_at, remark,
+        pool,
+        require_mqtt_broker_url(broker_url)?,
+        project_id,
+        &worker,
+        &device,
+        action,
+        issued_at,
+        remark,
     )
     .await
 }
 
 pub async fn issue_device_workers_via_broker(
     pool: &PgPool,
-    broker_url: &str,
+    broker_url: Option<&str>,
     project_id: Uuid,
     attendance_device_id: Uuid,
     action: &str,
@@ -87,9 +103,15 @@ pub async fn issue_device_workers_via_broker(
     require_online: bool,
 ) -> Result<IssueWorkersSummary, String> {
     let device = fetch_issue_device(pool, project_id, attendance_device_id).await?;
-    if require_online && !is_device_online(&device) {
+    let is_b_vendor = is_b_vendor_device(&device);
+    if require_online && !is_b_vendor && !is_device_online(&device) {
         return Err("设备未在线，暂不能下发人员".to_string());
     }
+    let mqtt_broker_url = if is_b_vendor {
+        None
+    } else {
+        Some(require_mqtt_broker_url(broker_url)?)
+    };
 
     let workers = if action == "delete" {
         fetch_device_clear_workers(pool, project_id, attendance_device_id).await?
@@ -102,6 +124,15 @@ pub async fn issue_device_workers_via_broker(
     let mut failed = 0usize;
 
     for worker in workers {
+        if is_b_vendor {
+            insert_b_vendor_success_report(
+                pool, project_id, &worker, &device, action, None, remark,
+            )
+            .await?;
+            queued += 1;
+            continue;
+        }
+
         if should_skip_worker_without_photo(action, &worker) {
             skipped_without_photo += 1;
             insert_failed_issue_report(
@@ -118,7 +149,14 @@ pub async fn issue_device_workers_via_broker(
         }
 
         match issue_worker_snapshot_via_broker(
-            pool, broker_url, project_id, &worker, &device, action, None, remark,
+            pool,
+            mqtt_broker_url.expect("A厂家批量下发已经校验MQTT配置"),
+            project_id,
+            &worker,
+            &device,
+            action,
+            None,
+            remark,
         )
         .await
         {
@@ -152,6 +190,9 @@ pub async fn auto_issue_device_workers_via_client(
     let Some(device) = fetch_issue_device_by_serial(pool, serial_number).await? else {
         return Ok(None);
     };
+    if is_b_vendor_device(&device) {
+        return Ok(None);
+    }
     if has_any_issue_report(pool, device.id).await? {
         return Ok(None);
     }
@@ -675,6 +716,14 @@ fn issue_worker_custom_id(worker: &IssueWorkerSnapshot) -> String {
     worker.id.to_string()
 }
 
+fn is_b_vendor_device(device: &IssueDeviceSnapshot) -> bool {
+    device.device_type.as_deref() == Some(B_VENDOR_DEVICE_TYPE)
+}
+
+fn require_mqtt_broker_url(broker_url: Option<&str>) -> Result<&str, String> {
+    broker_url.ok_or_else(|| "MQTT_BROKER_URL 未配置，无法向 A 厂家设备下发人员".to_string())
+}
+
 fn should_skip_worker_without_photo(action: &str, worker: &IssueWorkerSnapshot) -> bool {
     action != "delete"
         && worker
@@ -759,6 +808,51 @@ async fn insert_attendance_device_issue_report(
     .bind(remark)
     .bind(message_id)
     .bind(request_payload)
+    .fetch_one(pool)
+    .await
+    .map_err(|error| error.to_string())
+}
+
+async fn insert_b_vendor_success_report(
+    pool: &PgPool,
+    project_id: Uuid,
+    worker: &IssueWorkerSnapshot,
+    device: &IssueDeviceSnapshot,
+    action: &str,
+    issued_at: Option<DateTime<Utc>>,
+    remark: Option<&str>,
+) -> Result<Uuid, String> {
+    sqlx::query_scalar::<_, Uuid>(
+        r#"
+        INSERT INTO construction_attendance_device_issue_reports (
+            project_id, worker_id, attendance_device_id,
+            worker_name, worker_id_card, worker_phone, avatar_url,
+            device_name, serial_number, device_type,
+            action, status, issued_at, message, remark, acknowledged_at
+        )
+        VALUES (
+            $1, $2, $3,
+            $4, $5, $6, $7,
+            $8, $9, $10,
+            $11, 'success', COALESCE($12, NOW()), $13, $14, NOW()
+        )
+        RETURNING id
+        "#,
+    )
+    .bind(project_id)
+    .bind(worker.id)
+    .bind(device.id)
+    .bind(&worker.name)
+    .bind(&worker.id_card)
+    .bind(&worker.phone)
+    .bind(&worker.avatar)
+    .bind(&device.device_name)
+    .bind(&device.serial_number)
+    .bind(&device.device_type)
+    .bind(action)
+    .bind(issued_at)
+    .bind(B_VENDOR_DEFAULT_SUCCESS_MESSAGE)
+    .bind(remark)
     .fetch_one(pool)
     .await
     .map_err(|error| error.to_string())
@@ -1019,5 +1113,25 @@ mod tests {
     #[test]
     fn project_worker_issue_query_excludes_left_site_workers() {
         assert!(FETCH_PROJECT_WORKERS_SQL.contains("COALESCE(work_status, 1) <> 2"));
+    }
+
+    #[test]
+    fn only_b_vendor_bypasses_the_mqtt_issue_path() {
+        let project_id = Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap();
+        let mut device = IssueDeviceSnapshot {
+            id: Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap(),
+            project_id,
+            device_name: Some("测试考勤机".to_string()),
+            serial_number: "1306612".to_string(),
+            device_type: Some("A厂家".to_string()),
+            online_status: "online".to_string(),
+            last_heartbeat_at: Some(Utc::now()),
+        };
+
+        assert!(!is_b_vendor_device(&device));
+        assert!(require_mqtt_broker_url(None).is_err());
+
+        device.device_type = Some(B_VENDOR_DEVICE_TYPE.to_string());
+        assert!(is_b_vendor_device(&device));
     }
 }

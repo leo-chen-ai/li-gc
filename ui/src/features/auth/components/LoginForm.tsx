@@ -105,7 +105,10 @@ export function LoginForm() {
           clearAdminWindowState();
           queryClient.invalidateQueries({ queryKey: authKeys.me() });
           toast.success("扫码登录成功");
-          navigate({ to: readStoredAdminActivePath(), replace: true });
+          navigate({
+            to: result.user.role === "admin" ? readStoredAdminActivePath() : "/app/admin",
+            replace: true,
+          });
           return;
         }
 
@@ -133,9 +136,12 @@ export function LoginForm() {
     }
 
     try {
-      await login.mutateAsync({ account, password });
+      const result = await login.mutateAsync({ account, password });
       clearAdminWindowState();
-      navigate({ to: readStoredAdminActivePath(), replace: true });
+      navigate({
+        to: result.user.role === "admin" ? readStoredAdminActivePath() : "/app/admin",
+        replace: true,
+      });
     } catch {
       // Error handled by hook
     }

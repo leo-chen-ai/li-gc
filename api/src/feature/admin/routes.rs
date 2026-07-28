@@ -438,7 +438,7 @@ pub fn admin_routes() -> Router<AppState> {
 
 pub fn management_routes(state: AppState) -> Router<AppState> {
     let permitted_report_forward_routes = report_forward_routes().route_layer(
-        middleware::from_fn_with_state(state, data_reporting_permission_middleware),
+        middleware::from_fn_with_state(state.clone(), data_reporting_permission_middleware),
     );
 
     Router::new()
@@ -578,7 +578,30 @@ pub fn management_routes(state: AppState) -> Router<AppState> {
             "/personnel-workers/{worker_id}",
             get(construction::handler::get_personnel_worker),
         )
+        .route_layer(middleware::from_fn_with_state(
+            state,
+            management_menu_permission_middleware,
+        ))
         .route_layer(middleware::from_fn(auth_middleware))
+}
+
+async fn management_menu_permission_middleware(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    let Some(allowed_menu_keys) = allowed_menu_keys_for_management_path(request.uri().path())
+    else {
+        return Ok(next.run(request).await);
+    };
+
+    let auth_user = request
+        .extensions()
+        .get::<AuthUser>()
+        .cloned()
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    ensure_any_menu_permission(&state, &auth_user, allowed_menu_keys).await?;
+    Ok(next.run(request).await)
 }
 
 async fn data_reporting_permission_middleware(
@@ -589,10 +612,19 @@ async fn data_reporting_permission_middleware(
     let auth_user = request
         .extensions()
         .get::<AuthUser>()
+        .cloned()
         .ok_or(StatusCode::UNAUTHORIZED)?;
+    ensure_any_menu_permission(&state, &auth_user, &["data_reporting"]).await?;
+    Ok(next.run(request).await)
+}
 
+async fn ensure_any_menu_permission(
+    state: &AppState,
+    auth_user: &AuthUser,
+    allowed_menu_keys: &[&str],
+) -> Result<(), StatusCode> {
     if auth_user.roles.contains(&Role::Admin) {
-        return Ok(next.run(request).await);
+        return Ok(());
     }
 
     let user = state
@@ -610,9 +642,70 @@ async fn data_reporting_permission_middleware(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::FORBIDDEN)?;
 
-    if !role.menu_keys.iter().any(|key| key == "data_reporting") {
+    if !role
+        .menu_keys
+        .iter()
+        .any(|key| allowed_menu_keys.contains(&key.as_str()))
+    {
         return Err(StatusCode::FORBIDDEN);
     }
 
-    Ok(next.run(request).await)
+    Ok(())
+}
+
+fn allowed_menu_keys_for_management_path(path: &str) -> Option<&'static [&'static str]> {
+    let management_path = path
+        .split_once("/management")
+        .map(|(_, suffix)| suffix)
+        .unwrap_or(path);
+
+    if management_path == "/projects" || management_path == "/projects/options" {
+        return Some(&[
+            "projects",
+            "attendance_devices",
+            "attendance_device_issue_reports",
+            "personnel_workers",
+        ]);
+    }
+
+    if management_path.starts_with("/projects/") {
+        return Some(if management_path.contains("/attendance-devices") {
+            &["attendance_devices"]
+        } else {
+            &["projects"]
+        });
+    }
+
+    if management_path.starts_with("/attendance-device-issue-reports") {
+        return Some(&["attendance_device_issue_reports"]);
+    }
+
+    if management_path.starts_with("/personnel-workers") {
+        return Some(&["personnel_workers"]);
+    }
+
+    None
+}
+
+#[cfg(test)]
+mod management_permission_tests {
+    use super::allowed_menu_keys_for_management_path;
+
+    #[test]
+    fn management_paths_map_to_their_menu_permissions() {
+        assert_eq!(
+            allowed_menu_keys_for_management_path("/api/v1/management/projects/123/workers"),
+            Some(&["projects"][..])
+        );
+        assert_eq!(
+            allowed_menu_keys_for_management_path(
+                "/api/v1/management/projects/123/attendance-devices"
+            ),
+            Some(&["attendance_devices"][..])
+        );
+        assert_eq!(
+            allowed_menu_keys_for_management_path("/api/v1/management/report-forward/summary"),
+            None
+        );
+    }
 }

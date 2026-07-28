@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { getMenuKeysForUserRole, menuPermissions } from "./rbac.ts";
+import {
+  getDefaultAdminPath,
+  getMenuKeysForUserRole,
+  menuPermissions,
+} from "./rbac.ts";
 
 test("admin default menus include every configured menu permission", () => {
   const adminKeys = new Set(getMenuKeysForUserRole("admin"));
@@ -27,4 +31,9 @@ test("custom roles receive their configured menus", () => {
     ]),
     ["projects", "data_reporting"]
   );
+});
+
+test("report-only roles land directly in the data reporting center", () => {
+  assert.equal(getDefaultAdminPath(["data_reporting"]), "/app/admin/data-reporting");
+  assert.equal(getDefaultAdminPath([]), "/app/admin");
 });

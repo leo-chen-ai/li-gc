@@ -257,7 +257,7 @@ async fn enqueue_bootstrap_events(
                   SELECT 1
                   FROM construction_attendance_record_photos photo
                   WHERE photo.attendance_record_id = record.id
-                    AND photo.source = 'mqtt_rec_push'
+                    AND photo.source IN ('mqtt_rec_push', 'device_vendor_b_photo')
                     AND BTRIM(photo.photo_data) <> ''
               )
             ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING

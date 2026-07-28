@@ -15,7 +15,7 @@ function UserDashboard() {
     useEffect(() => {
         if (!user) return;
         navigate({
-            to: user.role === "admin" ? readStoredAdminActivePath() : "/app/admin/projects",
+            to: user.role === "admin" ? readStoredAdminActivePath() : "/app/admin",
             replace: true,
         });
     }, [navigate, user]);

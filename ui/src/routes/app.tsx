@@ -38,7 +38,7 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
             if (user?.role === "admin") {
                 navigate({ to: readStoredAdminActivePath(), replace: true });
             } else {
-                navigate({ to: "/app/admin/projects", replace: true });
+                navigate({ to: "/app/admin", replace: true });
             }
             return;
         }

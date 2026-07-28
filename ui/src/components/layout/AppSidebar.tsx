@@ -47,6 +47,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import {
+  getDefaultAdminPath,
   getMenuKeysForUserRole,
   type MenuPermissionKey,
 } from "@/features/admin/data/rbac";
@@ -168,6 +169,7 @@ export function AppSidebar() {
       items: section.items.filter((item) => (item.enabled ?? isAdmin) && allowedMenus.has(item.key)),
     }))
     .filter((section) => section.items.length > 0);
+  const homePath = getDefaultAdminPath(allowedMenus);
 
   return (
     <Sidebar collapsible="none" className="border-r bg-sidebar/95">
@@ -176,7 +178,7 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <div className="flex items-center justify-between">
               <SidebarMenuButton size="lg" asChild>
-                <Link to={isAdmin ? "/app/admin" : "/app/admin/projects"}>
+                <Link to={homePath}>
                   <div className="flex aspect-square size-8 items-center justify-center rounded-md bg-[#0f6b5d] text-sm font-semibold text-white">
                     山
                   </div>

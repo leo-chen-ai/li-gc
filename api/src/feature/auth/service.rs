@@ -126,7 +126,10 @@ impl AuthService {
         let refresh_cookie = create_refresh_cookie(&tokens.refresh_token, &self.config);
 
         let username = user.username.clone();
-        let role = user.role().to_string();
+        // Keep the configured role code in the API response. Custom roles use the
+        // base `user` identity in JWT claims, but the UI needs the original code
+        // to load its menu permissions.
+        let role = user.role.clone();
 
         let response = AuthResponse {
             user: UserResponse {
@@ -239,7 +242,7 @@ impl AuthService {
         let refresh_cookie = create_refresh_cookie(&tokens.refresh_token, &self.config);
 
         let username = user.username.clone();
-        let role = user.role().to_string();
+        let role = user.role.clone();
 
         let response = AuthResponse {
             user: UserResponse {
@@ -328,7 +331,7 @@ impl AuthService {
             .map_err(|_| AuthError::RedisUnavailable)?;
 
         let username = user.username.clone();
-        let role = user.role().to_string();
+        let role = user.role.clone();
 
         Ok(AuthResponse {
             user: UserResponse {
@@ -397,7 +400,7 @@ impl AuthService {
 
         let refresh_cookie = create_refresh_cookie(&tokens.refresh_token, &self.config);
         let username = user.username.clone();
-        let role = user.role().to_string();
+        let role = user.role.clone();
 
         Ok((
             AuthResponse {
@@ -466,7 +469,7 @@ impl AuthService {
                 .flatten();
 
             let username = user.username.clone();
-            let role = user.role().to_string();
+            let role = user.role.clone();
 
             let response = AuthResponse {
                 user: UserResponse {
@@ -528,7 +531,7 @@ impl AuthService {
                 .flatten();
 
             let username = user.username.clone();
-            let role = user.role().to_string();
+            let role = user.role.clone();
 
             let response = AuthResponse {
                 user: UserResponse {
@@ -597,7 +600,7 @@ impl AuthService {
         let refresh_cookie = create_refresh_cookie(&tokens.refresh_token, &self.config);
 
         let username = user.username.clone();
-        let role = user.role().to_string();
+        let role = user.role.clone();
 
         let response = AuthResponse {
             user: UserResponse {

@@ -358,6 +358,13 @@ export function getMenuKeysForUserRole(
   ];
 }
 
+export function getDefaultAdminPath(menuKeys: Iterable<MenuPermissionKey>): string {
+  const allowedMenus = new Set(menuKeys);
+  return (
+    menuPermissions.find((menu) => allowedMenus.has(menu.key))?.path ?? "/app/admin"
+  );
+}
+
 function isMenuPermissionKey(key: string): key is MenuPermissionKey {
   return menuPermissions.some((menu) => menu.key === key);
 }

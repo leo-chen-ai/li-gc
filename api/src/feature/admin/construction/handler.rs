@@ -6408,15 +6408,7 @@ async fn trigger_worker_device_issue(
     action: &str,
     remark: &str,
 ) {
-    let Some(broker_url) = state.config.mqtt_broker_url.clone() else {
-        tracing::warn!(
-            %project_id,
-            %worker_id,
-            %action,
-            "MQTT_BROKER_URL 未配置，跳过考勤机人员同步"
-        );
-        return;
-    };
+    let broker_url = state.config.mqtt_broker_url.as_deref();
 
     let device_ids = match list_project_attendance_device_ids(state.db.pool(), project_id).await {
         Ok(device_ids) => device_ids,
@@ -6435,7 +6427,7 @@ async fn trigger_worker_device_issue(
     for device_id in device_ids {
         if let Err(error) = issue_single_worker_via_broker(
             state.db.pool(),
-            &broker_url,
+            broker_url,
             project_id,
             worker_id,
             device_id,
@@ -7050,11 +7042,7 @@ pub async fn create_attendance_device_issue_report(
     Extension(auth_user): Extension<AuthUser>,
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
-    let broker_url = state
-        .config
-        .mqtt_broker_url
-        .clone()
-        .ok_or_else(|| invalid_input("MQTT_BROKER_URL 未配置，无法下发人员"))?;
+    let broker_url = state.config.mqtt_broker_url.as_deref();
     let project_id = required_uuid_field(&body, "project_id")?;
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     let worker_id = required_uuid_field(&body, "worker_id")?;
@@ -7069,7 +7057,7 @@ pub async fn create_attendance_device_issue_report(
 
     let report_id = issue_single_worker_via_broker(
         state.db.pool(),
-        &broker_url,
+        broker_url,
         project_id,
         worker_id,
         attendance_device_id,
@@ -7094,11 +7082,7 @@ pub async fn issue_attendance_device_workers(
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
-    let broker_url = state
-        .config
-        .mqtt_broker_url
-        .clone()
-        .ok_or_else(|| invalid_input("MQTT_BROKER_URL 未配置，无法下发人员"))?;
+    let broker_url = state.config.mqtt_broker_url.as_deref();
     let action = issue_action_from_body(&body, "update")?;
     let remark = body
         .get("remark")
@@ -7107,7 +7091,7 @@ pub async fn issue_attendance_device_workers(
 
     let summary = issue_device_workers_via_broker(
         state.db.pool(),
-        &broker_url,
+        broker_url,
         project_id,
         device_id,
         &action,

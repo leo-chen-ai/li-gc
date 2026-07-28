@@ -13,7 +13,11 @@ import {
 import { AppSidebar } from "@/components/layout/AppSidebar";
 import { AdminWindowTabs } from "@/components/layout/AdminWindowTabs";
 import { useAuthUser } from "@/stores/use-auth-store";
-import { getMenuKeysForUserRole, type MenuPermissionKey } from "@/features/admin/data/rbac";
+import {
+  getDefaultAdminPath,
+  getMenuKeysForUserRole,
+  type MenuPermissionKey,
+} from "@/features/admin/data/rbac";
 import { useCurrentRolePermissions } from "@/features/admin/hooks/use-roles";
 import { HeaderUserMenu } from "@/components/layout/HeaderUserMenu";
 import {
@@ -79,6 +83,10 @@ function AdminContent() {
   const canUseScopedPage = Boolean(
     currentScopedPage && allowedMenus.has(currentScopedPage.menuKey)
   );
+  const firstAllowedScopedPage = scopedUserPages.find(({ menuKey }) =>
+    allowedMenus.has(menuKey)
+  );
+  const defaultAdminPath = getDefaultAdminPath(allowedMenus);
 
   // Note: Authenticated guard is handled by app.tsx 
 
@@ -96,8 +104,16 @@ function AdminContent() {
   }
 
   if (user?.role !== "admin" && !canUseScopedPage) {
-    navigate({ to: "/app" });
-    return null;
+    if (firstAllowedScopedPage) {
+      navigate({ to: firstAllowedScopedPage.path });
+      return null;
+    }
+
+    return (
+      <div className="flex min-h-screen items-center justify-center p-6 text-sm text-muted-foreground">
+        当前角色尚未配置可访问的菜单，请联系管理员。
+      </div>
+    );
   }
 
   return (
@@ -182,7 +198,7 @@ function AdminContent() {
             <HeaderUserMenu />
           </div>
         </header>
-        <AdminWindowTabs />
+        <AdminWindowTabs fallbackPath={defaultAdminPath} />
 
         {/* Page Content */}
         <main className="admin-surface min-w-0 flex-1 overflow-x-hidden bg-muted/20 p-3 md:p-4">

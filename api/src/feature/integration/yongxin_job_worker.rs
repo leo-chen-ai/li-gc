@@ -557,7 +557,7 @@ async fn execute_attendance_sync(
             SELECT p.photo_data
             FROM construction_attendance_record_photos p
             WHERE p.attendance_record_id = record.id
-              AND p.source = 'mqtt_rec_push'
+              AND p.source IN ('mqtt_rec_push', 'device_vendor_b_photo')
               AND BTRIM(p.photo_data) <> ''
             ORDER BY CASE p.photo_kind WHEN 'closeup' THEN 0 ELSE 1 END, p.created_at
             LIMIT 1

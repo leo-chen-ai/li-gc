@@ -145,10 +145,7 @@ async fn test_admin_can_create_role_and_update_menu_permissions() {
     .await;
 
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(
-        body["data"]["menu_keys"],
-        json!(["projects", "users", "uploads"])
-    );
+    assert_eq!(body["data"]["menu_keys"], json!(["users", "uploads"]));
 }
 
 #[tokio::test]
@@ -183,7 +180,6 @@ async fn test_admin_update_role_menus_ignores_stale_menu_keys() {
     assert_eq!(
         body["data"]["menu_keys"],
         json!([
-            "projects",
             "users",
             "attendance_devices",
             "attendance_device_issue_reports",
