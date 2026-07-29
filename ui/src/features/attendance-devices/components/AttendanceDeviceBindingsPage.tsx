@@ -62,6 +62,8 @@ const deviceTypeOptions = [
   { label: "B厂家", value: "B厂家" },
 ] as const;
 const HEARTBEAT_ONLINE_WINDOW_MS = 3 * 60 * 1000;
+const B_VENDOR_ONLINE_WINDOW_MS = 15 * 60 * 1000;
+const B_VENDOR_DEVICE_TYPE = "B厂家";
 
 type DeviceFormState = {
   project_id: string;
@@ -183,7 +185,9 @@ export function AttendanceDeviceBindingsPage() {
       } else {
         const createdDevice = await createDevice.mutateAsync(payload);
         setSelectedProjectId(form.project_id);
-        if (isDeviceOnline(createdDevice)) {
+        if (isBVendorDevice(createdDevice)) {
+          toast.success("考勤机绑定已新增，设备将通过 /workers 主动拉取人员");
+        } else if (isDeviceOnline(createdDevice)) {
           setIssuingDeviceId(createdDevice.id);
           try {
             const summary = await issueWorkers.mutateAsync({
@@ -276,7 +280,7 @@ export function AttendanceDeviceBindingsPage() {
 
           <div className="grid gap-2 sm:grid-cols-5">
             <CompactStat label="绑定设备" value={total} helper={currentProject?.name || "请选择项目"} />
-            <CompactStat label="本页在线" value={onlineCount} helper="收到心跳" accent="teal" />
+            <CompactStat label="本页在线" value={onlineCount} helper="最近有心跳或通信" accent="teal" />
             <CompactStat label="本页进场" value={inboundCount} helper="方向为进场" accent="teal" />
             <CompactStat label="本页出场" value={outboundCount} helper="方向为出场" accent="amber" />
             <CompactStat label="本页通用" value={genericCount} helper="方向为通用" accent="blue" />
@@ -400,59 +404,63 @@ export function AttendanceDeviceBindingsPage() {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex flex-wrap justify-end gap-1">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        title={isDeviceOnline(device) ? "重新下发本项目人员" : "设备在线后可下发"}
-                        disabled={!isDeviceOnline(device) || issuingDeviceId === device.id || clearingDeviceId === device.id}
-                        className="gap-1 text-[#0f6b5d] hover:bg-emerald-50 hover:text-[#0b5148] disabled:text-slate-400 dark:text-primary dark:hover:bg-emerald-950/30"
-                        onClick={() => handleIssueDevice(device)}
-                      >
-                        {issuingDeviceId === device.id ? (
-                          <Loader2 className="size-4 animate-spin" />
-                        ) : (
-                          <Send className="size-4" />
-                        )}
-                        下发
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        title={isDeviceOnline(device) ? "清空该考勤机上的人员" : "设备在线后可清空人员"}
-                        disabled={!isDeviceOnline(device) || issuingDeviceId === device.id || clearingDeviceId === device.id}
-                        className="gap-1 text-amber-700 hover:bg-amber-50 hover:text-amber-800 disabled:text-slate-400 dark:text-amber-300 dark:hover:bg-amber-950/30"
-                        onClick={() => setDevicePendingClear(device)}
-                      >
-                        {clearingDeviceId === device.id ? (
-                          <Loader2 className="size-4 animate-spin" />
-                        ) : (
-                          <UserX className="size-4" />
-                        )}
-                        清空人员
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        asChild
-                        className="gap-1 text-blue-700 hover:bg-blue-50 hover:text-blue-800 dark:text-blue-300 dark:hover:bg-blue-950/30"
-                      >
-                        <Link
-                          to="/app/admin/attendance-device-issue-reports"
-                          search={{
-                            project_id: device.project_id,
-                            attendance_device_id: device.id,
-                            device_name: device.device_name || undefined,
-                            serial_number: device.serial_number || undefined,
-                            include_delete_actions: "1",
-                          }}
-                        >
-                          <FileClock className="size-4" />
-                          下发报告
-                        </Link>
-                      </Button>
+                      {!isBVendorDevice(device) ? (
+                        <>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            title={isDeviceOnline(device) ? "重新下发本项目人员" : "设备在线后可下发"}
+                            disabled={!isDeviceOnline(device) || issuingDeviceId === device.id || clearingDeviceId === device.id}
+                            className="gap-1 text-[#0f6b5d] hover:bg-emerald-50 hover:text-[#0b5148] disabled:text-slate-400 dark:text-primary dark:hover:bg-emerald-950/30"
+                            onClick={() => handleIssueDevice(device)}
+                          >
+                            {issuingDeviceId === device.id ? (
+                              <Loader2 className="size-4 animate-spin" />
+                            ) : (
+                              <Send className="size-4" />
+                            )}
+                            下发
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            title={isDeviceOnline(device) ? "清空该考勤机上的人员" : "设备在线后可清空人员"}
+                            disabled={!isDeviceOnline(device) || issuingDeviceId === device.id || clearingDeviceId === device.id}
+                            className="gap-1 text-amber-700 hover:bg-amber-50 hover:text-amber-800 disabled:text-slate-400 dark:text-amber-300 dark:hover:bg-amber-950/30"
+                            onClick={() => setDevicePendingClear(device)}
+                          >
+                            {clearingDeviceId === device.id ? (
+                              <Loader2 className="size-4 animate-spin" />
+                            ) : (
+                              <UserX className="size-4" />
+                            )}
+                            清空人员
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            asChild
+                            className="gap-1 text-blue-700 hover:bg-blue-50 hover:text-blue-800 dark:text-blue-300 dark:hover:bg-blue-950/30"
+                          >
+                            <Link
+                              to="/app/admin/attendance-device-issue-reports"
+                              search={{
+                                project_id: device.project_id,
+                                attendance_device_id: device.id,
+                                device_name: device.device_name || undefined,
+                                serial_number: device.serial_number || undefined,
+                                include_delete_actions: "1",
+                              }}
+                            >
+                              <FileClock className="size-4" />
+                              下发报告
+                            </Link>
+                          </Button>
+                        </>
+                      ) : null}
                       <Button
                         type="button"
                         variant="ghost"
@@ -752,7 +760,18 @@ function DirectionBadge({ value }: { value: number }) {
 
 function DeviceStatusBadge({ device }: { device: ConstructionAttendanceDevice }) {
   const online = isDeviceOnline(device);
-  const heartbeatText = device.last_heartbeat_at ? `心跳 ${formatDateTime(device.last_heartbeat_at)}` : "暂无心跳";
+  const isBVendor = device.device_type === B_VENDOR_DEVICE_TYPE;
+  const activityAt = isBVendor ? device.last_seen_at : device.last_heartbeat_at;
+  const activityText = activityAt
+    ? `${isBVendor ? "通信" : "心跳"} ${formatDateTime(activityAt)}`
+    : isBVendor
+      ? "暂无通信"
+      : "暂无心跳";
+  const statusText = online
+    ? "在线"
+    : activityAt || device.online_status === "offline"
+      ? "离线"
+      : "未连接";
 
   return (
     <div className="space-y-1">
@@ -764,14 +783,20 @@ function DeviceStatusBadge({ device }: { device: ConstructionAttendanceDevice })
             : "rounded-md border-slate-200 bg-slate-50 text-slate-600 dark:border-border dark:bg-muted/30 dark:text-muted-foreground"
         }
       >
-        {online ? "在线" : device.online_status === "offline" ? "离线" : "未连接"}
+        {statusText}
       </Badge>
-      <div className="max-w-[180px] truncate text-xs text-slate-500 dark:text-muted-foreground">{heartbeatText}</div>
+      <div className="max-w-[180px] truncate text-xs text-slate-500 dark:text-muted-foreground">{activityText}</div>
     </div>
   );
 }
 
 function isDeviceOnline(device: ConstructionAttendanceDevice) {
+  if (isBVendorDevice(device)) {
+    if (!device.last_seen_at) return false;
+    const lastSeenAt = new Date(device.last_seen_at).getTime();
+    return !Number.isNaN(lastSeenAt) && Date.now() - lastSeenAt <= B_VENDOR_ONLINE_WINDOW_MS;
+  }
+
   if (device.online_status === "offline") return false;
   if (!device.last_heartbeat_at) return device.online_status === "online";
 
@@ -779,6 +804,10 @@ function isDeviceOnline(device: ConstructionAttendanceDevice) {
   if (Number.isNaN(heartbeatAt)) return device.online_status === "online";
 
   return Date.now() - heartbeatAt <= HEARTBEAT_ONLINE_WINDOW_MS;
+}
+
+function isBVendorDevice(device: ConstructionAttendanceDevice) {
+  return device.device_type === B_VENDOR_DEVICE_TYPE;
 }
 
 function formatIssueSummary(prefix: string, summary: ConstructionAttendanceDeviceIssueWorkersSummary) {

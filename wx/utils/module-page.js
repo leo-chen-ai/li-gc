@@ -23,6 +23,8 @@ const resourceByModule = {
 };
 
 const HEARTBEAT_ONLINE_WINDOW_MS = 3 * 60 * 1000;
+const B_VENDOR_ONLINE_WINDOW_MS = 15 * 60 * 1000;
+const B_VENDOR_DEVICE_TYPE = "B厂家";
 const LIST_PAGE_SIZE = 10;
 
 const moduleConfigs = {
@@ -494,6 +496,12 @@ function getTeamStatus(record) {
 }
 
 function isDeviceOnline(record) {
+  if (record.device_type === B_VENDOR_DEVICE_TYPE) {
+    if (!record.last_seen_at) return false;
+    const lastSeenAt = new Date(record.last_seen_at).getTime();
+    return !Number.isNaN(lastSeenAt) && Date.now() - lastSeenAt <= B_VENDOR_ONLINE_WINDOW_MS;
+  }
+
   if (record.online_status === "offline") return false;
   if (!record.last_heartbeat_at) return record.online_status === "online";
 
@@ -505,7 +513,10 @@ function isDeviceOnline(record) {
 
 function getDeviceStatusKey(record) {
   if (isDeviceOnline(record)) return "online";
-  return record.online_status === "offline" ? "offline" : "unknown";
+  const activityAt = record.device_type === B_VENDOR_DEVICE_TYPE
+    ? record.last_seen_at
+    : record.last_heartbeat_at;
+  return activityAt || record.online_status === "offline" ? "offline" : "unknown";
 }
 
 function getDeviceStatusLabel(record) {
@@ -557,6 +568,8 @@ function buildRecordView(moduleKey, record, lookups = {}) {
     };
   }
   const status = getDeviceStatusLabel(record);
+  const isBVendor = record.device_type === B_VENDOR_DEVICE_TYPE;
+  const activityAt = isBVendor ? record.last_seen_at : record.last_heartbeat_at;
   return {
     _title: record.device_name || "未命名设备",
     _subtitle: `${record.device_type || "A厂家"} / ${record.serial_number || "未填序列号"}`,
@@ -564,13 +577,13 @@ function buildRecordView(moduleKey, record, lookups = {}) {
     _statusTone: toneFromStatus(status),
     _details: details([
       ["当前状态", status],
-      ["最近心跳", formatDateTime(record.last_heartbeat_at)],
+      [isBVendor ? "最近通信" : "最近心跳", formatDateTime(activityAt)],
       ["进出方向", optionLabel(fieldSets.devices, "direction", record.direction)],
       ["厂家类型", record.device_type || "A厂家"],
       ["序列号", record.serial_number],
       ["设备名称", record.device_name],
     ]),
-    _note: record.remark || (status === "在线" ? "设备当前在线" : "暂无在线心跳"),
+    _note: record.remark || (status === "在线" ? "设备当前在线" : isBVendor ? "暂无近期通信" : "暂无在线心跳"),
   };
 }
 

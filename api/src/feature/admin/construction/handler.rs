@@ -2953,7 +2953,6 @@ struct TeamPlatformSyncSource {
     project_id: Uuid,
     name: String,
     work_type: Option<i32>,
-    is_manage_team: bool,
     leader_name: String,
     remark: String,
     company_credit_code: String,
@@ -2972,7 +2971,6 @@ pub(crate) async fn sync_new_team_to_ningbo_platforms(
             team.project_id,
             COALESCE(team.name, '') AS name,
             team.work_type,
-            team.is_manage_team,
             COALESCE(team.leader_name, '') AS leader_name,
             COALESCE(team.remark, '') AS remark,
             COALESCE(unit.company_credit_code, '') AS company_credit_code,
@@ -2995,14 +2993,13 @@ pub(crate) async fn sync_new_team_to_ningbo_platforms(
         project_id: row.try_get("project_id").map_err(db_error)?,
         name: row.try_get("name").map_err(db_error)?,
         work_type: row.try_get("work_type").map_err(db_error)?,
-        is_manage_team: row.try_get("is_manage_team").map_err(db_error)?,
         leader_name: row.try_get("leader_name").map_err(db_error)?,
         remark: row.try_get("remark").map_err(db_error)?,
         company_credit_code: row.try_get("company_credit_code").map_err(db_error)?,
         created_at: row.try_get("created_at").map_err(db_error)?,
     };
 
-    if source.is_deleted || source.is_manage_team || source.work_type == Some(1001) {
+    if source.is_deleted {
         return Ok(());
     }
 
@@ -3639,6 +3636,7 @@ fn ningbo_team_type_label(work_type: Option<i32>) -> String {
         Some(37) => "金属工",
         Some(38) => "杂工",
         Some(900) => "其它",
+        Some(1001) => "管理人员",
         _ => "",
     }
     .to_owned()
@@ -3760,8 +3758,6 @@ pub async fn repair_team_reporting(
         ) latest_job ON TRUE
         WHERE team.project_id = $1
           AND team.is_deleted = FALSE
-          AND team.is_manage_team = FALSE
-          AND COALESCE(team.work_type, 0) <> 1001
           AND (
               latest_job.status IS NULL
               OR latest_job.status NOT IN ('success', 'completed')
@@ -3912,15 +3908,60 @@ pub async fn update_team(
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+    let before_platform_fields =
+        fetch_team_platform_fields(state.db.pool(), project_id, team_id).await?;
     let body = normalize_team_update_type(state.db.pool(), project_id, team_id, body).await?;
-    update_row(
+    let response = update_row(
         state.db.pool(),
         "construction_teams",
         TEAM_COLUMNS,
         &body,
         &[("project_id", project_id), ("id", team_id)],
     )
+    .await?;
+
+    let after_platform_fields =
+        fetch_team_platform_fields(state.db.pool(), project_id, team_id).await?;
+    if platform_fields_changed(&before_platform_fields, &after_platform_fields)
+        && let Err(error) = crate::feature::integration::outbox_worker::enqueue_team_sync(
+            state.db.pool(),
+            project_id,
+            team_id,
+        )
+        .await
+    {
+        tracing::error!(%team_id, %project_id, error = %error, "Failed to enqueue team update");
+    }
+
+    Ok(response)
+}
+
+async fn fetch_team_platform_fields(
+    pool: &sqlx::PgPool,
+    project_id: Uuid,
+    team_id: Uuid,
+) -> Result<Option<Value>, ApiError> {
+    sqlx::query_scalar::<_, Value>(
+        r#"
+        SELECT jsonb_build_object(
+            'unit_id', unit_id,
+            'name', name,
+            'work_type', work_type,
+            'is_manage_team', is_manage_team,
+            'leader_name', leader_name,
+            'remark', remark
+        )
+        FROM construction_teams
+        WHERE is_deleted = FALSE
+          AND project_id = $1
+          AND id = $2
+        "#,
+    )
+    .bind(project_id)
+    .bind(team_id)
+    .fetch_optional(pool)
     .await
+    .map_err(db_error)
 }
 
 struct TeamPlatformExitTarget {
@@ -3984,7 +4025,7 @@ pub(crate) async fn exit_team_from_ningbo_platforms(
 ) -> Result<(), ApiError> {
     let team = sqlx::query(
         r#"
-        SELECT COALESCE(name, '') AS name, is_manage_team, work_type
+        SELECT COALESCE(name, '') AS name
         FROM construction_teams
         WHERE project_id = $1
           AND id = $2
@@ -3997,11 +4038,6 @@ pub(crate) async fn exit_team_from_ningbo_platforms(
     .map_err(db_error)?
     .ok_or_else(not_found)?;
     let team_name: String = team.try_get("name").map_err(db_error)?;
-    let is_manage_team: bool = team.try_get("is_manage_team").map_err(db_error)?;
-    let work_type: Option<i32> = team.try_get("work_type").map_err(db_error)?;
-    if is_manage_team || work_type == Some(1001) {
-        return Ok(());
-    }
 
     let target_rows = sqlx::query(
         r#"
@@ -6269,6 +6305,8 @@ pub async fn update_worker(
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+    let before_platform_fields =
+        fetch_worker_platform_fields(state.db.pool(), project_id, worker_id).await?;
     let before_issue_fields =
         fetch_worker_issue_fields(state.db.pool(), project_id, worker_id).await?;
     let body = normalize_worker_body(body, false)?;
@@ -6281,13 +6319,16 @@ pub async fn update_worker(
     )
     .await?;
 
-    if let Err(error) = crate::feature::integration::outbox_worker::enqueue_worker_reconcile(
-        state.db.pool(),
-        project_id,
-        worker_id,
-        false,
-    )
-    .await
+    let after_platform_fields =
+        fetch_worker_platform_fields(state.db.pool(), project_id, worker_id).await?;
+    if platform_fields_changed(&before_platform_fields, &after_platform_fields)
+        && let Err(error) = crate::feature::integration::outbox_worker::enqueue_worker_reconcile(
+            state.db.pool(),
+            project_id,
+            worker_id,
+            false,
+        )
+        .await
     {
         tracing::error!(%worker_id, error = %error, "Failed to enqueue Ningbo worker update");
     }
@@ -6295,10 +6336,45 @@ pub async fn update_worker(
     let after_issue_fields =
         fetch_worker_issue_fields(state.db.pool(), project_id, worker_id).await?;
     if let (Some(before), Some(after)) = (before_issue_fields, after_issue_fields) {
-        trigger_worker_reissue_after_change(&state, project_id, worker_id, &before, &after).await;
+        enqueue_worker_reissue_after_change(
+            state.db.pool(),
+            project_id,
+            worker_id,
+            &before,
+            &after,
+        )
+        .await;
     }
 
     Ok(response)
+}
+
+async fn fetch_worker_platform_fields(
+    pool: &sqlx::PgPool,
+    project_id: Uuid,
+    worker_id: Uuid,
+) -> Result<Option<Value>, ApiError> {
+    sqlx::query_scalar::<_, Value>(
+        r#"
+        SELECT to_jsonb(worker) - ARRAY[
+            'id', 'owner_user_id', 'is_deleted', 'project_id',
+            'created_at', 'updated_at', 'deleted_at'
+        ]::text[]
+        FROM construction_workers worker
+        WHERE worker.is_deleted = FALSE
+          AND worker.project_id = $1
+          AND worker.id = $2
+        "#,
+    )
+    .bind(project_id)
+    .bind(worker_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(db_error)
+}
+
+fn platform_fields_changed(before: &Option<Value>, after: &Option<Value>) -> bool {
+    matches!((before, after), (Some(before), Some(after)) if before != after)
 }
 
 #[derive(Debug, Clone)]
@@ -6376,8 +6452,8 @@ async fn fetch_worker_issue_fields(
     })
 }
 
-async fn trigger_worker_reissue_after_change(
-    state: &AppState,
+async fn enqueue_worker_reissue_after_change(
+    pool: &sqlx::PgPool,
     project_id: Uuid,
     worker_id: Uuid,
     before: &WorkerIssueFields,
@@ -6387,15 +6463,36 @@ async fn trigger_worker_reissue_after_change(
         return;
     };
 
+    if let Err(error) = crate::feature::integration::outbox_worker::enqueue_worker_device_reconcile(
+        pool, project_id, worker_id, action,
+    )
+    .await
+    {
+        tracing::error!(
+            %project_id,
+            %worker_id,
+            %action,
+            error = %error,
+            "Failed to enqueue attendance device worker update"
+        );
+    }
+}
+
+pub(crate) async fn reconcile_worker_to_attendance_devices(
+    state: &AppState,
+    project_id: Uuid,
+    worker_id: Uuid,
+    action: &str,
+) {
     trigger_worker_device_issue(
         state,
         project_id,
         worker_id,
         action,
         if action == "delete" {
-            "人员退场后自动从考勤机删除"
+            "人员退场后异步从考勤机删除"
         } else {
-            "人员资料修改后自动下发"
+            "人员资料修改后异步下发"
         },
     )
     .await;
@@ -6461,6 +6558,7 @@ async fn list_project_attendance_device_ids(
           AND project_id = $1
           AND serial_number IS NOT NULL
           AND BTRIM(serial_number) <> ''
+          AND COALESCE(device_type, '') <> 'B厂家'
         ORDER BY created_at ASC
         "#,
     )
@@ -11075,14 +11173,12 @@ async fn list_team_rows_page(
                             'platform_type', config.platform_type,
                             'is_enabled', config.is_enabled,
                             'status', CASE
-                                WHEN r.is_manage_team OR r.work_type = 1001 THEN 'ignored'
                                 WHEN latest_job.id IS NULL THEN 'not_reported'
                                 WHEN latest_job.status IN ('success', 'completed') THEN 'success'
                                 WHEN latest_job.status IN ('pending', 'processing', 'retry', 'awaiting_result', 'waiting_dependency', 'waiting_media') THEN 'pending'
                                 ELSE 'failed'
                             END,
                             'failure_reason', CASE
-                                WHEN r.is_manage_team OR r.work_type = 1001 THEN NULL
                                 WHEN latest_job.id IS NOT NULL
                                      AND latest_job.status NOT IN ('success', 'completed', 'pending', 'processing', 'retry', 'awaiting_result', 'waiting_dependency', 'waiting_media')
                                     THEN COALESCE(
@@ -11093,7 +11189,7 @@ async fn list_team_rows_page(
                                     )
                                 ELSE NULL
                             END,
-                            'reported_at', CASE WHEN r.is_manage_team OR r.work_type = 1001 THEN NULL ELSE latest_job.updated_at END
+                            'reported_at', latest_job.updated_at
                         )
                         ORDER BY config.created_at, config.platform_name
                     )
@@ -11160,7 +11256,6 @@ async fn team_reporting_summary(pool: &sqlx::PgPool, project_id: Uuid) -> Result
                 config.created_at AS platform_created_at,
                 team.id AS team_id,
                 CASE
-                    WHEN team.is_manage_team OR team.work_type = 1001 THEN 'ignored'
                     WHEN team.id IS NULL OR latest_job.id IS NULL THEN 'not_reported'
                     WHEN latest_job.status IN ('success', 'completed') THEN 'success'
                     WHEN latest_job.status IN ('pending', 'processing', 'retry', 'awaiting_result', 'waiting_dependency', 'waiting_media') THEN 'pending'
@@ -11949,6 +12044,7 @@ mod tests {
             (34, "古建筑传统彩画工"),
             (38, "杂工"),
             (900, "其它"),
+            (1001, "管理人员"),
         ];
         for (work_type, platform_name) in expected {
             assert_eq!(ningbo_team_type_label(Some(work_type)), platform_name);
@@ -12111,6 +12207,17 @@ mod tests {
             left_site.issue_action_after_change(&changed),
             Some("update")
         );
+    }
+
+    #[test]
+    fn platform_sync_requires_a_real_before_after_change() {
+        let before = Some(serde_json::json!({ "name": "张三", "work_type": 2 }));
+        let same = Some(serde_json::json!({ "work_type": 2, "name": "张三" }));
+        let changed = Some(serde_json::json!({ "name": "张三", "work_type": 3 }));
+
+        assert!(!platform_fields_changed(&before, &same));
+        assert!(platform_fields_changed(&before, &changed));
+        assert!(!platform_fields_changed(&None, &changed));
     }
 
     #[test]

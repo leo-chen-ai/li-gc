@@ -610,6 +610,7 @@ export function useProjectAttendanceDevicesQuery(projectId: string, filters?: Co
     queryKey: constructionProjectKeys.attendanceDevices(projectId, filters),
     queryFn: () => constructionProjectService.listAttendanceDevices(projectId, filters),
     enabled: canQueryProject(projectId),
+    refetchInterval: 30_000,
   });
 }
 

@@ -11,16 +11,28 @@ use super::publisher::publish_json;
 // 厂家协议 personType: 0=白名单, 1=黑名单。本项目不使用黑名单。
 const FACE_PERSON_TYPE_WHITELIST: i32 = 0;
 const B_VENDOR_DEVICE_TYPE: &str = "B厂家";
-const B_VENDOR_DEFAULT_SUCCESS_MESSAGE: &str =
-    "B厂家由设备主动拉取人员；未收到照片质量失败反馈，按成功显示";
 const MISSING_FACE_PHOTO_MESSAGE: &str = "工人未上传人脸照片，无法下发";
 const FETCH_PROJECT_WORKERS_SQL: &str = r#"
-        SELECT id, name, id_card, phone, avatar, is_deleted, work_status
-        FROM construction_workers
-        WHERE is_deleted = FALSE
-          AND project_id = $1
-          AND COALESCE(work_status, 1) <> 2
-        ORDER BY created_at ASC
+        SELECT worker.id, worker.name, worker.id_card, worker.phone, worker.avatar,
+               worker.is_deleted, worker.work_status,
+               (
+                   SELECT identity.external_person_id
+                   FROM integration_person_identities identity
+                   JOIN integration_platforms platform
+                     ON platform.id = identity.platform_id
+                    AND platform.is_deleted = FALSE
+                    AND platform.code = 'ningbo_housing'
+                   WHERE identity.is_deleted = FALSE
+                     AND identity.identity_type = 'id_card'
+                     AND identity.identity_value = UPPER(BTRIM(worker.id_card))
+                   ORDER BY identity.updated_at DESC
+                   LIMIT 1
+               ) AS native
+        FROM construction_workers worker
+        WHERE worker.is_deleted = FALSE
+          AND worker.project_id = $1
+          AND COALESCE(worker.work_status, 1) <> 2
+        ORDER BY worker.created_at ASC
         "#;
 
 #[derive(Debug, Clone)]
@@ -32,6 +44,7 @@ struct IssueWorkerSnapshot {
     avatar: Option<String>,
     is_deleted: bool,
     work_status: Option<i16>,
+    native: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -69,10 +82,7 @@ pub async fn issue_single_worker_via_broker(
     let worker = fetch_issue_worker(pool, project_id, worker_id).await?;
     let device = fetch_issue_device(pool, project_id, attendance_device_id).await?;
     if is_b_vendor_device(&device) {
-        return insert_b_vendor_success_report(
-            pool, project_id, &worker, &device, action, issued_at, remark,
-        )
-        .await;
+        return Err("B厂家设备由设备主动调用/workers拉取人员，不支持服务端下发".to_string());
     }
     if let Some(error) = issue_preflight_error(action, &worker) {
         insert_failed_issue_report(pool, project_id, &worker, &device, action, error, remark)
@@ -103,15 +113,13 @@ pub async fn issue_device_workers_via_broker(
     require_online: bool,
 ) -> Result<IssueWorkersSummary, String> {
     let device = fetch_issue_device(pool, project_id, attendance_device_id).await?;
-    let is_b_vendor = is_b_vendor_device(&device);
-    if require_online && !is_b_vendor && !is_device_online(&device) {
+    if is_b_vendor_device(&device) {
+        return Err("B厂家设备由设备主动调用/workers拉取人员，不支持服务端下发".to_string());
+    }
+    if require_online && !is_device_online(&device) {
         return Err("设备未在线，暂不能下发人员".to_string());
     }
-    let mqtt_broker_url = if is_b_vendor {
-        None
-    } else {
-        Some(require_mqtt_broker_url(broker_url)?)
-    };
+    let mqtt_broker_url = require_mqtt_broker_url(broker_url)?;
 
     let workers = if action == "delete" {
         fetch_device_clear_workers(pool, project_id, attendance_device_id).await?
@@ -124,15 +132,6 @@ pub async fn issue_device_workers_via_broker(
     let mut failed = 0usize;
 
     for worker in workers {
-        if is_b_vendor {
-            insert_b_vendor_success_report(
-                pool, project_id, &worker, &device, action, None, remark,
-            )
-            .await?;
-            queued += 1;
-            continue;
-        }
-
         if should_skip_worker_without_photo(action, &worker) {
             skipped_without_photo += 1;
             insert_failed_issue_report(
@@ -150,7 +149,7 @@ pub async fn issue_device_workers_via_broker(
 
         match issue_worker_snapshot_via_broker(
             pool,
-            mqtt_broker_url.expect("A厂家批量下发已经校验MQTT配置"),
+            mqtt_broker_url,
             project_id,
             &worker,
             &device,
@@ -268,7 +267,9 @@ async fn issue_worker_snapshot_via_broker(
     issued_at: Option<DateTime<Utc>>,
     remark: Option<&str>,
 ) -> Result<Uuid, String> {
-    ensure_worker_can_be_issued(worker)?;
+    if action != "delete" {
+        ensure_worker_can_be_issued(worker)?;
+    }
     let (message_id, topic, request_payload, operator) =
         build_issue_mqtt_payload(action, worker, device)?;
     let report_id = insert_attendance_device_issue_report(
@@ -320,7 +321,9 @@ async fn issue_worker_snapshot_via_client(
     action: &str,
     remark: Option<&str>,
 ) -> Result<Uuid, String> {
-    ensure_worker_can_be_issued(worker)?;
+    if action != "delete" {
+        ensure_worker_can_be_issued(worker)?;
+    }
     let (message_id, topic, request_payload, operator) =
         build_issue_mqtt_payload(action, worker, device)?;
     let report_id = insert_attendance_device_issue_report(
@@ -386,13 +389,28 @@ async fn fetch_issue_worker(
             Option<String>,
             bool,
             Option<i16>,
+            Option<String>,
         ),
     >(
         r#"
-        SELECT id, name, id_card, phone, avatar, is_deleted, work_status
-        FROM construction_workers
-        WHERE project_id = $1
-          AND id = $2
+        SELECT worker.id, worker.name, worker.id_card, worker.phone, worker.avatar,
+               worker.is_deleted, worker.work_status,
+               (
+                   SELECT identity.external_person_id
+                   FROM integration_person_identities identity
+                   JOIN integration_platforms platform
+                     ON platform.id = identity.platform_id
+                    AND platform.is_deleted = FALSE
+                    AND platform.code = 'ningbo_housing'
+                   WHERE identity.is_deleted = FALSE
+                     AND identity.identity_type = 'id_card'
+                     AND identity.identity_value = UPPER(BTRIM(worker.id_card))
+                   ORDER BY identity.updated_at DESC
+                   LIMIT 1
+               ) AS native
+        FROM construction_workers worker
+        WHERE worker.project_id = $1
+          AND worker.id = $2
         "#,
     )
     .bind(project_id)
@@ -401,7 +419,7 @@ async fn fetch_issue_worker(
     .await
     .map_err(|error| error.to_string())?
     .map(
-        |(id, name, id_card, phone, avatar, is_deleted, work_status)| IssueWorkerSnapshot {
+        |(id, name, id_card, phone, avatar, is_deleted, work_status, native)| IssueWorkerSnapshot {
             id,
             name,
             id_card,
@@ -409,13 +427,10 @@ async fn fetch_issue_worker(
             avatar,
             is_deleted,
             work_status,
+            native,
         },
     )
     .ok_or_else(|| "所选工人不属于该项目".to_string())
-    .and_then(|worker| {
-        ensure_worker_can_be_issued(&worker)?;
-        Ok(worker)
-    })
 }
 
 async fn fetch_project_workers(
@@ -432,6 +447,7 @@ async fn fetch_project_workers(
             Option<String>,
             bool,
             Option<i16>,
+            Option<String>,
         ),
     >(FETCH_PROJECT_WORKERS_SQL)
     .bind(project_id)
@@ -441,14 +457,17 @@ async fn fetch_project_workers(
     .map(|rows| {
         rows.into_iter()
             .map(
-                |(id, name, id_card, phone, avatar, is_deleted, work_status)| IssueWorkerSnapshot {
-                    id,
-                    name,
-                    id_card,
-                    phone,
-                    avatar,
-                    is_deleted,
-                    work_status,
+                |(id, name, id_card, phone, avatar, is_deleted, work_status, native)| {
+                    IssueWorkerSnapshot {
+                        id,
+                        name,
+                        id_card,
+                        phone,
+                        avatar,
+                        is_deleted,
+                        work_status,
+                        native,
+                    }
                 },
             )
             .collect()
@@ -526,6 +545,7 @@ async fn fetch_device_clear_workers(
                 avatar,
                 is_deleted,
                 work_status,
+                native: None,
             })
             .collect()
     })
@@ -698,6 +718,10 @@ fn build_issue_mqtt_payload(
             .phone
             .clone()
             .filter(|value| !value.trim().is_empty()),
+        notes: worker
+            .native
+            .clone()
+            .filter(|value| !value.trim().is_empty()),
         photo_uri: Some(avatar),
         photo_base64: None,
         person_type: FACE_PERSON_TYPE_WHITELIST,
@@ -737,6 +761,10 @@ fn should_skip_worker_without_photo(action: &str, worker: &IssueWorkerSnapshot) 
 fn issue_preflight_error(action: &str, worker: &IssueWorkerSnapshot) -> Option<&'static str> {
     if action == "delete" {
         return None;
+    }
+
+    if worker.is_deleted || worker.work_status == Some(2) {
+        return Some("人员已离场或已删除，禁止下发考勤机");
     }
 
     if worker
@@ -808,51 +836,6 @@ async fn insert_attendance_device_issue_report(
     .bind(remark)
     .bind(message_id)
     .bind(request_payload)
-    .fetch_one(pool)
-    .await
-    .map_err(|error| error.to_string())
-}
-
-async fn insert_b_vendor_success_report(
-    pool: &PgPool,
-    project_id: Uuid,
-    worker: &IssueWorkerSnapshot,
-    device: &IssueDeviceSnapshot,
-    action: &str,
-    issued_at: Option<DateTime<Utc>>,
-    remark: Option<&str>,
-) -> Result<Uuid, String> {
-    sqlx::query_scalar::<_, Uuid>(
-        r#"
-        INSERT INTO construction_attendance_device_issue_reports (
-            project_id, worker_id, attendance_device_id,
-            worker_name, worker_id_card, worker_phone, avatar_url,
-            device_name, serial_number, device_type,
-            action, status, issued_at, message, remark, acknowledged_at
-        )
-        VALUES (
-            $1, $2, $3,
-            $4, $5, $6, $7,
-            $8, $9, $10,
-            $11, 'success', COALESCE($12, NOW()), $13, $14, NOW()
-        )
-        RETURNING id
-        "#,
-    )
-    .bind(project_id)
-    .bind(worker.id)
-    .bind(device.id)
-    .bind(&worker.name)
-    .bind(&worker.id_card)
-    .bind(&worker.phone)
-    .bind(&worker.avatar)
-    .bind(&device.device_name)
-    .bind(&device.serial_number)
-    .bind(&device.device_type)
-    .bind(action)
-    .bind(issued_at)
-    .bind(B_VENDOR_DEFAULT_SUCCESS_MESSAGE)
-    .bind(remark)
     .fetch_one(pool)
     .await
     .map_err(|error| error.to_string())
@@ -990,6 +973,7 @@ mod tests {
             avatar: Some("https://example.test/avatar.jpg".to_string()),
             is_deleted: false,
             work_status: Some(1),
+            native: None,
         };
 
         assert_eq!(issue_worker_custom_id(&worker), worker_id.to_string());
@@ -1008,6 +992,7 @@ mod tests {
             avatar: Some("https://example.test/avatar.jpg".to_string()),
             is_deleted: false,
             work_status: Some(1),
+            native: Some("E6F2C98F834949EB88299E9266759343".to_string()),
         };
         let device = IssueDeviceSnapshot {
             id: device_id,
@@ -1025,6 +1010,8 @@ mod tests {
         assert_eq!(operator, "EditPerson");
         assert_eq!(payload["operator"], "EditPerson");
         assert_eq!(payload["info"]["personType"], FACE_PERSON_TYPE_WHITELIST);
+        assert_eq!(payload["info"]["notes"], "E6F2C98F834949EB88299E9266759343");
+        assert!(payload["info"].get("native").is_none());
     }
 
     #[test]
@@ -1040,6 +1027,7 @@ mod tests {
             avatar: None,
             is_deleted: false,
             work_status: Some(1),
+            native: Some("YJM-330200-001".to_string()),
         };
         let device = IssueDeviceSnapshot {
             id: device_id,
@@ -1057,6 +1045,7 @@ mod tests {
         assert_eq!(operator, "DelPerson");
         assert_eq!(payload["operator"], "DelPerson");
         assert_eq!(payload["info"]["customId"], worker_id.to_string());
+        assert!(payload["info"].get("notes").is_none());
         assert!(!should_skip_worker_without_photo("delete", &worker));
         assert!(should_skip_worker_without_photo("update", &worker));
     }
@@ -1074,6 +1063,7 @@ mod tests {
             avatar: None,
             is_deleted: false,
             work_status: Some(1),
+            native: None,
         };
         let device = IssueDeviceSnapshot {
             id: device_id,
@@ -1101,6 +1091,7 @@ mod tests {
             avatar: None,
             is_deleted: false,
             work_status: Some(1),
+            native: None,
         };
 
         assert_eq!(
@@ -1108,11 +1099,23 @@ mod tests {
             Some(MISSING_FACE_PHOTO_MESSAGE)
         );
         assert_eq!(issue_preflight_error("delete", &worker), None);
+
+        let left_site_worker = IssueWorkerSnapshot {
+            work_status: Some(2),
+            avatar: Some("https://example.test/avatar.jpg".to_string()),
+            ..worker
+        };
+        assert_eq!(
+            issue_preflight_error("update", &left_site_worker),
+            Some("人员已离场或已删除，禁止下发考勤机")
+        );
+        assert_eq!(issue_preflight_error("delete", &left_site_worker), None);
     }
 
     #[test]
     fn project_worker_issue_query_excludes_left_site_workers() {
-        assert!(FETCH_PROJECT_WORKERS_SQL.contains("COALESCE(work_status, 1) <> 2"));
+        assert!(FETCH_PROJECT_WORKERS_SQL.contains("COALESCE(worker.work_status, 1) <> 2"));
+        assert!(FETCH_PROJECT_WORKERS_SQL.contains("platform.code = 'ningbo_housing'"));
     }
 
     #[test]

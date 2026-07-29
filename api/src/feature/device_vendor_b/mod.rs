@@ -28,6 +28,8 @@ const QUALITY_EVENT: &str = "quality";
 const PHOTO_SOURCE: &str = "device_vendor_b_photo";
 const QUALITY_SOURCE: &str = "device_vendor_b_quality";
 const QUALITY_REMARK: &str = "B厂家设备拉取人员后的照片质量反馈";
+const WORKERS_PULL_REMARK: &str = "B厂家设备主动拉取人员";
+const WORKERS_PULL_MESSAGE: &str = "B厂家设备已通过/workers拉取人员";
 const PHOTO_JSON_LIMIT_BYTES: usize = 30 * 1024 * 1024;
 const MAX_PHOTO_PIXELS: u64 = 100_000_000;
 
@@ -289,7 +291,7 @@ async fn download_workers(
     let is_incremental = updated_after.is_some();
     let deleted_updated_after = updated_after;
 
-    ensure_b_vendor_device(state.db.pool(), device_id).await?;
+    let device = fetch_b_vendor_device(state.db.pool(), device_id).await?;
 
     let mut rows = sqlx::query_as::<_, WorkerRow>(DOWNLOAD_WORKERS_SQL)
         .bind(B_VENDOR_DEVICE_TYPE)
@@ -311,6 +313,7 @@ async fn download_workers(
         rows.sort_by_key(|row| (row.7, row.0));
     }
 
+    record_b_vendor_worker_downloads(state.db.pool(), &device, &rows).await?;
     let data = rows
         .into_iter()
         .map(|row| worker_from_row(row, is_incremental))
@@ -1154,8 +1157,150 @@ fn parse_update(value: Option<&str>) -> Result<Option<DateTime<Utc>>, VendorErro
         .ok_or_else(|| VendorError::bad_request("update时间戳超出有效范围"))
 }
 
-async fn ensure_b_vendor_device(pool: &PgPool, device_id: &str) -> Result<(), VendorError> {
-    fetch_b_vendor_device(pool, device_id).await.map(|_| ())
+async fn record_b_vendor_worker_downloads(
+    pool: &PgPool,
+    device: &DeviceBinding,
+    rows: &[WorkerRow],
+) -> Result<(), VendorError> {
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| VendorError::internal(error.to_string()))?;
+
+    for row in rows {
+        let worker_exists = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM construction_workers WHERE id = $1)",
+        )
+        .bind(row.0)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|error| VendorError::internal(error.to_string()))?;
+        if !worker_exists {
+            continue;
+        }
+
+        let lock_key = format!("b-workers:{}:{}", device.id, row.0);
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)")
+            .bind(lock_key)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| VendorError::internal(error.to_string()))?;
+
+        let action = if row.5 || row.6 == 2 {
+            "delete"
+        } else {
+            "update"
+        };
+        let existing_report_id = sqlx::query_scalar::<_, Uuid>(
+            r#"
+            SELECT id
+            FROM construction_attendance_device_issue_reports
+            WHERE is_deleted = FALSE
+              AND attendance_device_id = $1
+              AND worker_id = $2
+            ORDER BY issued_at DESC, created_at DESC, id DESC
+            LIMIT 1
+            FOR UPDATE
+            "#,
+        )
+        .bind(device.id)
+        .bind(row.0)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|error| VendorError::internal(error.to_string()))?;
+
+        if let Some(report_id) = existing_report_id {
+            sqlx::query(
+                r#"
+                UPDATE construction_attendance_device_issue_reports
+                SET worker_name = $2,
+                    worker_id_card = $3,
+                    avatar_url = $4,
+                    device_name = $5,
+                    serial_number = $6,
+                    device_type = $7,
+                    action = $8,
+                    status = 'success',
+                    issued_at = NOW(),
+                    message = $9,
+                    remark = $10,
+                    mqtt_message_id = NULL,
+                    request_payload = NULL,
+                    response_payload = NULL,
+                    acknowledged_at = NOW(),
+                    last_error = NULL,
+                    next_retry_at = NULL,
+                    retry_locked_until = NULL,
+                    updated_at = NOW()
+                WHERE id = $1
+                "#,
+            )
+            .bind(report_id)
+            .bind(&row.2)
+            .bind(&row.3)
+            .bind(&row.4)
+            .bind(&device.device_name)
+            .bind(&device.serial_number)
+            .bind(B_VENDOR_DEVICE_TYPE)
+            .bind(action)
+            .bind(WORKERS_PULL_MESSAGE)
+            .bind(WORKERS_PULL_REMARK)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| VendorError::internal(error.to_string()))?;
+        } else {
+            sqlx::query(
+                r#"
+                INSERT INTO construction_attendance_device_issue_reports (
+                    project_id, worker_id, attendance_device_id,
+                    worker_name, worker_id_card, avatar_url,
+                    device_name, serial_number, device_type,
+                    action, status, issued_at, message, remark, acknowledged_at
+                )
+                VALUES (
+                    $1, $2, $3,
+                    $4, $5, $6,
+                    $7, $8, $9,
+                    $10, 'success', NOW(), $11, $12, NOW()
+                )
+                "#,
+            )
+            .bind(device.project_id)
+            .bind(row.0)
+            .bind(device.id)
+            .bind(&row.2)
+            .bind(&row.3)
+            .bind(&row.4)
+            .bind(&device.device_name)
+            .bind(&device.serial_number)
+            .bind(B_VENDOR_DEVICE_TYPE)
+            .bind(action)
+            .bind(WORKERS_PULL_MESSAGE)
+            .bind(WORKERS_PULL_REMARK)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| VendorError::internal(error.to_string()))?;
+        }
+    }
+
+    sqlx::query(
+        r#"
+        UPDATE construction_attendance_devices
+        SET online_status = 'online',
+            last_seen_at = NOW(),
+            last_online_at = NOW(),
+            updated_at = NOW()
+        WHERE id = $1
+        "#,
+    )
+    .bind(device.id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| VendorError::internal(error.to_string()))?;
+    tx.commit()
+        .await
+        .map_err(|error| VendorError::internal(error.to_string()))?;
+    Ok(())
 }
 
 async fn fetch_b_vendor_device(

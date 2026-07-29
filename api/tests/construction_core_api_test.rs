@@ -1347,14 +1347,31 @@ async fn enabled_ningbo_platform_requires_team_type_but_not_team_leader() {
     assert_eq!(body["data"]["is_manage_team"], true);
     let manage_team_id = Uuid::parse_str(body["data"]["id"].as_str().expect("management team id"))
         .expect("valid management team id");
-    let manage_job_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM integration_jobs WHERE local_entity_id = $1 AND platform_code = 'ningbo_housing'",
+    let manage_sync_event_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM integration_outbox_events WHERE aggregate_id = $1 AND event_type = 'ningbo.team.sync' AND status = 'pending'",
     )
     .bind(manage_team_id)
     .fetch_one(&pool)
     .await
-    .expect("count management team jobs");
-    assert_eq!(manage_job_count, 0, "management team must not be reported");
+    .expect("count management team sync events");
+    assert_eq!(
+        manage_sync_event_count, 1,
+        "management team must be queued for municipal platform reporting"
+    );
+
+    let (status, repair_body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/teams/reporting/repair"),
+        &token,
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{repair_body}");
+    assert_eq!(
+        repair_body["data"]["attempted_count"], 2,
+        "repair must include both ordinary and management teams"
+    );
 
     let (status, body) = get_authed(
         app,
@@ -1371,12 +1388,175 @@ async fn enabled_ningbo_platform_requires_team_type_but_not_team_leader() {
         .expect("management team row");
     assert_eq!(
         management_team["reporting_platforms"][0]["status"],
-        "ignored"
+        "not_reported"
     );
     let summary = &body["data"]["reporting_summary"][0];
-    assert_eq!(summary["total_count"], 1);
-    assert_eq!(summary["ignored_count"], 1);
-    assert_eq!(summary["not_reported_count"], 1);
+    assert_eq!(summary["total_count"], 2);
+    assert_eq!(summary["ignored_count"], 0);
+    assert_eq!(summary["not_reported_count"], 2);
+}
+
+#[tokio::test]
+async fn worker_and_team_updates_enqueue_only_the_required_async_targets() {
+    let (app, pool, _container) = build_test_app_with_pool().await;
+    let token = admin_token();
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        "/api/v1/admin/projects",
+        &token,
+        json!({ "name": "异步更新判断项目", "status": 1 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let project_id = body["data"]["id"].as_str().expect("project id");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/units"),
+        &token,
+        json!({
+            "company_name": "异步更新判断单位",
+            "company_credit_code": "91330200ASYNC0001X",
+            "company_type": 1
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let unit_id = body["data"]["id"].as_str().expect("unit id");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/teams"),
+        &token,
+        json!({ "unit_id": unit_id, "name": "异步班组", "work_type": 2 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let team_id =
+        Uuid::parse_str(body["data"]["id"].as_str().expect("team id")).expect("valid team id");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/workers"),
+        &token,
+        json!({
+            "unit_id": unit_id,
+            "team_id": team_id,
+            "id_card": "330283199710280537",
+            "name": "异步工人",
+            "phone": "18069021273",
+            "work_type": 2,
+            "work_status": 1,
+            "avatar": "https://example.test/worker.jpg"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let worker_id =
+        Uuid::parse_str(body["data"]["id"].as_str().expect("worker id")).expect("valid worker id");
+
+    sqlx::query("DELETE FROM integration_outbox_events WHERE aggregate_id IN ($1, $2)")
+        .bind(team_id)
+        .bind(worker_id)
+        .execute(&pool)
+        .await
+        .expect("clear create events");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "PATCH",
+        &format!("/api/v1/admin/projects/{project_id}/workers/{worker_id}"),
+        &token,
+        json!({ "name": "异步工人-修改" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let worker_events = sqlx::query_as::<_, (String, Value)>(
+        r#"
+        SELECT event_type, payload
+        FROM integration_outbox_events
+        WHERE aggregate_id = $1
+        ORDER BY created_at, id
+        "#,
+    )
+    .bind(worker_id)
+    .fetch_all(&pool)
+    .await
+    .expect("worker update events");
+    assert_eq!(worker_events.len(), 3, "{worker_events:?}");
+    assert_eq!(worker_events[0].0, "construction.worker.changed");
+    assert_eq!(worker_events[1].0, "ningbo.worker.reconcile");
+    assert_eq!(worker_events[2].0, "attendance_device.worker.reconcile");
+    assert_eq!(worker_events[2].1["action"], "update");
+
+    sqlx::query("DELETE FROM integration_outbox_events WHERE aggregate_id = $1")
+        .bind(worker_id)
+        .execute(&pool)
+        .await
+        .expect("clear worker update events");
+    let (status, body) = authed_json(
+        app.clone(),
+        "PATCH",
+        &format!("/api/v1/admin/projects/{project_id}/workers/{worker_id}"),
+        &token,
+        json!({ "name": "异步工人-修改" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let unchanged_worker_events: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM integration_outbox_events WHERE aggregate_id = $1",
+    )
+    .bind(worker_id)
+    .fetch_one(&pool)
+    .await
+    .expect("unchanged worker event count");
+    assert_eq!(unchanged_worker_events, 0);
+
+    sqlx::query("DELETE FROM integration_outbox_events WHERE aggregate_id = $1")
+        .bind(team_id)
+        .execute(&pool)
+        .await
+        .expect("clear team create events");
+    let (status, body) = authed_json(
+        app.clone(),
+        "PATCH",
+        &format!("/api/v1/admin/projects/{project_id}/teams/{team_id}"),
+        &token,
+        json!({ "name": "异步班组-修改" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let team_events: Vec<String> = sqlx::query_scalar(
+        r#"
+        SELECT event_type
+        FROM integration_outbox_events
+        WHERE aggregate_id = $1
+        ORDER BY created_at, id
+        "#,
+    )
+    .bind(team_id)
+    .fetch_all(&pool)
+    .await
+    .expect("team update events");
+    assert_eq!(
+        team_events,
+        vec![
+            "construction.team.changed".to_owned(),
+            "ningbo.team.sync".to_owned()
+        ]
+    );
+    assert!(
+        !team_events
+            .iter()
+            .any(|event| event.contains("attendance_device"))
+    );
 }
 
 #[tokio::test]
@@ -1858,7 +2038,10 @@ async fn admin_can_crud_search_paginate_attendance_device_issue_reports() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    assert_eq!(body["message"], "MQTT_BROKER_URL 未配置，无法下发人员");
+    assert_eq!(
+        body["message"],
+        "MQTT_BROKER_URL 未配置，无法向 A 厂家设备下发人员"
+    );
 
     let project_uuid = Uuid::parse_str(project_id).expect("project uuid");
     let worker_uuid = Uuid::parse_str(worker_id).expect("worker uuid");

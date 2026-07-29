@@ -380,6 +380,8 @@ for (const label of ["班组管理", "参建单位", "考勤机状态"]) {
 }
 assert.match(moduleJs, /online_status/, "device module should filter by online status");
 assert.match(moduleJs, /last_heartbeat_at/, "device module should display last heartbeat");
+assert.match(moduleJs, /last_seen_at/, "B vendor device module should display last communication time");
+assert.match(moduleJs, /B_VENDOR_ONLINE_WINDOW_MS/, "B vendor online status should use its polling window");
 assert.match(moduleJs, /isDeviceOnline/, "device module should align online calculation with PC");
 assert.match(constructionFieldsJs, /厂家类型/, "device form should use manufacturer type wording");
 assert.match(constructionFieldsJs, /deviceTypeOptions/, "device form should expose manufacturer type options");

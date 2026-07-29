@@ -199,6 +199,54 @@ async fn b_vendor_workers_support_registered_device_full_and_incremental_downloa
     assert_eq!(full["data"][0]["workerCode"], "NB-WORKER-001");
     assert!(full["data"][0].get("del").is_none());
 
+    let pull_report = sqlx::query_as::<_, (String, String, String, String)>(
+        r#"
+        SELECT report.status, report.action, report.serial_number, report.remark
+        FROM construction_attendance_device_issue_reports report
+        WHERE report.worker_id = $1 AND report.is_deleted = FALSE
+        "#,
+    )
+    .bind(active_worker_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(pull_report.0, "success");
+    assert_eq!(pull_report.1, "update");
+    assert_eq!(pull_report.2, "B-DEVICE-001");
+    assert_eq!(pull_report.3, "B厂家设备主动拉取人员");
+
+    let device_presence = sqlx::query_as::<
+        _,
+        (
+            String,
+            Option<chrono::DateTime<chrono::Utc>>,
+            Option<chrono::DateTime<chrono::Utc>>,
+            Option<chrono::DateTime<chrono::Utc>>,
+        ),
+    >(
+        r#"
+        SELECT online_status, last_seen_at, last_online_at, last_heartbeat_at
+        FROM construction_attendance_devices
+        WHERE serial_number = 'B-DEVICE-001'
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(device_presence.0, "online");
+    assert!(
+        device_presence.1.is_some(),
+        "/workers应更新B厂家最后通信时间"
+    );
+    assert!(
+        device_presence.2.is_some(),
+        "/workers应更新B厂家最后在线时间"
+    );
+    assert!(
+        device_presence.3.is_none(),
+        "B厂家不应写入A厂家的MQTT心跳时间"
+    );
+
     sqlx::query("UPDATE construction_workers SET name = '在场人员已修改' WHERE id = $1")
         .bind(active_worker_id)
         .execute(&pool)
@@ -288,7 +336,7 @@ async fn b_vendor_quality_feedback_is_visible_as_idempotent_issue_reports() {
     .await
     .unwrap();
 
-    let default_report_id = issue_single_worker_via_broker(
+    let issue_error = issue_single_worker_via_broker(
         &pool,
         None,
         project_id,
@@ -298,6 +346,33 @@ async fn b_vendor_quality_feedback_is_visible_as_idempotent_issue_reports() {
         None,
         Some("人员新增后自动下发"),
     )
+    .await
+    .unwrap_err();
+    assert!(issue_error.contains("不支持服务端下发"));
+
+    let report_count_before_pull = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM construction_attendance_device_issue_reports WHERE worker_id = $1",
+    )
+    .bind(worker_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(report_count_before_pull, 0, "设备拉取前不应提前显示成功");
+
+    let (workers_status, workers) = get_json(
+        app.clone(),
+        "/workers?deviceId=B-QUALITY-001&productId=1&update=0",
+    )
+    .await;
+    assert_eq!(workers_status, axum::http::StatusCode::OK, "{workers}");
+    assert_eq!(workers["data"][0]["workerId"], worker_id.to_string());
+
+    let default_report_id = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM construction_attendance_device_issue_reports WHERE worker_id = $1 AND attendance_device_id = $2 AND is_deleted = FALSE",
+    )
+    .bind(worker_id)
+    .bind(device_record_id)
+    .fetch_one(&pool)
     .await
     .unwrap();
     let default_report = sqlx::query_as::<_, (String, Option<String>, Option<Value>)>(
@@ -371,7 +446,7 @@ async fn b_vendor_quality_feedback_is_visible_as_idempotent_issue_reports() {
     assert_eq!(report.1, worker_id);
     assert_eq!(report.2, device_record_id);
     assert_eq!(report.3, "B厂家");
-    assert_eq!(report.4, "create");
+    assert_eq!(report.4, "update");
     assert_eq!(report.5, "failed");
     assert!(report.6.is_some());
     assert_eq!(report.7["data"]["code"], "5");

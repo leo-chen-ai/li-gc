@@ -18,6 +18,7 @@ const MAX_ATTEMPTS: i32 = 5;
 const WORKER_RECONCILE_EVENT: &str = "ningbo.worker.reconcile";
 const TEAM_SYNC_EVENT: &str = "ningbo.team.sync";
 const TEAM_EXIT_EVENT: &str = "ningbo.team.exit";
+const DEVICE_WORKER_RECONCILE_EVENT: &str = "attendance_device.worker.reconcile";
 const GENERIC_EVENTS: &[&str] = &[
     "construction.project.changed",
     "construction.unit.changed",
@@ -119,6 +120,23 @@ pub async fn enqueue_team_exit(
     .await
 }
 
+pub async fn enqueue_worker_device_reconcile(
+    pool: &PgPool,
+    project_id: Uuid,
+    worker_id: Uuid,
+    action: &str,
+) -> Result<(), sqlx::Error> {
+    enqueue_event(
+        pool,
+        project_id,
+        DEVICE_WORKER_RECONCILE_EVENT,
+        "worker",
+        worker_id,
+        json!({ "action": action }),
+    )
+    .await
+}
+
 pub async fn enqueue_domain_event_tx(
     tx: &mut Transaction<'_, Postgres>,
     project_id: Uuid,
@@ -216,6 +234,7 @@ async fn claim_event(
                     'ningbo.worker.reconcile',
                     'ningbo.team.sync',
                     'ningbo.team.exit',
+                    'attendance_device.worker.reconcile',
                     'construction.project.changed',
                     'construction.unit.changed',
                     'construction.team.changed',
@@ -246,6 +265,7 @@ async fn claim_event(
                             'ningbo.worker.reconcile',
                             'ningbo.team.sync',
                             'ningbo.team.exit',
+                            'attendance_device.worker.reconcile',
                             'construction.project.changed',
                             'construction.unit.changed',
                             'construction.team.changed',
@@ -313,6 +333,22 @@ async fn process_claimed_event(state: &AppState, event: ClaimedEvent) {
             handler::exit_team_from_ningbo_platforms(state.db.pool(), project_id, aggregate_id)
                 .await
                 .map_err(|error| error.message)
+        }
+        DEVICE_WORKER_RECONCILE_EVENT => {
+            let action = event
+                .payload
+                .get("action")
+                .and_then(Value::as_str)
+                .filter(|action| matches!(*action, "update" | "delete"))
+                .unwrap_or("update");
+            handler::reconcile_worker_to_attendance_devices(
+                state,
+                project_id,
+                aggregate_id,
+                action,
+            )
+            .await;
+            Ok(())
         }
         event_type if GENERIC_EVENTS.contains(&event_type) => dispatcher::dispatch(
             state.db.pool(),

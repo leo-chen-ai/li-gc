@@ -864,7 +864,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   };
 
   const handleRepairTeamReporting = async () => {
-    if (!window.confirm("确认修正失败和未传的班组上报？系统将重新调用已启用的市住建接口。")) {
+    if (!window.confirm("确认修正失败和未传的班组上报？普通班组和管理班组都会重新调用已启用的市住建接口。")) {
       return;
     }
 

@@ -63,6 +63,7 @@ pub struct FacePersonPayload {
     pub name: String,
     pub id_card: Option<String>,
     pub phone: Option<String>,
+    pub notes: Option<String>,
     pub photo_uri: Option<String>,
     pub photo_base64: Option<String>,
     pub person_type: i32,
@@ -159,6 +160,9 @@ pub fn build_edit_person(message_id: &str, person: &FacePersonPayload) -> Value 
     }
     if let Some(phone) = &person.phone {
         info["telnum1"] = json!(phone);
+    }
+    if let Some(notes) = &person.notes {
+        info["notes"] = json!(notes);
     }
     if let Some(photo_uri) = &person.photo_uri {
         info["picURI"] = json!(photo_uri);
@@ -288,6 +292,7 @@ mod tests {
                 name: "张三".to_string(),
                 id_card: Some("330100199001011234".to_string()),
                 phone: Some("13900000000".to_string()),
+                notes: Some("E6F2C98F834949EB88299E9266759343".to_string()),
                 photo_uri: Some("https://example.test/a.jpg".to_string()),
                 photo_base64: None,
                 person_type: 0,
@@ -297,11 +302,33 @@ mod tests {
         assert_eq!(edit["operator"], "EditPerson");
         assert_eq!(edit["messageId"], "msg-1");
         assert_eq!(edit["info"]["customId"], "330100199001011234");
+        assert_eq!(edit["info"]["notes"], "E6F2C98F834949EB88299E9266759343");
+        assert!(edit["info"].get("native").is_none());
         assert_eq!(edit["info"]["picURI"], "https://example.test/a.jpg");
 
         let delete = build_delete_person("msg-2", "330100199001011234");
         assert_eq!(delete["operator"], "DelPerson");
         assert_eq!(delete["info"]["customId"], "330100199001011234");
+    }
+
+    #[test]
+    fn build_edit_person_omits_notes_when_worker_has_no_yongjian_code() {
+        let edit = build_edit_person(
+            "msg-without-native",
+            &FacePersonPayload {
+                custom_id: "worker-1".to_string(),
+                name: "李四".to_string(),
+                id_card: None,
+                phone: None,
+                notes: None,
+                photo_uri: Some("https://example.test/b.jpg".to_string()),
+                photo_base64: None,
+                person_type: 0,
+                temp_card_type: 0,
+            },
+        );
+
+        assert!(edit["info"].get("notes").is_none());
     }
 
     #[test]
