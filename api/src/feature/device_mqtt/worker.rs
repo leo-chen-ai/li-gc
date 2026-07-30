@@ -368,11 +368,8 @@ async fn process_attendance_record(
     };
 
     let payload_direction = record.direction.as_deref().and_then(parse_direction);
-    let trigger_time = record
-        .record_time
-        .as_deref()
-        .and_then(parse_device_time)
-        .unwrap_or_else(Utc::now);
+    let device_trigger_time = record.record_time.as_deref().and_then(parse_device_time);
+    let trigger_time = device_trigger_time.unwrap_or_else(Utc::now);
     let should_recalculate_generic_direction =
         binding.direction == 2 && fixed_direction(payload_direction).is_none();
     let direction = if let Some(direction) = fixed_direction(payload_direction) {
@@ -395,7 +392,16 @@ async fn process_attendance_record(
         .map(str::trim)
         .filter(|photo| !photo.is_empty());
 
-    let dedupe_key = format!("attendance-rec:{worker_id}:{serial_number}:{original_time}");
+    // A vendor device RecordID is only a local counter and can restart from 1 after
+    // a reboot. Use the device timestamp as part of the identity when it is valid,
+    // while retaining the old RecordID-only fallback for malformed legacy payloads.
+    let dedupe_key = match device_trigger_time {
+        Some(device_trigger_time) => format!(
+            "attendance-rec:{worker_id}:{serial_number}:{original_time}:{}",
+            device_trigger_time.timestamp_micros()
+        ),
+        None => format!("attendance-rec:{worker_id}:{serial_number}:{original_time}"),
+    };
     let mut tx = pool.begin().await.map_err(|error| error.to_string())?;
     sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)")
         .bind(&dedupe_key)
@@ -411,6 +417,7 @@ async fn process_attendance_record(
           AND worker_id = $1
           AND serial_number = $2
           AND original_time = $3
+          AND ($4::timestamptz IS NULL OR trigger_time = $4)
         ORDER BY trigger_time ASC, created_at ASC
         LIMIT 1
         "#,
@@ -418,6 +425,7 @@ async fn process_attendance_record(
     .bind(worker_id)
     .bind(serial_number)
     .bind(&original_time)
+    .bind(device_trigger_time)
     .fetch_optional(&mut *tx)
     .await
     .map_err(|error| error.to_string())?
@@ -758,11 +766,132 @@ fn text_field(value: &Value, key: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use sqlx::postgres::PgPoolOptions;
+    use testcontainers::runners::AsyncRunner;
+    use testcontainers_modules::postgres::Postgres;
+
     use super::*;
 
     #[test]
     fn worker_lookup_query_excludes_left_site_workers() {
         assert!(FIND_WORKER_SQL.contains("COALESCE(work_status, 1) <> 2"));
         assert!(FIND_WORKER_SQL.contains("id::text = $2 THEN 0"));
+    }
+
+    #[tokio::test]
+    async fn reused_record_id_at_a_different_device_time_is_not_deduplicated() {
+        let container = Postgres::default()
+            .start()
+            .await
+            .expect("start postgres test container");
+        let port = container.get_host_port_ipv4(5432).await.unwrap();
+        let pool = PgPoolOptions::new()
+            .max_connections(5)
+            .connect(&format!(
+                "postgresql://postgres:postgres@127.0.0.1:{port}/postgres"
+            ))
+            .await
+            .expect("connect to postgres test container");
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .expect("run migrations");
+
+        let project_id = sqlx::query_scalar::<_, Uuid>(
+            "INSERT INTO construction_projects (name, status) VALUES ('A厂家RecordID复用测试项目', 1) RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let unit_id = sqlx::query_scalar::<_, Uuid>(
+            "INSERT INTO construction_units (project_id, company_name) VALUES ($1, '测试单位') RETURNING id",
+        )
+        .bind(project_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let team_id = sqlx::query_scalar::<_, Uuid>(
+            "INSERT INTO construction_teams (project_id, unit_id, name, work_type) VALUES ($1, $2, '测试班组', 900) RETURNING id",
+        )
+        .bind(project_id)
+        .bind(unit_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let worker_id = sqlx::query_scalar::<_, Uuid>(
+            "INSERT INTO construction_workers (project_id, unit_id, team_id, name, work_status) VALUES ($1, $2, $3, '李浩', 1) RETURNING id",
+        )
+        .bind(project_id)
+        .bind(unit_id)
+        .bind(team_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let binding = DeviceBinding {
+            id: Uuid::new_v4(),
+            project_id,
+            direction: 0,
+        };
+
+        let first = json!({
+            "operator": "RecPush",
+            "info": {
+                "customId": worker_id.to_string(),
+                "RecordID": "1",
+                "direction": "unknow",
+                "personName": "李浩",
+                "facesluiceId": "2604725",
+                "time": "2026-07-29 10:37:50"
+            }
+        })
+        .to_string();
+        let after_reboot = json!({
+            "operator": "RecPush",
+            "info": {
+                "customId": worker_id.to_string(),
+                "RecordID": "1",
+                "direction": "unknow",
+                "personName": "李浩",
+                "facesluiceId": "2604725",
+                "time": "2026-07-30 15:07:35"
+            }
+        })
+        .to_string();
+
+        assert!(
+            process_attendance_record(&pool, "2604725", Some(&binding), &first)
+                .await
+                .unwrap()
+        );
+        assert!(
+            process_attendance_record(&pool, "2604725", Some(&binding), &after_reboot)
+                .await
+                .unwrap()
+        );
+        // MQTT QoS redelivery of the exact same event must still be idempotent.
+        assert!(
+            process_attendance_record(&pool, "2604725", Some(&binding), &after_reboot)
+                .await
+                .unwrap()
+        );
+
+        let rows = sqlx::query_as::<_, (String, DateTime<Utc>)>(
+            r#"
+            SELECT original_time, trigger_time
+            FROM construction_attendance_records
+            WHERE worker_id = $1 AND serial_number = '2604725' AND is_deleted = FALSE
+            ORDER BY trigger_time
+            "#,
+        )
+        .bind(worker_id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].0, "1");
+        assert_eq!(rows[1].0, "1");
+        assert_eq!(rows[0].1, parse_device_time("2026-07-29 10:37:50").unwrap());
+        assert_eq!(rows[1].1, parse_device_time("2026-07-30 15:07:35").unwrap());
     }
 }
