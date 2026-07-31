@@ -110,6 +110,8 @@ Page({
     currentDetail: null,
     calendarRowsByMonth: {},
     calendarWeekdays: ["日", "一", "二", "三", "四", "五", "六"],
+    dailyRecordsByDate: {},
+    dateLoading: false,
   },
 
   async onLoad() {
@@ -157,6 +159,7 @@ Page({
       }, () => {
         this.refresh();
         this.loadMonthCalendarCounts();
+        this.preloadDailyRecords();
       });
     } catch (error) {
       wx.showToast({ title: error.message || "考勤加载失败", icon: "none" });
@@ -178,15 +181,66 @@ Page({
   async loadDailyRecords() {
     const project = this.data.project;
     if (!project || !project.id) return;
+    const date = this.data.activeDateValue;
+    const cached = this.data.dailyRecordsByDate[date];
+    if (cached) {
+      this.setData({ records: cached }, () => this.refresh());
+      return;
+    }
+    this.setData({ dateLoading: true });
     try {
       const attendanceResult = await listResource(project.id, "attendance-records", {
         page: 1,
         page_size: 500,
-        attendance_date: this.data.activeDateValue,
+        attendance_date: date,
       });
-      this.setData({ records: attendanceResult.items || [] }, () => this.refresh());
+      const records = attendanceResult.items || [];
+      this.setData({
+        records,
+        dailyRecordsByDate: { ...this.data.dailyRecordsByDate, [date]: records },
+        dateLoading: false,
+      }, () => this.refresh());
     } catch (error) {
+      this.setData({ dateLoading: false });
       wx.showToast({ title: error.message || "考勤加载失败", icon: "none" });
+    }
+  },
+
+  async preloadDailyRecords() {
+    const project = this.data.project;
+    if (!project || !project.id) return;
+    const otherDates = this.data.dateItems
+      .map((item) => item.value)
+      .filter((date) => date !== this.data.activeDateValue);
+    if (!otherDates.length) return;
+
+    this.setData({
+      dailyRecordsByDate: {
+        ...this.data.dailyRecordsByDate,
+        [this.data.activeDateValue]: this.data.records || [],
+      },
+    });
+
+    const batchSize = 3;
+    for (let i = 0; i < otherDates.length; i += batchSize) {
+      const batch = otherDates.slice(i, i + batchSize);
+      await Promise.all(batch.map(async (date) => {
+        try {
+          const result = await listResource(project.id, "attendance-records", {
+            page: 1,
+            page_size: 500,
+            attendance_date: date,
+          });
+          this.setData({
+            dailyRecordsByDate: {
+              ...this.data.dailyRecordsByDate,
+              [date]: result.items || [],
+            },
+          });
+        } catch (error) {
+          console.error(`预加载 ${date} 考勤失败`, error);
+        }
+      }));
     }
   },
 

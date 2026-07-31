@@ -47,6 +47,12 @@
     </scroll-view>
 
     <view class="attendance-main">
+      <view class="date-loading-mask" wx:if="{{dateLoading}}">
+        <view class="date-loading-box">
+          <view class="date-loading-spinner"></view>
+          <text class="date-loading-text">加载中...</text>
+        </view>
+      </view>
       <view class="tab-row">
         <block wx:for="{{tabs}}" wx:key="*this">
           <view class="tab-item {{activeTab === item ? 'active' : ''}}" data-tab="{{item}}" bind:tap="setTab">{{item}}（{{item === '已出勤' ? stats.present : stats.absent}}）</view>
