@@ -154,12 +154,12 @@ Page({
         teams,
         workers,
         records,
+        dailyRecordsByDate: { ...this.data.dailyRecordsByDate, [this.data.activeDateValue]: records },
         teamOptions: ["全部班组"].concat(teams.map((team) => team.name || "未命名班组")),
         companyOptions: ["全部参建单位"].concat(units.map((unit) => unit.company_name || "未命名单位")),
       }, () => {
         this.refresh();
         this.loadMonthCalendarCounts();
-        this.preloadDailyRecords();
       });
     } catch (error) {
       wx.showToast({ title: error.message || "考勤加载失败", icon: "none" });
@@ -203,44 +203,6 @@ Page({
     } catch (error) {
       this.setData({ dateLoading: false });
       wx.showToast({ title: error.message || "考勤加载失败", icon: "none" });
-    }
-  },
-
-  async preloadDailyRecords() {
-    const project = this.data.project;
-    if (!project || !project.id) return;
-    const otherDates = this.data.dateItems
-      .map((item) => item.value)
-      .filter((date) => date !== this.data.activeDateValue);
-    if (!otherDates.length) return;
-
-    this.setData({
-      dailyRecordsByDate: {
-        ...this.data.dailyRecordsByDate,
-        [this.data.activeDateValue]: this.data.records || [],
-      },
-    });
-
-    const batchSize = 3;
-    for (let i = 0; i < otherDates.length; i += batchSize) {
-      const batch = otherDates.slice(i, i + batchSize);
-      await Promise.all(batch.map(async (date) => {
-        try {
-          const result = await listResource(project.id, "attendance-records", {
-            page: 1,
-            page_size: 500,
-            attendance_date: date,
-          });
-          this.setData({
-            dailyRecordsByDate: {
-              ...this.data.dailyRecordsByDate,
-              [date]: result.items || [],
-            },
-          });
-        } catch (error) {
-          console.error(`预加载 ${date} 考勤失败`, error);
-        }
-      }));
     }
   },
 
