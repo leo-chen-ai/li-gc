@@ -154,7 +154,10 @@ Page({
         records,
         teamOptions: ["全部班组"].concat(teams.map((team) => team.name || "未命名班组")),
         companyOptions: ["全部参建单位"].concat(units.map((unit) => unit.company_name || "未命名单位")),
-      }, () => this.refresh());
+      }, () => {
+        this.refresh();
+        this.loadMonthCalendarCounts();
+      });
     } catch (error) {
       wx.showToast({ title: error.message || "考勤加载失败", icon: "none" });
     }
@@ -169,7 +172,52 @@ Page({
       activeDateValue: item.value,
       month: formatMonth(item.value),
       detailVisible: false,
-    }, () => this.loadData());
+    }, () => this.loadDailyRecords());
+  },
+
+  async loadDailyRecords() {
+    const project = this.data.project;
+    if (!project || !project.id) return;
+    try {
+      const attendanceResult = await listResource(project.id, "attendance-records", {
+        page: 1,
+        page_size: 500,
+        attendance_date: this.data.activeDateValue,
+      });
+      this.setData({ records: attendanceResult.items || [] }, () => this.refresh());
+    } catch (error) {
+      wx.showToast({ title: error.message || "考勤加载失败", icon: "none" });
+    }
+  },
+
+  async loadMonthCalendarCounts() {
+    const project = this.data.project;
+    if (!project || !project.id) return;
+    try {
+      const month = monthKey(this.data.activeDateValue);
+      const result = await listResource(project.id, "attendance-records", {
+        view: "calendar",
+        month,
+      });
+      const rows = result.items || [];
+      const countMap = {};
+      rows.forEach((row) => {
+        if (!Array.isArray(row.days)) return;
+        row.days.forEach((day) => {
+          const dayNum = Number(day.day);
+          if (!dayNum || dayNum < 1 || dayNum > 31) return;
+          const date = `${month}-${pad2(dayNum)}`;
+          countMap[date] = (countMap[date] || 0) + 1;
+        });
+      });
+      const dateItems = this.data.dateItems.map((item) => ({
+        ...item,
+        count: countMap[item.value] || 0,
+      }));
+      this.setData({ dateItems });
+    } catch (error) {
+      console.error("加载月出勤计数失败", error);
+    }
   },
 
   setTab(event) {
@@ -206,11 +254,6 @@ Page({
       absent: Math.max(0, total - present),
       rate: total ? `${Math.round((present / total) * 1000) / 10}%` : "0%",
     };
-    const dateItems = this.data.dateItems.map((item) => ({
-      ...item,
-      count: item.value === this.data.activeDateValue ? present : item.count,
-    }));
-
     const kw = String(this.data.keyword || "").trim().toLowerCase();
     const filteredWorkers = rows.filter((item) => {
       const matchesTab = item.status === this.data.activeTab;
@@ -220,7 +263,7 @@ Page({
       return matchesTab && matchesKeyword && matchesTeam && matchesCompany;
     });
 
-    this.setData({ stats, dateItems, filteredWorkers });
+    this.setData({ stats, filteredWorkers });
   },
 
   buildWorkerAttendance(worker) {
