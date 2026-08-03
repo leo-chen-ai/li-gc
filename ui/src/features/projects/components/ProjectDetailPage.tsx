@@ -3142,12 +3142,30 @@ function WorkerAttendanceDialog({
   projectId: string;
   onOpenChange: (open: boolean) => void;
 }) {
-  const attendanceQuery = useProjectAttendanceQuery(
-    projectId,
-    open && worker ? { worker_id: worker.id, page_size: 200, page: 1 } : undefined,
-  );
+  const DIALOG_PAGE_SIZE = 20;
+  const [page, setPage] = useState(1);
+  const [attendanceDate, setAttendanceDate] = useState("");
+
+  useEffect(() => {
+    setPage(1);
+    setAttendanceDate("");
+  }, [open, worker?.id]);
+
+  const queryFilters = useMemo(() => {
+    if (!open || !worker) return undefined;
+    return {
+      worker_id: worker.id,
+      page_size: DIALOG_PAGE_SIZE,
+      page,
+      ...(attendanceDate ? { attendance_date: attendanceDate } : {}),
+    };
+  }, [open, worker, page, attendanceDate]);
+
+  const attendanceQuery = useProjectAttendanceQuery(projectId, queryFilters);
   const isQueryEnabled = open && Boolean(worker);
   const rawItems = isQueryEnabled ? (attendanceQuery.data?.items ?? []) : [];
+  const total = attendanceQuery.data?.total ?? 0;
+  const totalPages = getTotalPages(total, DIALOG_PAGE_SIZE);
 
   const records: AttendanceRecord[] = useMemo(() => {
     if (!worker) return [];
@@ -3176,6 +3194,32 @@ function WorkerAttendanceDialog({
             {worker ? `${worker.name} · ${worker.team} · ${worker.workType || "未填写工种"}` : "查看工人考勤记录"}
           </DialogDescription>
         </DialogHeader>
+
+        {/* Date filter */}
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-muted-foreground">
+            <span className="shrink-0">考勤日期</span>
+            <Input
+              type="date"
+              className="h-8 w-44"
+              value={attendanceDate}
+              onChange={(event) => {
+                setAttendanceDate(event.target.value);
+                setPage(1);
+              }}
+            />
+          </label>
+          {attendanceDate && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 text-xs text-slate-500 hover:text-slate-700"
+              onClick={() => { setAttendanceDate(""); setPage(1); }}
+            >
+              清除
+            </Button>
+          )}
+        </div>
 
         <div className="max-h-[60vh] overflow-auto rounded-lg border border-slate-200 dark:border-border">
           <Table className="min-w-[880px] table-fixed">
@@ -3243,8 +3287,34 @@ function WorkerAttendanceDialog({
             </TableBody>
           </Table>
         </div>
-        <div className="text-xs text-slate-500 dark:text-muted-foreground">
-          共 {records.length} 条记录
+
+        {/* Pagination */}
+        <div className="flex items-center justify-between">
+          <div className="text-xs text-slate-500 dark:text-muted-foreground">
+            共 {total} 条记录{total > 0 ? `，第 ${page} / ${totalPages} 页` : ""}
+          </div>
+          {totalPages > 1 && (
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                上一页
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                disabled={page >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              >
+                下一页
+              </Button>
+            </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>
