@@ -4,6 +4,7 @@ import time
 import logging
 import base64
 import shutil
+import unicodedata
 from datetime import datetime
 
 from selenium.webdriver.common.by import By
@@ -25,6 +26,10 @@ LOGIN_URL = "http://tg.91jtg.com/#/login"
 MAX_CAPTCHA_RETRIES = 5
 PAGE_LOAD_TIMEOUT = 30
 DOWNLOAD_WAIT_TIMEOUT = 120
+
+
+def _normalized_project_name(value):
+    return unicodedata.normalize("NFKC", str(value)).strip()
 
 
 class Downloader:
@@ -58,12 +63,8 @@ class Downloader:
         try:
             if not self.login():
                 raise RuntimeError("源站登录失败")
-            if not self._find_and_click(By.XPATH, "//*[contains(text(),'跳转')]", "跳转按钮"):
-                raise RuntimeError("未找到跳转按钮")
-            time.sleep(5)
-            if not self._find_and_click(By.XPATH, "//*[contains(text(),'项目') and contains(text(),'总数')]", "项目(工地)总数"):
-                raise RuntimeError("未找到项目(工地)总数")
-            time.sleep(3)
+            if not self._enter_project_list():
+                raise RuntimeError("未进入项目列表")
             names = []
             while True:
                 page_names = self._get_current_page_project_names()
@@ -221,25 +222,8 @@ class Downloader:
 
     def download_all(self):
         try:
-            logger.info("寻找'跳转'按钮...")
-            skip_btn = self._find_and_click(
-                By.XPATH, "//*[contains(text(),'跳转')]",
-                description="跳转按钮"
-            )
-            if not skip_btn:
-                logger.error("未找到跳转按钮")
+            if not self._enter_project_list():
                 return []
-            time.sleep(5)
-
-            logger.info("寻找'项目(工地)总数'...")
-            project_btn = self._find_and_click(
-                By.XPATH, "//*[contains(text(),'项目') and contains(text(),'总数')]",
-                description="项目(工地)总数"
-            )
-            if not project_btn:
-                logger.error("未找到项目(工地)总数")
-                return []
-            time.sleep(3)
 
             downloaded = []
             page = 1
@@ -294,6 +278,34 @@ class Downloader:
             logger.error(f"下载流程异常: {e}")
             return []
 
+    def _enter_project_list(self):
+        """Support both the legacy jump page and accounts landing on home directly."""
+        logger.info("检查登录后的源站入口...")
+        skip_btn = self._find_and_click(
+            By.XPATH,
+            "//*[contains(text(),'跳转')]",
+            description="跳转按钮",
+            timeout=5,
+            warn_on_timeout=False,
+        )
+        if skip_btn:
+            logger.info("检测到旧版跳转入口，继续进入系统首页")
+            time.sleep(5)
+        else:
+            logger.info("未显示跳转按钮，按直接进入系统首页的方式继续")
+
+        logger.info("寻找'项目(工地)总数'...")
+        project_btn = self._find_and_click(
+            By.XPATH,
+            "//*[contains(text(),'项目') and contains(text(),'总数')]",
+            description="项目(工地)总数",
+        )
+        if not project_btn:
+            logger.error("登录后既未进入可用首页，也未找到项目(工地)总数")
+            return False
+        time.sleep(3)
+        return True
+
     def _check_expired(self):
         try:
             tips = self.driver.find_elements(
@@ -338,7 +350,9 @@ class Downloader:
             return False
         return False
 
-    def _find_and_click(self, by, value, description="", timeout=10):
+    def _find_and_click(
+        self, by, value, description="", timeout=10, warn_on_timeout=True
+    ):
         try:
             element = WebDriverWait(self.driver, timeout).until(
                 EC.element_to_be_clickable((by, value))
@@ -350,7 +364,8 @@ class Downloader:
             logger.info(f"已点击: {description}")
             return element
         except TimeoutException:
-            logger.warning(f"未找到可点击元素: {description}")
+            log = logger.warning if warn_on_timeout else logger.info
+            log(f"未找到可点击元素: {description}")
             return None
 
     def _get_current_page_project_names(self):
@@ -404,14 +419,28 @@ class Downloader:
         if isinstance(include, str) and include.lower() == 'all':
             filtered = list(project_names)
         elif isinstance(include, list):
-            included_names = {str(name).strip() for name in include if str(name).strip()}
-            filtered = [p for p in project_names if p.strip() in included_names]
+            included_names = {
+                _normalized_project_name(name)
+                for name in include
+                if _normalized_project_name(name)
+            }
+            filtered = [
+                p for p in project_names
+                if _normalized_project_name(p) in included_names
+            ]
         else:
             filtered = list(project_names)
 
         if exclude:
-            excluded_names = {str(name).strip() for name in exclude if str(name).strip()}
-            filtered = [p for p in filtered if p.strip() not in excluded_names]
+            excluded_names = {
+                _normalized_project_name(name)
+                for name in exclude
+                if _normalized_project_name(name)
+            }
+            filtered = [
+                p for p in filtered
+                if _normalized_project_name(p) not in excluded_names
+            ]
 
         return filtered
 
@@ -419,14 +448,19 @@ class Downloader:
         include = self.download_settings.get('include_projects', 'all')
         if not isinstance(include, list):
             return False
-        selected = {str(name).strip() for name in include if str(name).strip()}
+        selected = {
+            _normalized_project_name(name)
+            for name in include
+            if _normalized_project_name(name)
+        }
         excluded = {
-            str(name).strip()
+            _normalized_project_name(name)
             for name in self.download_settings.get('exclude_projects', [])
-            if str(name).strip()
+            if _normalized_project_name(name)
         }
         selected -= excluded
-        return bool(selected) and selected.issubset(processed_names)
+        processed = {_normalized_project_name(name) for name in processed_names}
+        return bool(selected) and selected.issubset(processed)
 
     def _click_and_download(self, project_name):
         logger.info(f"点击项目: {project_name}")

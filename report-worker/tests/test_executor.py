@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import report_worker.executor as executor_module
 import converter
+import downloader
 import target_login
 import uploader
 from report_worker.executor import (
@@ -266,6 +267,19 @@ def test_project_filter_only_keeps_exact_configured_names():
     assert downloader._filter_projects(["测试项目", "测试项目二期", "其他项目"]) == ["测试项目"]
 
 
+def test_project_filter_normalizes_full_width_punctuation_without_fuzzy_matching():
+    downloader = executor_module.Downloader.__new__(executor_module.Downloader)
+    downloader.download_settings = {
+        "include_projects": ["东部新城工程(二期)"],
+        "exclude_projects": [],
+    }
+
+    assert downloader._filter_projects([
+        "东部新城工程（二期）",
+        "东部新城工程（二期）景观段",
+    ]) == ["东部新城工程（二期）"]
+
+
 def test_selected_projects_stop_pagination_after_all_are_processed():
     downloader = executor_module.Downloader.__new__(executor_module.Downloader)
     downloader.download_settings = {
@@ -275,6 +289,16 @@ def test_selected_projects_stop_pagination_after_all_are_processed():
 
     assert downloader._selected_projects_complete({"项目甲"}) is False
     assert downloader._selected_projects_complete({"项目甲", "项目乙"}) is True
+
+
+def test_selected_projects_completion_normalizes_full_width_punctuation():
+    downloader = executor_module.Downloader.__new__(executor_module.Downloader)
+    downloader.download_settings = {
+        "include_projects": ["东部新城工程(二期)"],
+        "exclude_projects": [],
+    }
+
+    assert downloader._selected_projects_complete({"东部新城工程（二期）"}) is True
 
 
 def test_login_feedback_does_not_wait_for_absent_optional_messages():
@@ -293,6 +317,56 @@ def test_login_feedback_does_not_wait_for_absent_optional_messages():
 
     assert downloader._login_feedback() == ""
     assert downloader.driver.waits == [0, 5]
+
+
+def test_source_entry_uses_legacy_jump_page_when_present(monkeypatch):
+    instance = executor_module.Downloader.__new__(executor_module.Downloader)
+    clicked = []
+    responses = iter([object(), object()])
+
+    def find_and_click(
+        _by, _value, description="", timeout=10, warn_on_timeout=True
+    ):
+        clicked.append((description, timeout, warn_on_timeout))
+        return next(responses)
+
+    instance._find_and_click = find_and_click
+    monkeypatch.setattr(downloader.time, "sleep", lambda _seconds: None)
+
+    assert instance._enter_project_list() is True
+    assert clicked == [
+        ("跳转按钮", 5, False),
+        ("项目(工地)总数", 10, True),
+    ]
+
+
+def test_source_entry_accepts_direct_home_without_jump_button(monkeypatch):
+    instance = executor_module.Downloader.__new__(executor_module.Downloader)
+    clicked = []
+    responses = iter([None, object()])
+
+    def find_and_click(
+        _by, _value, description="", timeout=10, warn_on_timeout=True
+    ):
+        clicked.append((description, timeout, warn_on_timeout))
+        return next(responses)
+
+    instance._find_and_click = find_and_click
+    monkeypatch.setattr(downloader.time, "sleep", lambda _seconds: None)
+
+    assert instance._enter_project_list() is True
+    assert clicked == [
+        ("跳转按钮", 5, False),
+        ("项目(工地)总数", 10, True),
+    ]
+
+
+def test_source_entry_fails_when_home_has_no_project_total(monkeypatch):
+    instance = executor_module.Downloader.__new__(executor_module.Downloader)
+    instance._find_and_click = lambda *_args, **_kwargs: None
+    monkeypatch.setattr(downloader.time, "sleep", lambda _seconds: None)
+
+    assert instance._enter_project_list() is False
 
 
 def test_upload_with_row_failures_is_partial_success(monkeypatch, tmp_path):
