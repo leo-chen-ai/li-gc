@@ -2773,6 +2773,7 @@ function WorkersTab({
   const [editingEntryWorker, setEditingEntryWorker] = useState<Worker | null>(null);
   const [editingEntryDate, setEditingEntryDate] = useState("");
   const [editingEntrySaving, setEditingEntrySaving] = useState(false);
+  const [attendanceWorker, setAttendanceWorker] = useState<Worker | null>(null);
   const scopedTeams =
     selection.kind === "team"
       ? activeTeam
@@ -3018,7 +3019,14 @@ function WorkersTab({
               <EntityReportingPlatforms platforms={worker.reportingPlatforms} showLabel={false} />
             </div>,
             <WorkerAvatar key={`${worker.id}-avatar`} src={worker.avatar} name={worker.name} />,
-            worker.name,
+            <button
+              key={`${worker.id}-name`}
+              type="button"
+              className="cursor-pointer font-medium text-[#0f6b5d] hover:text-[#0b5148] hover:underline"
+              onClick={() => setAttendanceWorker(worker)}
+            >
+              {worker.name}
+            </button>,
             worker.phone,
             worker.team,
             worker.workType,
@@ -3111,7 +3119,135 @@ function WorkersTab({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <WorkerAttendanceDialog
+        open={Boolean(attendanceWorker)}
+        worker={attendanceWorker}
+        projectId={projectId}
+        onOpenChange={(open) => {
+          if (!open) setAttendanceWorker(null);
+        }}
+      />
     </div>
+  );
+}
+
+function WorkerAttendanceDialog({
+  open,
+  worker,
+  projectId,
+  onOpenChange,
+}: {
+  open: boolean;
+  worker: Worker | null;
+  projectId: string;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const attendanceQuery = useProjectAttendanceQuery(
+    projectId,
+    open && worker ? { worker_id: worker.id, page_size: 200, page: 1 } : undefined,
+  );
+  const isQueryEnabled = open && Boolean(worker);
+  const rawItems = isQueryEnabled ? (attendanceQuery.data?.items ?? []) : [];
+
+  const records: AttendanceRecord[] = useMemo(() => {
+    if (!worker) return [];
+    return rawItems.map((record) => ({
+      id: record.id,
+      projectId: record.project_id,
+      workerId: record.worker_id,
+      worker: worker.name,
+      team: worker.team,
+      workType: worker.workType,
+      workerType: worker.workerType,
+      direction: (record.direction === 1 ? "出场" : "进场") as AttendanceRecord["direction"],
+      time: formatBeijingDateTime(record.trigger_time) || formatBeijingDateTime(record.original_time) || "",
+      device: record.equipment_id ?? record.serial_number ?? "未填写",
+      photoUrl: normalizeAttendancePhoto(record.closeup_photo ?? record.photo_path ?? record.overall_photo),
+      status: "有效" as const,
+    }));
+  }, [rawItems, worker]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-5xl">
+        <DialogHeader>
+          <DialogTitle>考勤记录</DialogTitle>
+          <DialogDescription>
+            {worker ? `${worker.name} · ${worker.team} · ${worker.workType || "未填写工种"}` : "查看工人考勤记录"}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="max-h-[60vh] overflow-auto rounded-lg border border-slate-200 dark:border-border">
+          <Table className="min-w-[880px] table-fixed">
+            <TableHeader className="bg-[#f8faf9] dark:bg-muted/30">
+              <TableRow>
+                <TableHead className="w-16 px-3 text-slate-500 dark:text-muted-foreground">照片</TableHead>
+                <TableHead className="w-24 text-slate-500 dark:text-muted-foreground">工人</TableHead>
+                <TableHead className="w-28 text-slate-500 dark:text-muted-foreground">班组名称</TableHead>
+                <TableHead className="w-24 text-slate-500 dark:text-muted-foreground">工种</TableHead>
+                <TableHead className="w-24 text-slate-500 dark:text-muted-foreground">工人类型</TableHead>
+                <TableHead className="w-20 text-right text-slate-500 dark:text-muted-foreground">进出</TableHead>
+                <TableHead className="w-44 text-slate-500 dark:text-muted-foreground">考勤时间</TableHead>
+                <TableHead className="w-36 text-slate-500 dark:text-muted-foreground">设备</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {!isQueryEnabled ? null : attendanceQuery.isLoading ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="h-24 text-center text-sm text-muted-foreground">
+                    考勤记录加载中...
+                  </TableCell>
+                </TableRow>
+              ) : attendanceQuery.isError ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="h-24 text-center text-sm text-red-600 dark:text-red-400">
+                    考勤记录加载失败
+                  </TableCell>
+                </TableRow>
+              ) : records.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="h-24 text-center text-sm text-muted-foreground">
+                    暂无考勤记录
+                  </TableCell>
+                </TableRow>
+              ) : (
+                records.map((record) => (
+                  <TableRow key={record.id} className="hover:bg-[#f8faf9]/70 dark:hover:bg-muted/30">
+                    <TableCell className="px-3 py-2">
+                      <AttendancePhoto src={record.photoUrl} alt={`${record.worker} 考勤照片`} />
+                    </TableCell>
+                    <TableCell className="truncate font-medium text-slate-800 dark:text-foreground">
+                      {record.worker}
+                    </TableCell>
+                    <TableCell className="truncate text-slate-600 dark:text-muted-foreground">
+                      {record.team}
+                    </TableCell>
+                    <TableCell className="truncate text-slate-600 dark:text-muted-foreground">
+                      {record.workType ?? "未填写"}
+                    </TableCell>
+                    <TableCell className="truncate text-slate-600 dark:text-muted-foreground">
+                      {record.workerType ?? "未填写"}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <AttendanceDirectionBadge direction={record.direction} />
+                    </TableCell>
+                    <TableCell className="text-sm text-slate-700 dark:text-foreground">
+                      {record.time}
+                    </TableCell>
+                    <TableCell className="truncate text-sm text-slate-600 dark:text-muted-foreground" title={record.device}>
+                      {record.device}
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
+        <div className="text-xs text-slate-500 dark:text-muted-foreground">
+          共 {records.length} 条记录
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
