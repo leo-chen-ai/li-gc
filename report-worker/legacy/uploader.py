@@ -17,7 +17,7 @@ from selenium.common.exceptions import (
     NoSuchElementException,
     ElementClickInterceptedException,
 )
-from browser_runtime import create_driver
+from browser_runtime import browser_profile_dir, close_driver, create_driver
 
 logger = logging.getLogger(__name__)
 
@@ -158,14 +158,75 @@ def extract_project_name(file_path):
             name = name.split(suffix)[0]
             break
     name = name.split('_', 1)[-1] if '_' in name else name
+    name = re.sub(r'_第\d+批$', '', name)
     name = re.sub(r'[\(\)（）]', '', name)
     name = name.strip('_').strip('-').strip()
     return name or os.path.splitext(filename)[0]
 
 
+def split_upload_workbook(file_path, max_rows=200):
+    """Split one converted workbook into government-sized upload batches."""
+    workbook = openpyxl.load_workbook(file_path)
+    try:
+        worksheet = workbook['sheet1']
+        data_rows = [
+            row_number for row_number in range(3, worksheet.max_row + 1)
+            if worksheet.cell(row=row_number, column=1).value
+            and worksheet.cell(row=row_number, column=5).value
+        ]
+    finally:
+        workbook.close()
+
+    if len(data_rows) <= max_rows:
+        return [file_path]
+
+    batch_dir = os.path.join(os.path.dirname(file_path), '.upload_batches')
+    os.makedirs(batch_dir, exist_ok=True)
+    filename = os.path.basename(file_path)
+    suffix = '_姜太公导出.xlsx'
+    stem = filename[:-len(suffix)] if filename.endswith(suffix) else os.path.splitext(filename)[0]
+    batch_paths = []
+    for batch_number, offset in enumerate(range(0, len(data_rows), max_rows), start=1):
+        selected_rows = data_rows[offset:offset + max_rows]
+        batch_path = os.path.join(batch_dir, f'{stem}_第{batch_number:03d}批_姜太公导出.xlsx')
+        shutil.copy2(file_path, batch_path)
+        batch_workbook = openpyxl.load_workbook(batch_path)
+        try:
+            batch_sheet = batch_workbook['sheet1']
+            last_row = selected_rows[-1]
+            if last_row < batch_sheet.max_row:
+                batch_sheet.delete_rows(last_row + 1, batch_sheet.max_row - last_row)
+            first_row = selected_rows[0]
+            if first_row > 3:
+                batch_sheet.delete_rows(3, first_row - 3)
+            batch_workbook.save(batch_path)
+        finally:
+            batch_workbook.close()
+        batch_paths.append(batch_path)
+
+    logger.info(
+        "上传文件共 %s 条，已拆分为 %s 批，每批最多 %s 条",
+        len(data_rows), len(batch_paths), max_rows,
+    )
+    return batch_paths
+
+
+def count_upload_rows(file_path):
+    workbook = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+    try:
+        worksheet = workbook['sheet1']
+        return sum(
+            1 for row in worksheet.iter_rows(min_row=3, values_only=True)
+            if row[0] and len(row) > 4 and row[4]
+        )
+    finally:
+        workbook.close()
+
+
 class Uploader:
     def __init__(self, config, driver=None):
         self.config = config
+        self.browser_config = config['browser']
         self.driver = driver
         self.own_driver = driver is None
         self.long_wait = None
@@ -187,8 +248,12 @@ class Uploader:
         )
         os.makedirs(self.error_dir, exist_ok=True)
 
-        timeout_minutes = config['browser'].get('upload_timeout', 15)
-        self.upload_timeout = int(timeout_minutes) * 60
+        # Keep the setting configurable, but bound a stalled import at ten
+        # minutes by default instead of allowing an unbounded wait.
+        timeout_minutes = config['browser'].get('upload_timeout', 10)
+        # Safety cap: an old persisted setting of 15 minutes must not revive
+        # the previous long wait while the task is stalled.
+        self.upload_timeout = min(max(int(timeout_minutes), 1), 10) * 60
         configured_retries = config.get('runtime', {}).get('max_execution_retries', 3)
         try:
             configured_retries = int(configured_retries)
@@ -205,6 +270,7 @@ class Uploader:
         self.driver = create_driver(
             self.error_dir,
             headless=self.config.get('browser', {}).get('headless', True),
+            profile_dir=browser_profile_dir("target", self.config['credentials']['target_site']['username']),
         )
         self.driver.set_page_load_timeout(PAGE_LOAD_TIMEOUT)
         self.driver.implicitly_wait(0)
@@ -219,9 +285,6 @@ class Uploader:
         self.target.long_wait = self.long_wait
         self.target.short_wait = self.short_wait
 
-        if not self.target._start_feishu_listener():
-            raise RuntimeError("飞书监听启动失败")
-
         try:
             self.target._init_driver = lambda: None
             self.target._init_driver()
@@ -229,7 +292,11 @@ class Uploader:
             self.long_wait = WebDriverWait(self.driver, 15)
             self.short_wait = WebDriverWait(self.driver, 5)
 
-            if not self.target.login():
+            if self.target._reuse_existing_session():
+                return
+            if not self.target._start_feishu_listener():
+                raise RuntimeError("飞书监听启动失败")
+            if not self.target.login(reuse_session=False):
                 raise RuntimeError("登录失败")
         except Exception:
             self.target._stop_feishu_listener()
@@ -256,36 +323,38 @@ class Uploader:
             logger.error(f"输出目录不存在: {self.output_dir}")
             return self.results
 
-        xlsx_files = sorted([
-            f for f in os.listdir(self.output_dir)
-            if f.endswith('.xlsx') and not f.startswith('~$')
+        source_files = sorted([
+            os.path.join(self.output_dir, filename) for filename in os.listdir(self.output_dir)
+            if filename.endswith('.xlsx') and not filename.startswith('~$')
         ])
+        xlsx_files = [
+            batch_path for source_path in source_files
+            for batch_path in split_upload_workbook(source_path)
+        ]
 
         if not xlsx_files:
             logger.warning("没有需要上传的文件")
             return self.results
 
         logger.info(f"共 {len(xlsx_files)} 个文件待上传:")
-        for f in xlsx_files:
-            logger.info(f"  - {f}")
+        for file_path in xlsx_files:
+            logger.info(f"  - {os.path.basename(file_path)}")
 
         session_needs_restart = False
-        for idx, filename in enumerate(xlsx_files):
-            file_path = os.path.join(self.output_dir, filename)
+        for idx, file_path in enumerate(xlsx_files):
+            filename = os.path.basename(file_path)
             project_name = extract_project_name(file_path)
             logger.info(f"[{idx + 1}/{len(xlsx_files)}] 开始上传: {project_name}")
 
             for attempt in range(self.max_execution_retries + 1):
                 try:
-                    restarted = False
                     if session_needs_restart:
                         self._restart_session()
                         session_needs_restart = False
-                        restarted = True
                     result = self._upload_single_file(
                         file_path,
                         project_name,
-                        is_first=(idx == 0 or attempt > 0 or restarted),
+                        is_first=True,
                     )
                     self.results.append(result)
                     break
@@ -303,10 +372,14 @@ class Uploader:
                         )
                         continue
                     logger.error(f"上传失败 {project_name}: {e}", exc_info=True)
+                    batch_rows = count_upload_rows(file_path)
                     self.results.append({
                         'project_name': project_name,
                         'status': 'failed',
                         'error': str(e),
+                        'total_rows': batch_rows,
+                        'success_rows': 0,
+                        'failure_rows': batch_rows,
                     })
 
         logger.info(f"全部上传完成，失败/错误文件: {len(self.error_files)}")
@@ -616,6 +689,19 @@ class Uploader:
         try:
             current_url = self.driver.current_url
             title = self.driver.title
+            evidence_root = self.browser_config.get('diagnostics_dir') or os.path.join(
+                os.environ.get('REPORT_FORWARD_LOCAL_STORAGE', '/data/artifacts'),
+                'diagnostics', self.date_str,
+            )
+            os.makedirs(evidence_root, exist_ok=True)
+            safe_label = re.sub(r'[^0-9A-Za-z一-龥_-]+', '_', label).strip('_') or 'page'
+            stamp = datetime.now().strftime('%H%M%S_%f')
+            prefix = os.path.join(evidence_root, f'{stamp}_{safe_label}')
+            screenshot_path = f'{prefix}.png'
+            html_path = f'{prefix}.html'
+            self.driver.save_screenshot(screenshot_path)
+            with open(html_path, 'w', encoding='utf-8') as html_file:
+                html_file.write(self.driver.page_source or '')
             actions = self.driver.execute_script("""
                 return Array.from(document.querySelectorAll('button,a,[role="button"],input[type="button"],input[type="submit"]'))
                     .filter(function (el) { return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length); })
@@ -623,7 +709,10 @@ class Uploader:
                     .filter(Boolean)
                     .slice(0, 40);
             """)
-            logger.info(f"{label} — URL: {current_url}, 标题: {title}, 可见操作: {actions}")
+            logger.info(
+                f"{label} — URL: {current_url}, 标题: {title}, 可见操作: {actions}; "
+                f"现场证据已保存: {screenshot_path}, {html_path}"
+            )
         except Exception as error:
             logger.warning(f"记录页面现场失败: {error}")
 
@@ -868,7 +957,8 @@ class Uploader:
                 else:
                     logger.info(f"等待上传响应... (已等待 {elapsed}秒)")
 
-        logger.error(f"上传超时 ({self.upload_timeout}秒)")
+        logger.error(f"上传超时 ({self.upload_timeout}秒)，停止等待并让上层按失败重试策略处理")
+        raise TimeoutError(f"目标站上传超时（{self.upload_timeout}秒）")
 
     def _read_upload_results(self, project_name):
         logger.info("读取上传结果")
@@ -1127,7 +1217,7 @@ class Uploader:
             self.target._stop_feishu_listener()
         if self.driver and self.own_driver:
             try:
-                self.driver.quit()
+                close_driver(self.driver)
                 logger.info("浏览器已关闭")
             except Exception as e:
                 logger.warning(f"关闭浏览器异常: {e}")

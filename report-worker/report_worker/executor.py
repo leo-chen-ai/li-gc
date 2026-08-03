@@ -125,9 +125,10 @@ class RunExecutor:
             },
             "browser": {
                 "download_dir": str(download_root), "output_dir": str(output_root), "error_dir": str(error_root),
+                "diagnostics_dir": str(self.work_dir / "diagnostics"),
                 "template_file": str(ASSETS / "建筑项目人员备案信息模板.xlsx"),
                 "headless": bool((self.config_row.get("settings") or {}).get("headless", True)),
-                "upload_timeout": int((self.config_row.get("settings") or {}).get("upload_timeout_minutes", 15)),
+                "upload_timeout": int((self.config_row.get("settings") or {}).get("upload_timeout_minutes", 10)),
             },
             "feishu": verification,
             "email": {"enabled": False},
@@ -314,7 +315,10 @@ class RunExecutor:
 
     def _upload(self):
         self.stage("target_upload", "开始登录目标网站并上报")
-        results = Uploader(self.config).run()
+        try:
+            results = aggregate_project_results(Uploader(self.config).run())
+        finally:
+            self._store_diagnostics()
         if not results:
             raise RuntimeError("目标网站未产生上传结果")
         for result in results:
@@ -366,6 +370,70 @@ class RunExecutor:
                 project_id = next((pid for name, pid in self.project_ids.items() if name[:6] in path.name), None)
                 stored = self.storage.put(self.config_id, self.run_id, "error_detail", path)
                 self.repo.add_artifact(self.run_id, project_id, "error_detail", stored)
+
+    def _store_diagnostics(self):
+        configured_dir = self.config["browser"].get("diagnostics_dir")
+        if not configured_dir:
+            return
+        diagnostics_dir = Path(configured_dir)
+        if not diagnostics_dir.exists():
+            return
+        artifact_types = {".png": "diagnostic_screenshot", ".html": "diagnostic_html"}
+        for path in sorted(diagnostics_dir.iterdir()):
+            artifact_type = artifact_types.get(path.suffix.lower())
+            if not artifact_type:
+                continue
+            try:
+                stored = self.storage.put(self.config_id, self.run_id, artifact_type, path)
+                self.repo.add_artifact(self.run_id, None, artifact_type, stored)
+            except Exception as error:
+                logging.warning("诊断证据留存失败 %s: %s", path.name, error)
+
+
+def aggregate_project_results(results):
+    grouped = {}
+    for result in results:
+        project_name = result["project_name"]
+        aggregate = grouped.setdefault(project_name, {
+            "project_name": project_name,
+            "status": "failed",
+            "total_rows": 0,
+            "success_rows": 0,
+            "failure_rows": 0,
+            "already_exists": False,
+            "person_details_available": True,
+            "person_results": [],
+            "batches": [],
+        })
+        total = result.get("total_rows") or 0
+        success = result.get("success_rows") or 0
+        failure = result.get("failure_rows")
+        failure = failure if failure is not None else (total if result.get("status") == "failed" else 0)
+        aggregate["total_rows"] += total
+        aggregate["success_rows"] += success
+        aggregate["failure_rows"] += failure
+        # “已存在”只可靠描述单行批次，不能扩散成整个项目的人员结果。
+        if total == 1 and result.get("already_exists"):
+            aggregate["already_exists"] = True
+        if failure:
+            aggregate["person_details_available"] = (
+                aggregate["person_details_available"]
+                and bool(result.get("person_details_available"))
+            )
+        aggregate["person_results"].extend(result.get("person_results") or [])
+        aggregate["batches"].append({
+            key: value for key, value in result.items()
+            if key not in {"person_results", "project_name"}
+        })
+        if result.get("status") == "validated" and aggregate["status"] == "failed":
+            aggregate["status"] = "validated"
+        elif result.get("status") == "success":
+            aggregate["status"] = "success"
+
+    for aggregate in grouped.values():
+        if aggregate["total_rows"] > 1:
+            aggregate["already_exists"] = False
+    return list(grouped.values())
 
 
 def parse_converted_items(file_path):

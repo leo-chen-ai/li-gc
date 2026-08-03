@@ -34,4 +34,8 @@ export const reportService = {
     const url = URL.createObjectURL(response.data);
     const link = document.createElement("a"); link.href = url; link.download = filename; link.click(); URL.revokeObjectURL(url);
   },
+  artifactBlob: async (id: string) => {
+    const response = await apiClient.get<Blob>(API_ENDPOINTS.ADMIN.REPORT_FORWARD_ARTIFACT_DOWNLOAD(id), { responseType: "blob" });
+    return response.data;
+  },
 };

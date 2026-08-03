@@ -15,7 +15,8 @@ from selenium.common.exceptions import (
     ElementClickInterceptedException,
     StaleElementReferenceException,
 )
-from browser_runtime import create_driver
+from browser_runtime import browser_profile_dir, close_driver, create_driver
+from captcha_ocr import recognize_target_code
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +107,12 @@ class TargetLogin:
             logger.warning("飞书监听强制终止")
 
     def _init_driver(self):
-        self.driver = create_driver(headless=self.config.get('browser', {}).get('headless', True))
+        if self.driver is not None:
+            return
+        self.driver = create_driver(
+            headless=self.config.get('browser', {}).get('headless', True),
+            profile_dir=browser_profile_dir("target", self.creds['username']),
+        )
         self.driver.set_page_load_timeout(30)
         self.driver.implicitly_wait(0)
         self.long_wait = WebDriverWait(self.driver, 15)
@@ -312,14 +318,6 @@ class TargetLogin:
     def _solve_image_captcha(self):
         logger.info("识别图片验证码")
 
-        try:
-            import ddddocr
-        except ImportError:
-            logger.error("ddddocr 未安装")
-            return None
-
-        ocr = ddddocr.DdddOcr(show_ad=False)
-
         captcha_img = self._find_captcha_image()
         if not captcha_img:
             try:
@@ -344,13 +342,10 @@ class TargetLogin:
                     return None
                 continue
 
-            result = ocr.classification(img_bytes)
-            logger.info(f"验证码 OCR 原始结果: '{result}'")
+            cleaned, details = recognize_target_code(img_bytes)
+            logger.info("验证码 OCR 投票结果: %s (%s)", cleaned, details)
 
-            cleaned = re.sub(r'[^a-zA-Z0-9]', '', result).strip()
-            if cleaned and len(cleaned) >= 2:
-                if len(cleaned) > 6:
-                    cleaned = cleaned[:4]
+            if cleaned:
 
                 captcha_input = self._find_captcha_input()
                 if not captcha_input:
@@ -362,7 +357,7 @@ class TargetLogin:
                 logger.info(f"验证码已填入: {cleaned}")
                 return cleaned
 
-            logger.warning(f"OCR 识别无效 (attempt {ocr_attempt + 1})，刷新验证码重试")
+            logger.warning(f"OCR 识别低置信度或不一致 (attempt {ocr_attempt + 1})，刷新验证码重试")
             self._refresh_captcha()
             captcha_img = self._find_captcha_image()
             if not captcha_img:
@@ -613,8 +608,23 @@ class TargetLogin:
                 return True
         return False
 
-    def login(self):
+    def _reuse_existing_session(self):
+        logger.info("检查目标政务网持久登录状态")
+        try:
+            self.driver.get(HOME_URL)
+            time.sleep(3)
+            if self._check_login_success():
+                logger.info("复用目标政务网已有登录状态")
+                return True
+        except Exception as error:
+            logger.info("目标政务网登录状态复用失败，将重新登录: %s", error)
+        return False
+
+    def login(self, reuse_session=True):
         self._init_driver()
+
+        if reuse_session and self._reuse_existing_session():
+            return True
 
         self._click_login_entry()
 
@@ -724,18 +734,21 @@ class TargetLogin:
         self._stop_feishu_listener()
         if self.driver:
             try:
-                self.driver.quit()
+                close_driver(self.driver)
                 logger.info("浏览器已关闭")
             except Exception as e:
                 logger.warning(f"关闭浏览器异常: {e}")
 
     def run(self):
         try:
+            self._init_driver()
+            if self._reuse_existing_session():
+                return True
             if not self._start_feishu_listener():
                 logger.error("飞书监听启动失败")
                 return False
 
-            return self.login()
+            return self.login(reuse_session=False)
 
         except Exception as e:
             logger.error(f"登录流程异常: {e}", exc_info=True)

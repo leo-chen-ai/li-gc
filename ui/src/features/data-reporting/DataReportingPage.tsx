@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useAuthUser } from "@/stores/use-auth-store";
 import { reportService } from "./service";
-import type { LifecycleStatus, ReportConfig, ReportConfigPayload, ReportItem, ReportRun, ResultCounts, RunMode, RunProject } from "./types";
+import type { LifecycleStatus, ReportConfig, ReportConfigPayload, ReportItem, ReportRun, ResultCounts, RunArtifact, RunMode, RunProject } from "./types";
 
 type Tab = "dashboard" | "configs" | "tests" | "runs" | "data";
 type ResultOutcome = "all" | "success" | "failed" | "unknown";
@@ -32,7 +32,7 @@ const emptyForm: ConfigForm = {
   name: "", source_username: "", source_password: "", project_mode: "all", include_projects: "",
   exclude_projects: "", target_username: "", target_password: "", feishu_app_id: "", feishu_app_secret: "",
   feishu_chat_id: "", schedule_time: "23:00", lifecycle_status: "draft", is_enabled: false,
-  headless: true, upload_timeout_minutes: "15", latest_entry_days: "30", remark: "",
+  headless: true, upload_timeout_minutes: "10", latest_entry_days: "30", remark: "",
 };
 
 const testCases: Array<{ mode: RunMode; title: string; description: string; danger?: boolean; needsSource?: "raw" | "converted" }> = [
@@ -135,7 +135,7 @@ export function DataReportingPage() {
         target_username: detail.target_username, target_password: detail.target_password ?? "", feishu_app_id: detail.verification_config?.app_id ?? "", feishu_app_secret: detail.verification_config?.app_secret ?? "",
         feishu_chat_id: detail.verification_config?.chat_id ?? "", schedule_time: detail.schedule_time.slice(0, 5), lifecycle_status: detail.lifecycle_status,
         is_enabled: detail.is_enabled, headless: detail.settings.headless !== false,
-        upload_timeout_minutes: String(detail.settings.upload_timeout_minutes ?? 15),
+        upload_timeout_minutes: String(detail.settings.upload_timeout_minutes ?? 10),
         latest_entry_days: String(detail.settings.latest_entry_days ?? 30), remark: detail.remark ?? "",
       });
       setFormOpen(true);
@@ -160,7 +160,7 @@ export function DataReportingPage() {
       schedule_time: form.schedule_time, schedule_timezone: "Asia/Shanghai", lifecycle_status: form.lifecycle_status,
       is_enabled: form.is_enabled, settings: {
         headless: form.headless,
-        upload_timeout_minutes: Math.max(1, Number(form.upload_timeout_minutes) || 15),
+        upload_timeout_minutes: Math.min(10, Math.max(1, Number(form.upload_timeout_minutes) || 10)),
         latest_entry_days: Math.max(1, Number(form.latest_entry_days) || 30),
       },
       remark: form.remark.trim() || null,
@@ -236,7 +236,7 @@ function ConfigTable({ rows, loading, onEdit, onRun, onDelete }: { rows: ReportC
 
   return <div className="space-y-4">{rows.map((row) => {
     const headless = row.settings.headless !== false;
-    const timeout = Number(row.settings.upload_timeout_minutes ?? 15);
+    const timeout = Math.min(10, Number(row.settings.upload_timeout_minutes ?? 10));
     const latestEntryDays = Number(row.settings.latest_entry_days ?? 30);
     return <section key={row.id} className="overflow-hidden rounded-xl border bg-white shadow-sm">
       <header className="flex flex-wrap items-start justify-between gap-3 border-b bg-slate-50/70 px-5 py-4">
@@ -341,29 +341,385 @@ function ConfigDialog({ open, onOpen, editing, form, setForm, submit, saving }: 
   return <Dialog open={open} onOpenChange={onOpen}><DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl"><form onSubmit={submit}><DialogHeader><DialogTitle>{editing ? "编辑报送配置" : "新增报送配置"}</DialogTitle><DialogDescription>编辑时会回填并明文显示当前密码和飞书配置，可直接修改后保存。</DialogDescription></DialogHeader><div className="mt-4 space-y-4"><FormSection title="基础与源网站"><div className="grid gap-4 md:grid-cols-2"><TextField label="配置名称" value={form.name} onChange={(value) => set("name", value)} /><TextField label="源站账号" value={form.source_username} onChange={(value) => set("source_username", value)} /><TextField label="源站密码" value={form.source_password} onChange={(value) => set("source_password", value)} placeholder="请输入密码" /><TextAreaField className="md:col-span-2" label="要拉取的项目名称（一行一个）" value={form.include_projects} onChange={(value) => set("include_projects", value)} placeholder="例如：东部新城明湖南区工程（二期）景观段I标段" description="填写后只拉取名称完全一致的项目，其他项目不处理；留空表示拉取全部项目。" /><TextAreaField className="md:col-span-2" label="额外排除项目（一行一个，可选）" value={form.exclude_projects} onChange={(value) => set("exclude_projects", value)} /></div></FormSection><FormSection title="目标网站与短信验证码"><div className="grid gap-4 md:grid-cols-2"><TextField label="政务网手机号/账号" value={form.target_username} onChange={(value) => set("target_username", value)} /><TextField label="政务网密码" value={form.target_password} onChange={(value) => set("target_password", value)} placeholder="请输入密码" /><TextField label="飞书 App ID" value={form.feishu_app_id} onChange={(value) => set("feishu_app_id", value)} /><TextField label="飞书 App Secret" value={form.feishu_app_secret} onChange={(value) => set("feishu_app_secret", value)} placeholder="请输入 Secret" /><TextField className="md:col-span-2" label="飞书群 Chat ID" value={form.feishu_chat_id} onChange={(value) => set("feishu_chat_id", value)} /></div></FormSection><FormSection title="运行策略"><div className="grid gap-4 md:grid-cols-3"><TextField label="每日运行时间" type="time" value={form.schedule_time} onChange={(value) => set("schedule_time", value)} /><Field label="配置阶段"><NativeSelect value={form.lifecycle_status} onChange={(value) => set("lifecycle_status", value as LifecycleStatus)} options={[{ value: "draft", label: "草稿" }, { value: "testing", label: "测试中" }, { value: "production", label: "正式" }, { value: "paused", label: "暂停" }]} /></Field><TextField label="上传超时（分钟）" type="number" value={form.upload_timeout_minutes} onChange={(value) => set("upload_timeout_minutes", value)} /><TextField label="最新进场天数" type="number" value={form.latest_entry_days} onChange={(value) => set("latest_entry_days", value)} placeholder="30" /><CheckField label="启用每日运行" checked={form.is_enabled} onChange={(value) => set("is_enabled", value)} /><CheckField label="无界面 Chromium" checked={form.headless} onChange={(value) => set("headless", value)} /><TextAreaField className="md:col-span-3" label="备注" value={form.remark} onChange={(value) => set("remark", value)} /></div></FormSection></div><DialogFooter className="mt-5"><Button type="button" variant="outline" onClick={() => onOpen(false)}>取消</Button><Button type="submit" disabled={saving} className="bg-[#0f6b5d]">{saving && <Loader2 className="mr-2 size-4 animate-spin" />}保存配置</Button></DialogFooter></form></DialogContent></Dialog>;
 }
 
-function RunDetail({ open, onOpen, run, loading, onDownload, itemResult, itemsLoading, itemPage, onItemPage, outcome, onOutcome, onExport }: { open: boolean; onOpen: (open: boolean) => void; run?: ReportRun; loading: boolean; onDownload: (id: string, name: string) => void; itemResult?: Awaited<ReturnType<typeof reportService.items>>; itemsLoading: boolean; itemPage: number; onItemPage: (page: number) => void; outcome: ResultOutcome; onOutcome: (value: ResultOutcome) => void; onExport: () => void }) {
-  const pageCount = Math.max(1, Math.ceil((itemResult?.total ?? 0) / (itemResult?.page_size ?? 50)));
-  return <Dialog open={open} onOpenChange={onOpen}><DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-6xl"><DialogHeader><DialogTitle>运行详情</DialogTitle><DialogDescription>{run ? `${run.config_name} · ${modeLabel(run.run_mode)}` : "正在加载"}</DialogDescription></DialogHeader>{loading || !run ? <div className="flex justify-center py-16"><Loader2 className="size-6 animate-spin" /></div> : <div className="space-y-5"><div className="grid gap-3 sm:grid-cols-4"><MiniStat label="状态" value={<StatusBadge status={run.status} />} /><MiniStat label="当前阶段" value={stageLabel(run.current_stage)} /><MiniStat label="人员条数" value={run.item_count} /><MiniStat label="政府汇总 成功/失败" value={`${run.success_count}/${run.failure_count}`} /></div>{run.error_summary && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{run.error_summary}</div>}<section><h3 className="mb-2 font-semibold">项目结果</h3><div className="space-y-2">{run.projects?.length ? run.projects.map((project) => <div key={project.id} className="rounded-lg border p-3 text-sm"><div className="grid gap-2 md:grid-cols-[1fr_auto_auto]"><div><div className="font-medium">{project.external_project_name}</div><div className="text-xs text-red-600">{project.last_error}</div></div><StatusBadge status={project.status} /><span>{project.upload_success_count}/{project.upload_failure_count}</span></div><ProjectResultNote project={project} /></div>) : <Empty text="尚无项目结果" />}</div></section><section><div className="mb-2 flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">人员报送结果</h3><Button size="sm" variant="outline" disabled={itemsLoading} onClick={onExport}><Download className="mr-2 size-4" />导出当前分类 Excel</Button></div><div className="overflow-hidden rounded-lg border"><div className="border-b p-3"><OutcomeTabs value={outcome} counts={itemResult?.counts} onChange={onOutcome} /></div><div className="max-h-96 overflow-auto"><Table><TableHeader className="sticky top-0 z-10 bg-white"><TableRow><TableHead>姓名</TableHead><TableHead>项目</TableHead><TableHead>来源行</TableHead><TableHead>报送结果</TableHead><TableHead>完成时间</TableHead><TableHead>错误/说明</TableHead></TableRow></TableHeader><TableBody>{itemsLoading ? <MessageRow text="人员结果加载中" /> : itemResult?.items.length ? itemResult.items.map((item) => <TableRow key={item.id}><TableCell className="font-medium">{item.person_name}</TableCell><TableCell className="max-w-72 truncate">{item.project_name}</TableCell><TableCell>{item.source_row_no ?? "-"}</TableCell><TableCell><PersonResult item={item} /></TableCell><TableCell className="whitespace-nowrap">{formatTime(item.pushed_at)}</TableCell><TableCell className="max-w-72 text-xs text-red-600">{item.last_error || (item.status === "result_unknown" ? "政府只返回批量汇总，无法确认此人结果" : "-")}</TableCell></TableRow>) : <MessageRow text="当前分类暂无人员数据" />}</TableBody></Table></div><ResultPagination total={itemResult?.total ?? 0} page={itemPage} pageCount={pageCount} loading={itemsLoading} onPage={onItemPage} /></div></section><section><h3 className="mb-2 font-semibold">留存文件</h3><div className="flex flex-wrap gap-2">{run.artifacts?.length ? run.artifacts.map((artifact) => <Button key={artifact.id} size="sm" variant="outline" onClick={() => onDownload(artifact.id, artifact.original_filename)}><Download className="mr-2 size-4" />{artifact.original_filename}</Button>) : <span className="text-sm text-slate-500">暂无文件</span>}</div></section><section><h3 className="mb-2 font-semibold">运行日志</h3><div className="max-h-80 space-y-1 overflow-y-auto rounded-lg bg-slate-950 p-3 font-mono text-xs text-slate-200">{run.events?.length ? run.events.map((event) => <div key={event.id} className={event.level === "error" ? "text-red-300" : event.level === "warning" ? "text-amber-300" : ""}><span className="text-slate-500">{formatTime(event.created_at)}</span> [{stageLabel(event.stage)}] {event.message}</div>) : <div className="text-slate-500">暂无日志</div>}</div></section></div>}</DialogContent></Dialog>;
+function RunDetail({
+  open,
+  onOpen,
+  run,
+  loading,
+  onDownload,
+  itemResult,
+  itemsLoading,
+  itemPage,
+  onItemPage,
+  outcome,
+  onOutcome,
+  onExport,
+}: {
+  open: boolean;
+  onOpen: (open: boolean) => void;
+  run?: ReportRun;
+  loading: boolean;
+  onDownload: (id: string, name: string) => void;
+  itemResult?: Awaited<ReturnType<typeof reportService.items>>;
+  itemsLoading: boolean;
+  itemPage: number;
+  onItemPage: (page: number) => void;
+  outcome: ResultOutcome;
+  onOutcome: (value: ResultOutcome) => void;
+  onExport: () => void;
+}) {
+  const pageCount = Math.max(
+    1,
+    Math.ceil((itemResult?.total ?? 0) / (itemResult?.page_size ?? 50)),
+  );
+  return (
+    <Dialog open={open} onOpenChange={onOpen}>
+      <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-6xl">
+        <DialogHeader>
+          <DialogTitle>运行详情</DialogTitle>
+          <DialogDescription>
+            {run
+              ? `${run.config_name} · ${modeLabel(run.run_mode)}`
+              : "正在加载"}
+          </DialogDescription>
+        </DialogHeader>
+        {loading || !run ? (
+          <div className="flex justify-center py-16">
+            <Loader2 className="size-6 animate-spin" />
+          </div>
+        ) : (
+          <div className="space-y-5">
+            <div className="grid gap-3 sm:grid-cols-4">
+              <MiniStat
+                label="状态"
+                value={<StatusBadge status={run.status} />}
+              />
+              <MiniStat
+                label="当前阶段"
+                value={stageLabel(run.current_stage)}
+              />
+              <MiniStat label="人员条数" value={run.item_count} />
+              <MiniStat
+                label="政府汇总 成功/失败"
+                value={`${run.success_count}/${run.failure_count}`}
+              />
+            </div>
+            {run.error_summary && (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                {run.error_summary}
+              </div>
+            )}
+            <DiagnosticEvidence artifacts={run.artifacts ?? []} />
+            <section>
+              <h3 className="mb-2 font-semibold">项目结果</h3>
+              <div className="space-y-2">
+                {run.projects?.length ? (
+                  run.projects.map((project) => (
+                    <div
+                      key={project.id}
+                      className="rounded-lg border p-3 text-sm"
+                    >
+                      <div className="grid gap-2 md:grid-cols-[1fr_auto_auto]">
+                        <div>
+                          <div className="font-medium">
+                            {project.external_project_name}
+                          </div>
+                          <div className="text-xs text-red-600">
+                            {project.last_error}
+                          </div>
+                        </div>
+                        <StatusBadge status={project.status} />
+                        <span>
+                          {project.upload_success_count}/
+                          {project.upload_failure_count}
+                        </span>
+                      </div>
+                      <ProjectResultNote project={project} />
+                    </div>
+                  ))
+                ) : (
+                  <Empty text="尚无项目结果" />
+                )}
+              </div>
+            </section>
+            <section>
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <h3 className="font-semibold">人员报送结果</h3>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={itemsLoading}
+                  onClick={onExport}
+                >
+                  <Download className="mr-2 size-4" />
+                  导出当前分类 Excel
+                </Button>
+              </div>
+              <div className="overflow-hidden rounded-lg border">
+                <div className="border-b p-3">
+                  <OutcomeTabs
+                    value={outcome}
+                    counts={itemResult?.counts}
+                    onChange={onOutcome}
+                  />
+                </div>
+                <div className="max-h-96 overflow-auto">
+                  <Table>
+                    <TableHeader className="sticky top-0 z-10 bg-white">
+                      <TableRow>
+                        <TableHead>姓名</TableHead>
+                        <TableHead>项目</TableHead>
+                        <TableHead>来源行</TableHead>
+                        <TableHead>报送结果</TableHead>
+                        <TableHead>完成时间</TableHead>
+                        <TableHead>错误/说明</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {itemsLoading ? (
+                        <MessageRow text="人员结果加载中" />
+                      ) : itemResult?.items.length ? (
+                        itemResult.items.map((item) => (
+                          <TableRow key={item.id}>
+                            <TableCell className="font-medium">
+                              {item.person_name}
+                            </TableCell>
+                            <TableCell className="max-w-72 truncate">
+                              {item.project_name}
+                            </TableCell>
+                            <TableCell>{item.source_row_no ?? "-"}</TableCell>
+                            <TableCell>
+                              <PersonResult item={item} />
+                            </TableCell>
+                            <TableCell className="whitespace-nowrap">
+                              {formatTime(item.pushed_at)}
+                            </TableCell>
+                            <TableCell className="max-w-72 text-xs text-red-600">
+                              {item.last_error ||
+                                (item.status === "result_unknown"
+                                  ? "政府只返回批量汇总，无法确认此人结果"
+                                  : "-")}
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      ) : (
+                        <MessageRow text="当前分类暂无人员数据" />
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+                <ResultPagination
+                  total={itemResult?.total ?? 0}
+                  page={itemPage}
+                  pageCount={pageCount}
+                  loading={itemsLoading}
+                  onPage={onItemPage}
+                />
+              </div>
+            </section>
+            <section>
+              <h3 className="mb-2 font-semibold">留存文件</h3>
+              <div className="flex flex-wrap gap-2">
+                {run.artifacts?.length ? (
+                  run.artifacts.map((artifact) => (
+                    <Button
+                      key={artifact.id}
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        onDownload(artifact.id, artifact.original_filename)
+                      }
+                    >
+                      <Download className="mr-2 size-4" />
+                      {artifact.original_filename}
+                    </Button>
+                  ))
+                ) : (
+                  <span className="text-sm text-slate-500">暂无文件</span>
+                )}
+              </div>
+            </section>
+            <section>
+              <h3 className="mb-2 font-semibold">运行日志</h3>
+              <div className="max-h-80 space-y-1 overflow-y-auto rounded-lg bg-slate-950 p-3 font-mono text-xs text-slate-200">
+                {run.events?.length ? (
+                  run.events.map((event) => (
+                    <div
+                      key={event.id}
+                      className={
+                        event.level === "error"
+                          ? "text-red-300"
+                          : event.level === "warning"
+                            ? "text-amber-300"
+                            : ""
+                      }
+                    >
+                      <span className="text-slate-500">
+                        {formatTime(event.created_at)}
+                      </span>{" "}
+                      [{stageLabel(event.stage)}] {event.message}
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-slate-500">暂无日志</div>
+                )}
+              </div>
+            </section>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function DiagnosticEvidence({ artifacts }: { artifacts: RunArtifact[] }) {
+  const diagnostics = artifacts.filter((artifact) => artifact.artifact_type.startsWith("diagnostic_"));
+  if (!diagnostics.length) return null;
+  return <section><h3 className="mb-2 font-semibold">失败现场</h3><div className="space-y-3">{diagnostics.map((artifact) => <DiagnosticArtifact key={artifact.id} artifact={artifact} />)}</div></section>;
+}
+
+function DiagnosticArtifact({ artifact }: { artifact: RunArtifact }) {
+  const [expanded, setExpanded] = useState(false);
+  const isScreenshot = artifact.artifact_type === "diagnostic_screenshot";
+  const content = useQuery({ queryKey: ["report-artifact-preview", artifact.id], queryFn: () => reportService.artifactBlob(artifact.id), staleTime: Infinity, enabled: isScreenshot || expanded });
+  const url = useMemo(() => content.data ? URL.createObjectURL(content.data) : null, [content.data]);
+  useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
+  if (isScreenshot && content.isLoading) return <div className="rounded-lg border p-4 text-sm text-slate-500">现场证据加载中...</div>;
+  if (isScreenshot && !url) return <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">现场证据加载失败</div>;
+  if (isScreenshot) {
+    return <figure className="overflow-hidden rounded-lg border bg-slate-50"><figcaption className="border-b px-3 py-2 text-xs text-slate-600">{artifact.original_filename} · {formatTime(artifact.created_at)}</figcaption><a href={url ?? undefined} target="_blank" rel="noreferrer"><img src={url ?? undefined} alt={artifact.original_filename} className="max-h-[70vh] w-full object-contain" /></a></figure>;
+  }
+  return <details className="overflow-hidden rounded-lg border" onToggle={(event) => setExpanded(event.currentTarget.open)}><summary className="cursor-pointer px-3 py-2 text-sm font-medium">查看页面 HTML · {artifact.original_filename}</summary>{content.isLoading ? <div className="border-t p-4 text-sm text-slate-500">页面 HTML 加载中...</div> : url ? <iframe title={artifact.original_filename} src={url} sandbox="" className="h-[60vh] w-full border-t bg-white" /> : expanded ? <div className="border-t p-4 text-sm text-red-700">页面 HTML 加载失败</div> : null}</details>;
 }
 
 function ProjectResultNote({ project }: { project: RunProject }) {
-  if (!(project.upload_success_count > 0 && project.upload_failure_count > 0 && project.target_receipt?.person_details_available === false)) return null;
-  return <div className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-amber-800">政府平台确认成功 {project.upload_success_count} 条、失败 {project.upload_failure_count} 条，但错误明细未返回完整人员名单，无法可靠定位具体姓名。</div>;
+  if (
+    !(
+      project.upload_success_count > 0 &&
+      project.upload_failure_count > 0 &&
+      project.target_receipt?.person_details_available === false
+    )
+  )
+    return null;
+  return (
+    <div className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-amber-800">
+      政府平台确认成功 {project.upload_success_count} 条、失败{" "}
+      {project.upload_failure_count}{" "}
+      条，但错误明细未返回完整人员名单，无法可靠定位具体姓名。
+    </div>
+  );
 }
 
 function PersonResult({ item }: { item: ReportItem }) {
-  if (item.target_result?.already_exists) return <div><Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">政府平台已存在</Badge><div className="mt-1 text-xs text-slate-500">按成功处理，未重复提交</div></div>;
-  if (item.status === "result_unknown") return <div><Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">未对应到个人</Badge><div className="mt-1 text-xs text-slate-500">仅有批量汇总，无法确认此人结果</div></div>;
+  if (item.target_result?.already_exists)
+    return (
+      <div>
+        <Badge
+          variant="outline"
+          className="border-emerald-200 bg-emerald-50 text-emerald-700"
+        >
+          政府平台已存在
+        </Badge>
+        <div className="mt-1 text-xs text-slate-500">
+          按成功处理，未重复提交
+        </div>
+      </div>
+    );
+  if (item.status === "result_unknown")
+    return (
+      <div>
+        <Badge
+          variant="outline"
+          className="border-amber-200 bg-amber-50 text-amber-700"
+        >
+          未对应到个人
+        </Badge>
+        <div className="mt-1 text-xs text-slate-500">
+          仅有批量汇总，无法确认此人结果
+        </div>
+      </div>
+    );
   if (item.status === "submitted") return <StatusBadge status="submitted" />;
   if (item.status === "validated") return <StatusBadge status="validated" />;
-  return <div><StatusBadge status={item.status} />{item.last_error && <div className="mt-1 max-w-72 text-xs text-red-600">{item.last_error}</div>}</div>;
+  return (
+    <div>
+      <StatusBadge status={item.status} />
+      {item.last_error && (
+        <div className="mt-1 max-w-72 text-xs text-red-600">
+          {item.last_error}
+        </div>
+      )}
+    </div>
+  );
 }
 
-function StatusBadge({ status }: { status: string }) { const color = ["success", "submitted", "validated", "idle"].includes(status) ? "border-emerald-200 bg-emerald-50 text-emerald-700" : ["failed", "offline"].includes(status) ? "border-red-200 bg-red-50 text-red-700" : ["running", "busy"].includes(status) ? "border-blue-200 bg-blue-50 text-blue-700" : ["partial_success", "submitted_with_errors", "validated_with_errors", "warning"].includes(status) ? "border-amber-200 bg-amber-50 text-amber-700" : "border-slate-200 bg-slate-50 text-slate-600"; return <Badge variant="outline" className={color}>{statusLabel(status)}</Badge>; }
-function LifecycleBadge({ config }: { config: ReportConfig }) { return config.is_enabled ? <Badge className="bg-emerald-600">正式启用</Badge> : <Badge variant="outline">{{ draft: "草稿", testing: "测试中", production: "正式未启用", paused: "已暂停" }[config.lifecycle_status]}</Badge>; }
-function MiniStat({ label, value }: { label: string; value: ReactNode }) { return <div className="rounded-lg border p-3"><div className="text-xs text-slate-500">{label}</div><div className="mt-1 font-medium">{value}</div></div>; }
-function FormSection({ title, children }: { title: string; children: ReactNode }) { return <section className="rounded-xl border p-4"><h3 className="mb-4 font-semibold">{title}</h3>{children}</section>; }
-function Field({ label, children }: { label: string; children: ReactNode }) { return <div className="space-y-2"><Label>{label}</Label>{children}</div>; }
+function StatusBadge({ status }: { status: string }) {
+  const color = ["success", "submitted", "validated", "idle"].includes(status)
+    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+    : ["failed", "offline"].includes(status)
+      ? "border-red-200 bg-red-50 text-red-700"
+      : ["running", "busy"].includes(status)
+        ? "border-blue-200 bg-blue-50 text-blue-700"
+        : [
+              "partial_success",
+              "submitted_with_errors",
+              "validated_with_errors",
+              "warning",
+            ].includes(status)
+          ? "border-amber-200 bg-amber-50 text-amber-700"
+          : "border-slate-200 bg-slate-50 text-slate-600";
+  return (
+    <Badge variant="outline" className={color}>
+      {statusLabel(status)}
+    </Badge>
+  );
+}
+function LifecycleBadge({ config }: { config: ReportConfig }) {
+  return config.is_enabled ? (
+    <Badge className="bg-emerald-600">正式启用</Badge>
+  ) : (
+    <Badge variant="outline">
+      {
+        {
+          draft: "草稿",
+          testing: "测试中",
+          production: "正式未启用",
+          paused: "已暂停",
+        }[config.lifecycle_status]
+      }
+    </Badge>
+  );
+}
+function MiniStat({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="rounded-lg border p-3">
+      <div className="text-xs text-slate-500">{label}</div>
+      <div className="mt-1 font-medium">{value}</div>
+    </div>
+  );
+}
+function FormSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="rounded-xl border p-4">
+      <h3 className="mb-4 font-semibold">{title}</h3>
+      {children}
+    </section>
+  );
+}
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      {children}
+    </div>
+  );
+}
 function TextField({ label, value, onChange, type = "text", placeholder, className = "" }: { label: string; value: string; onChange: (value: string) => void; type?: string; placeholder?: string; className?: string }) { return <div className={`space-y-2 ${className}`}><Label>{label}</Label><Input type={type} value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} /></div>; }
 function TextAreaField({ label, value, onChange, disabled, placeholder, description, className = "" }: { label: string; value: string; onChange: (value: string) => void; disabled?: boolean; placeholder?: string; description?: string; className?: string }) { return <div className={`space-y-2 ${className}`}><Label>{label}</Label><textarea className="min-h-20 w-full rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-50" value={value} disabled={disabled} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} />{description && <p className="text-xs text-slate-500">{description}</p>}</div>; }
 function CheckField({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) { return <label className="flex h-10 items-center gap-2 rounded-md border px-3 text-sm"><Checkbox checked={checked} onCheckedChange={(value) => onChange(value === true)} />{label}</label>; }

@@ -1,4 +1,5 @@
 import hashlib
+import json
 import sys
 from contextlib import contextmanager, nullcontext
 from datetime import date, timedelta
@@ -14,8 +15,11 @@ import converter
 import downloader
 import target_login
 import uploader
+import browser_runtime
+import captcha_ocr
 from report_worker.executor import (
     RunExecutor,
+    aggregate_project_results,
     limit_converted_file_rows,
     max_execution_retries,
     parse_converted_items,
@@ -23,6 +27,107 @@ from report_worker.executor import (
 )
 from report_worker.repository import Repository
 from report_worker.storage import ArtifactStorage
+
+
+def test_browser_profile_is_stable_per_site_and_account(monkeypatch, tmp_path):
+    monkeypatch.setenv("REPORT_FORWARD_BROWSER_PROFILES", str(tmp_path))
+    first = browser_runtime.browser_profile_dir("source", "same-account")
+    second = browser_runtime.browser_profile_dir("source", "same-account")
+    target = browser_runtime.browser_profile_dir("target", "same-account")
+
+    assert first == second
+    assert first != target
+    assert "same-account" not in first
+
+
+def test_close_driver_exports_session_cookies(monkeypatch, tmp_path):
+    profile = tmp_path / "profile"
+    profile.mkdir()
+
+    class FakeDriver:
+        _shanhuai_profile_dir = str(profile)
+        quit_called = False
+
+        def execute_cdp_cmd(self, command, _params):
+            assert command == "Network.getAllCookies"
+            return {
+                "cookies": [{
+                    "name": "auth", "value": "session", "domain": "example.test",
+                    "path": "/", "session": True, "size": 11,
+                }]
+            }
+
+        def quit(self):
+            self.quit_called = True
+
+    driver = FakeDriver()
+    browser_runtime.close_driver(driver)
+
+    stored = json.loads((profile / "session-cookies.json").read_text())
+    assert stored == [{
+        "name": "auth", "value": "session", "domain": "example.test", "path": "/",
+    }]
+    assert driver.quit_called is True
+
+
+def test_ocr_consensus_accepts_two_matching_models(monkeypatch):
+    class FakeModel:
+        def __init__(self, text, confidence):
+            self.text = text
+            self.confidence = confidence
+
+        def classification(self, _image, probability=False):
+            return {"text": self.text, "confidence": self.confidence}
+
+    models = iter([FakeModel("a1b2", 0.7), FakeModel("a1b2", 0.72)])
+    monkeypatch.setattr(captcha_ocr, "_ocr_model", lambda *_args: next(models))
+    monkeypatch.setattr(captcha_ocr, "_image_variants", lambda image: [("original", image)])
+
+    text, details = captcha_ocr.recognize_target_code(b"image")
+
+    assert text == "a1b2"
+    assert details["votes"] == 2
+
+
+def test_ocr_classify_supports_probability_arrays():
+    class FakeModel:
+        def classification(self, _image, probability=False):
+            assert probability is True
+            return {"text": "a1b2", "probability": [[0.1, 0.8], [0.2, 0.6]]}
+
+    assert captcha_ocr._classify(FakeModel(), b"image") == ("a1b2", 0.7)
+
+
+def test_ocr_consensus_rejects_weak_disagreement(monkeypatch):
+    class FakeModel:
+        def __init__(self, text):
+            self.text = text
+
+        def classification(self, _image, probability=False):
+            return {"text": self.text, "confidence": 0.7}
+
+    models = iter([FakeModel("a1b2"), FakeModel("c3d4")])
+    monkeypatch.setattr(captcha_ocr, "_ocr_model", lambda *_args: next(models))
+    monkeypatch.setattr(captcha_ocr, "_image_variants", lambda image: [("original", image)])
+
+    text, details = captcha_ocr.recognize_target_code(b"image")
+
+    assert text is None
+    assert details["reason"] == "low_consensus"
+
+
+def test_math_ocr_limits_charset_and_normalizes_operator(monkeypatch):
+    class FakeModel:
+        def classification(self, _image, probability=False):
+            return {"text": "7T8=?", "confidence": 0.9}
+
+    monkeypatch.setattr(captcha_ocr, "_ocr_model", lambda *_args: FakeModel())
+    monkeypatch.setattr(captcha_ocr, "_image_variants", lambda image: [("original", image)])
+
+    text, details = captcha_ocr.recognize_math_expression(b"image")
+
+    assert text == "7x8=?"
+    assert details["votes"] == 2
 
 
 def test_parse_converted_items(tmp_path):
@@ -319,54 +424,19 @@ def test_login_feedback_does_not_wait_for_absent_optional_messages():
     assert downloader.driver.waits == [0, 5]
 
 
-def test_source_entry_uses_legacy_jump_page_when_present(monkeypatch):
+def test_source_entry_navigates_directly_to_project_list(monkeypatch):
     instance = executor_module.Downloader.__new__(executor_module.Downloader)
-    clicked = []
-    responses = iter([object(), object()])
-
-    def find_and_click(
-        _by, _value, description="", timeout=10, warn_on_timeout=True
-    ):
-        clicked.append((description, timeout, warn_on_timeout))
-        return next(responses)
-
-    instance._find_and_click = find_and_click
+    class FakeDriver:
+        current_url = "http://tg.91jtg.com/#/home"
+        navigated = None
+        def get(self, url):
+            self.navigated = url
+            self.current_url = url
+    instance.driver = FakeDriver()
     monkeypatch.setattr(downloader.time, "sleep", lambda _seconds: None)
 
     assert instance._enter_project_list() is True
-    assert clicked == [
-        ("跳转按钮", 5, False),
-        ("项目(工地)总数", 10, True),
-    ]
-
-
-def test_source_entry_accepts_direct_home_without_jump_button(monkeypatch):
-    instance = executor_module.Downloader.__new__(executor_module.Downloader)
-    clicked = []
-    responses = iter([None, object()])
-
-    def find_and_click(
-        _by, _value, description="", timeout=10, warn_on_timeout=True
-    ):
-        clicked.append((description, timeout, warn_on_timeout))
-        return next(responses)
-
-    instance._find_and_click = find_and_click
-    monkeypatch.setattr(downloader.time, "sleep", lambda _seconds: None)
-
-    assert instance._enter_project_list() is True
-    assert clicked == [
-        ("跳转按钮", 5, False),
-        ("项目(工地)总数", 10, True),
-    ]
-
-
-def test_source_entry_fails_when_home_has_no_project_total(monkeypatch):
-    instance = executor_module.Downloader.__new__(executor_module.Downloader)
-    instance._find_and_click = lambda *_args, **_kwargs: None
-    monkeypatch.setattr(downloader.time, "sleep", lambda _seconds: None)
-
-    assert instance._enter_project_list() is False
+    assert instance.driver.navigated == "http://tg.91jtg.com/#/project/index"
 
 
 def test_upload_with_row_failures_is_partial_success(monkeypatch, tmp_path):
@@ -615,6 +685,7 @@ def test_uploader_retries_only_the_failed_project(monkeypatch, tmp_path):
         return {"project_name": project_name, "status": "success"}
 
     monkeypatch.setattr(instance, "_upload_single_file", upload_file)
+    monkeypatch.setattr(uploader, "split_upload_workbook", lambda path: [path])
     monkeypatch.setattr(instance, "_log_page_state", lambda *_args: None)
     monkeypatch.setattr(instance, "_restart_session", lambda: restarts.append(True))
 
@@ -623,4 +694,60 @@ def test_uploader_retries_only_the_failed_project(monkeypatch, tmp_path):
     assert len(attempts) == 2
     assert attempts[1][1] is True
     assert restarts == [True]
+
+
+def test_split_upload_workbook_uses_200_row_batches(tmp_path):
+    path = tmp_path / "20260803_测试项目_姜太公导出.xlsx"
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "sheet1"
+    for row_number in range(3, 656):
+        sheet.cell(row=row_number, column=1, value=f"人员{row_number}")
+        sheet.cell(row=row_number, column=5, value=f"证件{row_number}")
+    workbook.save(path)
+    workbook.close()
+
+    batches = uploader.split_upload_workbook(str(path))
+
+    assert [uploader.count_upload_rows(batch) for batch in batches] == [200, 200, 200, 53]
+    assert all(uploader.extract_project_name(batch) == "测试项目" for batch in batches)
+
+
+def test_aggregate_project_results_sums_upload_batches():
+    results = aggregate_project_results([
+        {
+            "project_name": "测试项目", "status": "success",
+            "total_rows": 200, "success_rows": 190, "failure_rows": 10,
+            "person_details_available": True, "person_results": [{"person_name": "甲"}],
+        },
+        {
+            "project_name": "测试项目", "status": "success",
+            "total_rows": 53, "success_rows": 50, "failure_rows": 3,
+            "person_details_available": True, "person_results": [{"person_name": "乙"}],
+        },
+    ])
+
+    assert len(results) == 1
+    assert results[0]["total_rows"] == 253
+    assert results[0]["success_rows"] == 240
+    assert results[0]["failure_rows"] == 13
+    assert len(results[0]["person_results"]) == 2
+    assert len(results[0]["batches"]) == 2
     assert results[0]["status"] == "success"
+
+
+def test_aggregate_project_results_does_not_spread_single_existing_person():
+    results = aggregate_project_results([
+        {
+            "project_name": "测试项目", "status": "success",
+            "total_rows": 200, "success_rows": 200, "failure_rows": 0,
+        },
+        {
+            "project_name": "测试项目", "status": "success",
+            "total_rows": 1, "success_rows": 1, "failure_rows": 0,
+            "already_exists": True,
+        },
+    ])
+
+    assert results[0]["total_rows"] == 201
+    assert results[0]["already_exists"] is False

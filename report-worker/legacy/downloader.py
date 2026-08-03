@@ -16,11 +16,12 @@ from selenium.common.exceptions import (
     ElementClickInterceptedException,
     StaleElementReferenceException,
 )
-from browser_runtime import create_driver
+from browser_runtime import browser_profile_dir, close_driver, create_driver
+from captcha_ocr import recognize_math_expression
 
 logger = logging.getLogger(__name__)
 
-PROJECT_LIST_URL = "https://tg.91jtg.com/#/project/index"
+PROJECT_LIST_URL = "http://tg.91jtg.com/#/project/index"
 
 LOGIN_URL = "http://tg.91jtg.com/#/login"
 MAX_CAPTCHA_RETRIES = 5
@@ -52,6 +53,7 @@ class Downloader:
         self.driver = create_driver(
             self.download_dir,
             headless=self.browser_config.get('headless', True),
+            profile_dir=browser_profile_dir("source", self.creds['username']),
         )
         self.driver.set_page_load_timeout(PAGE_LOAD_TIMEOUT)
         self.driver.implicitly_wait(5)
@@ -80,17 +82,11 @@ class Downloader:
 
     def _solve_captcha(self, image_element):
         try:
-            import ddddocr
-            ocr = ddddocr.DdddOcr(show_ad=False)
-        except ImportError:
-            logger.error("ddddocr 未安装，请运行: pip install ddddocr")
-            return None
-
-        try:
             img_bytes = image_element.screenshot_as_png
-
-            result = ocr.classification(img_bytes)
-            logger.info(f"验证码 OCR 原始结果: {result}")
+            result, details = recognize_math_expression(img_bytes)
+            logger.info("验证码 OCR 投票结果: %s (%s)", result, details)
+            if not result:
+                return None
 
             match = re.search(r'(\d)\s*([+\-*/×÷xXtT])\s*(\d)', result)
             if not match:
@@ -123,6 +119,8 @@ class Downloader:
 
     def login(self):
         self._init_driver()
+        if self._reuse_existing_session():
+            return True
         logger.info(f"正在打开登录页面: {LOGIN_URL}")
         self.driver.get(LOGIN_URL)
         time.sleep(3)
@@ -164,6 +162,9 @@ class Downloader:
                 feedback = self._login_feedback()
                 if feedback:
                     logger.warning("源站登录响应: %s", feedback)
+                    if "Bad credentials" in feedback or "密码错误" in feedback or "锁定" in feedback:
+                        logger.error("源站凭据错误或账号已锁定，停止验证码重试")
+                        return False
                 time.sleep(2)
 
                 if self._check_login_success():
@@ -187,6 +188,28 @@ class Downloader:
                 time.sleep(1)
 
         logger.error(f"登录失败，已重试 {MAX_CAPTCHA_RETRIES} 次")
+        return False
+
+    def _reuse_existing_session(self):
+        logger.info("检查源站持久登录状态")
+        try:
+            self.driver.get(PROJECT_LIST_URL)
+            login_inputs = WebDriverWait(self.driver, 6).until(
+                lambda driver: driver.find_elements(By.XPATH, "//input[@placeholder='请输入用户名']")
+                or driver.find_elements(
+                    By.XPATH,
+                    "//*[contains(text(),'项目') and (contains(text(),'总数') or contains(text(),'工地'))] | //*[contains(text(),'跳转')]",
+                )
+            )
+            if any(element.get_attribute("placeholder") == "请输入用户名" for element in login_inputs):
+                logger.info("源站登录状态不存在或已过期")
+                return False
+            logger.info("复用源站已有登录状态")
+            return True
+        except TimeoutException:
+            logger.info("源站登录状态无法确认，将重新登录")
+        except Exception as error:
+            logger.info("源站登录状态复用失败，将重新登录: %s", error)
         return False
 
     def _login_feedback(self):
@@ -279,32 +302,27 @@ class Downloader:
             return []
 
     def _enter_project_list(self):
-        """Support both the legacy jump page and accounts landing on home directly."""
-        logger.info("检查登录后的源站入口...")
-        skip_btn = self._find_and_click(
-            By.XPATH,
-            "//*[contains(text(),'跳转')]",
-            description="跳转按钮",
-            timeout=5,
-            warn_on_timeout=False,
-        )
-        if skip_btn:
-            logger.info("检测到旧版跳转入口，继续进入系统首页")
-            time.sleep(5)
-        else:
-            logger.info("未显示跳转按钮，按直接进入系统首页的方式继续")
-
-        logger.info("寻找'项目(工地)总数'...")
-        project_btn = self._find_and_click(
-            By.XPATH,
-            "//*[contains(text(),'项目') and contains(text(),'总数')]",
-            description="项目(工地)总数",
-        )
-        if not project_btn:
-            logger.error("登录后既未进入可用首页，也未找到项目(工地)总数")
+        """Open the stable source-site project list route directly after login."""
+        if not hasattr(self, "driver"):
             return False
-        time.sleep(3)
-        return True
+        current_url = self.driver.current_url or ""
+        if "#/project/index" not in current_url:
+            logger.info("登录成功，直接导航到项目列表: %s", PROJECT_LIST_URL)
+            try:
+                self.driver.get(PROJECT_LIST_URL)
+            except Exception as error:
+                logger.warning("项目列表导航异常: %s", error)
+                return False
+        try:
+            WebDriverWait(self.driver, 15).until(
+                lambda driver: "#/project/index" in (driver.current_url or "")
+            )
+            time.sleep(2)
+            logger.info("已进入项目列表页")
+            return True
+        except TimeoutException:
+            logger.error("项目列表页面加载超时，当前 URL: %s", self.driver.current_url)
+            return False
 
     def _check_expired(self):
         try:
@@ -367,6 +385,50 @@ class Downloader:
             log = logger.warning if warn_on_timeout else logger.info
             log(f"未找到可点击元素: {description}")
             return None
+
+    def _find_and_click_text(
+        self, text, description="", extra_terms=(), timeout=10, warn_on_timeout=True
+    ):
+        """Click text rendered by buttons/links, including nested spans and router links.
+
+        The source site has used both ``<button><span>`` and ``<a>``/role-button
+        variants for the same entry.  ``element_to_be_clickable`` on the inner
+        span is brittle, so first select the nearest interactive ancestor and
+        retain a JS fallback for transparent overlays used by the SPA.
+        """
+        terms = tuple(str(term) for term in extra_terms)
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            candidates = self.driver.find_elements(
+                By.XPATH,
+                "//button | //a | //*[@role='button'] | "
+                "//*[contains(@class,'el-button') or contains(@class,'el-link')]",
+            )
+            for element in candidates:
+                try:
+                    if not element.is_displayed() or not element.is_enabled():
+                        continue
+                    rendered = re.sub(r"\s+", "", element.text or "")
+                    if text not in rendered or any(term not in rendered for term in terms):
+                        continue
+                    self.driver.execute_script(
+                        "arguments[0].scrollIntoView({block:'center', inline:'center'});",
+                        element,
+                    )
+                    try:
+                        element.click()
+                    except Exception:
+                        self.driver.execute_script("arguments[0].click();", element)
+                    logger.info("已点击: %s (文本兼容定位: %s)", description, rendered[:80])
+                    return element
+                except (StaleElementReferenceException, ElementClickInterceptedException):
+                    continue
+                except Exception:
+                    continue
+            time.sleep(0.25)
+        log = logger.warning if warn_on_timeout else logger.info
+        log("未找到可点击文本元素: %s", description)
+        return None
 
     def _get_current_page_project_names(self):
         links = self.driver.find_elements(
@@ -595,7 +657,7 @@ class Downloader:
     def close(self):
         if self.driver:
             try:
-                self.driver.quit()
+                close_driver(self.driver)
                 logger.info("浏览器已关闭")
             except Exception:
                 pass
