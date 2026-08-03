@@ -690,6 +690,7 @@ export type ConstructionResourceListFilters = {
   project_id?: string;
   unit_id?: string;
   team_id?: string;
+  worker_id?: string;
   company_type?: number;
   salary_calc_type?: number;
   work_type?: number;
