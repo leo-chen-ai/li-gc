@@ -5633,14 +5633,14 @@ async fn build_ningbo_worker_basic_request(
     let id_card_photo = load_worker_image_base64(
         state,
         &source.id_card_photo_url,
-        crate::infrastructure::image_compression::WORKER_ID_CARD_MAX_BYTES,
+        NINGBO_WORKER_IMAGE_MAX_BYTES,
         "身份证人像面",
     )
     .await?;
     let face_photo = load_worker_image_base64(
         state,
         &source.face_photo_url,
-        crate::infrastructure::image_compression::WORKER_AVATAR_MAX_BYTES,
+        NINGBO_WORKER_IMAGE_MAX_BYTES,
         "人员头像",
     )
     .await?;
@@ -5676,6 +5676,10 @@ async fn build_ningbo_worker_basic_request(
         face_photo,
     })
 }
+
+// Keep every populated worker image sent to the Ningbo housing platform well
+// below its Base64 field limits. PositiveIdCardFile reuses id_card_photo.
+const NINGBO_WORKER_IMAGE_MAX_BYTES: usize = 20 * 1024;
 
 async fn load_worker_image_base64(
     state: &AppState,
@@ -12059,6 +12063,15 @@ mod tests {
         }
         assert!(!is_official_ningbo_worker_work_type(12));
         assert!(!is_official_ningbo_worker_work_type(0));
+    }
+
+    #[test]
+    fn ningbo_worker_image_limit_is_safe_after_base64_encoding() {
+        const NINGBO_WORKER_IMAGE_MAX_BASE64_CHARS: usize = 66_560;
+        let maximum_encoded_length = NINGBO_WORKER_IMAGE_MAX_BYTES.div_ceil(3) * 4;
+
+        assert_eq!(NINGBO_WORKER_IMAGE_MAX_BYTES, 20 * 1024);
+        assert!(maximum_encoded_length <= NINGBO_WORKER_IMAGE_MAX_BASE64_CHARS);
     }
 
     #[test]
