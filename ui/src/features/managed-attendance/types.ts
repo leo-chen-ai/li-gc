@@ -41,8 +41,21 @@ export type ManagedAttendanceConfig = ManagedAttendanceConfigLike & {
   worker_id: string;
   worker_name?: string | null;
   worker_id_card?: string | null;
+  attendance_device_id?: string | null;
+  attendance_device_name?: string | null;
+  attendance_device_serial_number?: string | null;
+  attendance_device_type?: string | null;
   photo_group_id?: string | null;
   photo_group_name?: string | null;
+  team_name?: string | null;
+  in_photos?: string[] | null;
+  out_photos?: string[] | null;
+  managed_record_count?: number;
+  last_generated_at?: string | null;
+  last_generated_month?: string | null;
+  pending_count?: number;
+  success_count?: number;
+  failed_count?: number;
   is_enabled: boolean;
   remark?: string | null;
   created_at?: string;
@@ -52,6 +65,7 @@ export type ManagedAttendanceConfig = ManagedAttendanceConfigLike & {
 export type ManagedAttendanceConfigPayload = {
   project_id: string;
   worker_id: string;
+  attendance_device_id: string | null;
   photo_group_id?: string | null;
   monthly_attendance_days: number;
   shift: ManagedAttendanceShift;
@@ -77,11 +91,16 @@ export type ManagedAttendanceRecord = {
   planned_at: string;
   photo_url?: string | null;
   status: string;
+  dispatch_status: "pending" | "processing" | "success" | "failed" | "skipped";
+  dispatched_at?: string | null;
+  dispatch_message?: string | null;
   error_message?: string | null;
 };
 
 export type ManagedAttendanceListFilters = {
   project_id?: string;
+  worker_id?: string;
+  config_id?: string;
   keyword?: string;
   status?: string;
   month?: string;

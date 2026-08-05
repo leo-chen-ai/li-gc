@@ -96,6 +96,7 @@ export type AttendanceRecord = {
   time: string;
   device: string;
   photoUrl?: string;
+  generated?: boolean;
   status: "有效" | "待补图" | "异常";
 };
 

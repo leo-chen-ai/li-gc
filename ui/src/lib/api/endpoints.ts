@@ -67,6 +67,7 @@ export const API_ENDPOINTS = {
     ATTENDANCE_DEVICE_ISSUE_REPORTS: "/management/attendance-device-issue-reports",
     ATTENDANCE_DEVICE_ISSUE_REPORT: (reportId: string) =>
       `/management/attendance-device-issue-reports/${reportId}`,
+    SUPPLEMENTAL_ATTENDANCE_RECORDS: "/management/supplemental-attendance/records",
     PERSONNEL_WORKERS: "/management/personnel-workers",
     PERSONNEL_WORKER: (workerId: string) =>
       `/management/personnel-workers/${workerId}`,
@@ -111,6 +112,10 @@ export const API_ENDPOINTS = {
       `/admin/projects/${projectId}/attendance-records/export`,
     PROJECT_ATTENDANCE_RECORD: (projectId: string, attendanceId: string) =>
       `/admin/projects/${projectId}/attendance-records/${attendanceId}`,
+    PROJECT_ATTENDANCE_GENERATOR_PREVIEW: (projectId: string) =>
+      `/admin/projects/${projectId}/attendance-generator/preview`,
+    PROJECT_ATTENDANCE_GENERATOR_COMMIT: (projectId: string) =>
+      `/admin/projects/${projectId}/attendance-generator/commit`,
     PROJECT_WAGE_BATCHES: (projectId: string) =>
       `/admin/projects/${projectId}/wage-batches`,
     PROJECT_WAGE_BATCH: (projectId: string, batchId: string) =>

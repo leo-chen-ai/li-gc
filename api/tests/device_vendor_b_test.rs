@@ -70,6 +70,26 @@ async fn post_quality_json(
     (status, serde_json::from_slice(&bytes).unwrap())
 }
 
+async fn post_attendance_results_json(
+    app: axum::Router,
+    payload: &Value,
+) -> (axum::http::StatusCode, Value) {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/attendance-results")
+                .header("content-type", "application/json")
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    (status, serde_json::from_slice(&bytes).unwrap())
+}
+
 #[tokio::test]
 async fn b_vendor_workers_support_registered_device_full_and_incremental_downloads() {
     let (app, pool, _container) = build_test_app_with_pool().await;
@@ -680,4 +700,296 @@ async fn b_vendor_photo_upload_persists_business_attendance_and_is_idempotent() 
     assert_eq!(record_count, 1);
 
     let _ = tokio::fs::remove_dir_all(upload_dir).await;
+}
+
+#[tokio::test]
+async fn supplemental_attendance_pull_and_callbacks_enforce_due_lease_ownership_and_transitions() {
+    let (app, pool, _container) = build_test_app_with_pool().await;
+    let project_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO construction_projects (name, status) VALUES ('补录考勤项目', 1) RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let unit_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO construction_units (project_id, company_name) VALUES ($1, '补录单位') RETURNING id",
+    )
+    .bind(project_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let team_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO construction_teams (project_id, unit_id, name, work_type) VALUES ($1, $2, '补录班组', 900) RETURNING id",
+    )
+    .bind(project_id)
+    .bind(unit_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let worker_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO construction_workers (project_id, unit_id, team_id, name) VALUES ($1, $2, $3, '补录人员') RETURNING id",
+    )
+    .bind(project_id)
+    .bind(unit_id)
+    .bind(team_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let devices = sqlx::query_as::<_, (Uuid, String)>(
+        r#"
+        INSERT INTO construction_attendance_devices (project_id, device_type, serial_number, device_name)
+        VALUES
+            ($1, 'B厂家', 'SUPPLEMENTAL-B-001', '补录一号机'),
+            ($1, 'B厂家', 'SUPPLEMENTAL-B-002', '补录二号机')
+        RETURNING id, serial_number
+        "#,
+    )
+    .bind(project_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let device_one_id = devices
+        .iter()
+        .find(|device| device.1 == "SUPPLEMENTAL-B-001")
+        .unwrap()
+        .0;
+    let device_two_id = devices
+        .iter()
+        .find(|device| device.1 == "SUPPLEMENTAL-B-002")
+        .unwrap()
+        .0;
+    let config_id: Uuid = sqlx::query_scalar(
+        r#"
+        INSERT INTO construction_managed_attendance_configs (
+            project_id, worker_id, attendance_device_id, monthly_attendance_days,
+            shift, check_in_time, check_out_time
+        ) VALUES ($1, $2, $3, 3, 'day', '08:00', '18:00')
+        RETURNING id
+        "#,
+    )
+    .bind(project_id)
+    .bind(worker_id)
+    .bind(device_one_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let now = chrono::Utc::now();
+    let today = now.date_naive();
+    let record_sql = r#"
+        INSERT INTO construction_managed_attendance_records (
+            config_id, project_id, worker_id, worker_name, attendance_date,
+            direction, shift, planned_at, photo_url
+        ) VALUES ($1, $2, $3, '补录人员', $4, $5, 'day', $6, $7)
+        RETURNING id
+    "#;
+    let due_record_id: Uuid = sqlx::query_scalar(record_sql)
+        .bind(config_id)
+        .bind(project_id)
+        .bind(worker_id)
+        .bind(today)
+        .bind(0_i16)
+        .bind(now - chrono::Duration::minutes(1))
+        .bind("https://example.test/supplemental-in.jpg")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let future_record_id: Uuid = sqlx::query_scalar(record_sql)
+        .bind(config_id)
+        .bind(project_id)
+        .bind(worker_id)
+        .bind(today.succ_opt().unwrap())
+        .bind(1_i16)
+        .bind(now + chrono::Duration::hours(1))
+        .bind(Option::<String>::None)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let other_device_record_id: Uuid = sqlx::query_scalar(record_sql)
+        .bind(config_id)
+        .bind(project_id)
+        .bind(worker_id)
+        .bind(today.succ_opt().unwrap().succ_opt().unwrap())
+        .bind(1_i16)
+        .bind(now - chrono::Duration::minutes(1))
+        .bind(Option::<String>::None)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    for (record_id, device_id, serial_number) in [
+        (due_record_id, device_one_id, "SUPPLEMENTAL-B-001"),
+        (future_record_id, device_one_id, "SUPPLEMENTAL-B-001"),
+        (other_device_record_id, device_two_id, "SUPPLEMENTAL-B-002"),
+    ] {
+        sqlx::query(
+            r#"
+            INSERT INTO device_dispatch_jobs (
+                project_id, worker_id, attendance_device_id, device_sn, action,
+                message_id, payload, job_type, adapter_code, transport,
+                managed_attendance_record_id
+            ) VALUES (
+                $1, $2, $3, $4, 'supplemental_attendance', $5, '{}'::jsonb,
+                'supplemental_attendance', 'vendor_b', 'http_pull', $6
+            )
+            "#,
+        )
+        .bind(project_id)
+        .bind(worker_id)
+        .bind(device_id)
+        .bind(serial_number)
+        .bind(format!("supplemental-{record_id}-{device_id}"))
+        .bind(record_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let future_job_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM device_dispatch_jobs WHERE managed_attendance_record_id = $1",
+    )
+    .bind(future_record_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let (status, unclaimed_error) = post_attendance_results_json(
+        app.clone(),
+        &serde_json::json!({
+            "deviceId": "SUPPLEMENTAL-B-001",
+            "data": {"jobId": future_job_id, "status": "success"}
+        }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::NOT_FOUND,
+        "{unclaimed_error}"
+    );
+
+    let (status, first_pull) = get_json(
+        app.clone(),
+        &format!(
+            "/attendance-jobs?deviceId=SUPPLEMENTAL-B-001&update={}",
+            now.timestamp()
+        ),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{first_pull}");
+    assert_eq!(first_pull["event"], "attendanceJobs");
+    assert_eq!(first_pull["data"].as_array().unwrap().len(), 1);
+    let job_id = first_pull["data"][0]["jobId"].as_str().unwrap().to_owned();
+    let message_id = first_pull["data"][0]["messageId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(first_pull["data"][0]["direction"], "in");
+    assert_eq!(first_pull["data"][0]["attemptCount"], 1);
+    assert!(first_pull["time"].as_i64().unwrap() >= now.timestamp());
+
+    let (_, active_lease_pull) =
+        get_json(app.clone(), "/attendance-jobs?deviceId=SUPPLEMENTAL-B-001").await;
+    assert!(active_lease_pull["data"].as_array().unwrap().is_empty());
+    sqlx::query(
+        "UPDATE device_dispatch_jobs SET locked_until = NOW() - INTERVAL '1 second' WHERE id = $1",
+    )
+    .bind(Uuid::parse_str(&job_id).unwrap())
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (_, expired_lease_pull) =
+        get_json(app.clone(), "/attendance-jobs?deviceId=SUPPLEMENTAL-B-001").await;
+    assert_eq!(expired_lease_pull["data"][0]["jobId"], job_id);
+    assert_eq!(expired_lease_pull["data"][0]["messageId"], message_id);
+    assert_eq!(expired_lease_pull["data"][0]["attemptCount"], 2);
+
+    sqlx::query(
+        "UPDATE construction_managed_attendance_configs SET is_enabled = FALSE WHERE id = $1",
+    )
+    .bind(config_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, ownership_error) = post_attendance_results_json(
+        app.clone(),
+        &serde_json::json!({
+            "deviceId": "SUPPLEMENTAL-B-002",
+            "data": {"jobId": job_id, "status": "success"}
+        }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::NOT_FOUND,
+        "{ownership_error}"
+    );
+    assert_eq!(ownership_error["event"], "attendanceResults");
+
+    for (payload, expected_status) in [
+        (
+            serde_json::json!({"jobId": job_id, "status": "processing", "code": 0, "message": "已排队"}),
+            "accepted",
+        ),
+        (
+            serde_json::json!({"jobId": job_id, "status": "processing", "code": 0, "message": "已排队"}),
+            "accepted",
+        ),
+        (
+            serde_json::json!({"jobId": job_id, "status": "failed", "code": 42, "message": "临时失败"}),
+            "failed",
+        ),
+        (
+            serde_json::json!({"jobId": job_id, "success": true, "code": 0, "message": "补录成功"}),
+            "success",
+        ),
+        (
+            serde_json::json!({"jobId": job_id, "success": false, "code": 99, "message": "迟到失败"}),
+            "success",
+        ),
+    ] {
+        let (status, response) = post_attendance_results_json(
+            app.clone(),
+            &serde_json::json!({
+                "deviceId": "SUPPLEMENTAL-B-001",
+                "data": payload
+            }),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{response}");
+        assert_eq!(response["event"], "attendanceResults");
+        assert_eq!(response["data"][0]["status"], expected_status);
+    }
+
+    let persisted = sqlx::query_as::<_, (String, String, String)>(
+        r#"
+        SELECT j.status, j.device_result_status, r.dispatch_status
+        FROM device_dispatch_jobs j
+        JOIN construction_managed_attendance_records r ON r.id = j.managed_attendance_record_id
+        WHERE j.id = $1
+        "#,
+    )
+    .bind(Uuid::parse_str(&job_id).unwrap())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(persisted.0, "delivered");
+    assert_eq!(persisted.1, "success");
+    assert_eq!(persisted.2, "success");
+    let event_types: Vec<String> = sqlx::query_scalar(
+        "SELECT event_type FROM device_dispatch_events WHERE job_id = $1 ORDER BY created_at",
+    )
+    .bind(Uuid::parse_str(&job_id).unwrap())
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert!(
+        event_types
+            .iter()
+            .any(|event| event == "attendance_result_duplicate")
+    );
+    assert!(
+        event_types
+            .iter()
+            .any(|event| event == "attendance_result_ignored")
+    );
 }

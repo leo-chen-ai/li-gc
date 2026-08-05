@@ -43,6 +43,46 @@ async fn persisted_admin_token(pool: &sqlx::PgPool) -> String {
         .access_token
 }
 
+async fn insert_unassigned_managed_record(pool: &sqlx::PgPool, name: &str) -> (Uuid, Uuid) {
+    sqlx::query_as::<_, (Uuid, Uuid)>(
+        r#"
+        WITH project AS (
+            INSERT INTO construction_projects (name, status) VALUES ($1, 1) RETURNING id
+        ), unit AS (
+            INSERT INTO construction_units (project_id, company_name)
+            SELECT id, $1 || '单位' FROM project RETURNING id, project_id
+        ), team AS (
+            INSERT INTO construction_teams (project_id, unit_id, name, work_type)
+            SELECT project_id, id, $1 || '班组', 900 FROM unit RETURNING id, project_id, unit_id
+        ), worker AS (
+            INSERT INTO construction_workers (project_id, unit_id, team_id, name)
+            SELECT project_id, unit_id, id, $1 || '人员' FROM team RETURNING id, project_id
+        ), config AS (
+            INSERT INTO construction_managed_attendance_configs (
+                project_id, worker_id, monthly_attendance_days, shift, check_in_time, check_out_time
+            )
+            SELECT project_id, id, 1, 'day', '08:00', '18:00' FROM worker
+            RETURNING id, project_id, worker_id
+        ), record AS (
+            INSERT INTO construction_managed_attendance_records (
+                config_id, project_id, worker_id, worker_name, attendance_date,
+                direction, shift, planned_at, dispatch_status, dispatch_message
+            )
+            SELECT id, project_id, worker_id, $1 || '人员', DATE '2026-08-05',
+                   0, 'day', TIMESTAMPTZ '2026-08-05 08:00:00+08', 'skipped',
+                   '未配置目标考勤设备，未创建下发任务'
+            FROM config
+            RETURNING id, project_id
+        )
+        SELECT project_id, id FROM record
+        "#,
+    )
+    .bind(name)
+    .fetch_one(pool)
+    .await
+    .expect("insert unassigned managed attendance record")
+}
+
 async fn authed_json(
     app: axum::Router,
     method: &str,
@@ -559,7 +599,7 @@ async fn admin_can_manage_project_nested_resources_and_fake_attendance() {
 
 #[tokio::test]
 async fn admin_can_configure_generate_and_list_managed_attendance() {
-    let (app, _c) = build_test_app().await;
+    let (app, pool, _c) = build_test_app_with_pool().await;
     let token = admin_token();
 
     let (status, body) = authed_json(
@@ -576,6 +616,21 @@ async fn admin_can_configure_generate_and_list_managed_attendance() {
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
     let project_id = body["data"]["id"].as_str().expect("project id");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/attendance-devices"),
+        &token,
+        json!({
+            "device_type": "B厂家",
+            "serial_number": "MANAGED-B-001",
+            "device_name": "托管考勤补录机"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let attendance_device_id = body["data"]["id"].as_str().expect("attendance device id");
 
     let (status, body) = authed_json(
         app.clone(),
@@ -666,6 +721,23 @@ async fn admin_can_configure_generate_and_list_managed_attendance() {
     assert_eq!(body["data"]["name"], "张三夜班照片组");
     assert_eq!(body["data"]["generation_status"], "ready");
 
+    let foreign_project_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO construction_projects (name, status) VALUES ('其他设备项目', 1) RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let foreign_device_id: Uuid = sqlx::query_scalar(
+        r#"
+        INSERT INTO construction_attendance_devices (project_id, device_type, serial_number)
+        VALUES ($1, 'B厂家', 'FOREIGN-B-001')
+        RETURNING id
+        "#,
+    )
+    .bind(foreign_project_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     let (status, body) = authed_json(
         app.clone(),
         "POST",
@@ -675,6 +747,26 @@ async fn admin_can_configure_generate_and_list_managed_attendance() {
             "project_id": project_id,
             "worker_id": worker_id,
             "photo_group_id": photo_group_id,
+            "attendance_device_id": foreign_device_id,
+            "monthly_attendance_days": 3,
+            "shift": "night",
+            "check_in_time": "19:10",
+            "check_out_time": "23:05"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        "/api/v1/admin/managed-attendance/configs",
+        &token,
+        json!({
+            "project_id": project_id,
+            "worker_id": worker_id,
+            "photo_group_id": photo_group_id,
+            "attendance_device_id": attendance_device_id,
             "monthly_attendance_days": 3,
             "shift": "night",
             "check_in_time": "19:10",
@@ -688,6 +780,12 @@ async fn admin_can_configure_generate_and_list_managed_attendance() {
     let config_id = body["data"]["id"].as_str().expect("config id");
     assert_eq!(body["data"]["worker_name"], "张三");
     assert_eq!(body["data"]["shift"], "night");
+    assert_eq!(body["data"]["attendance_device_name"], "托管考勤补录机");
+    assert_eq!(
+        body["data"]["attendance_device_serial_number"],
+        "MANAGED-B-001"
+    );
+    assert_eq!(body["data"]["attendance_device_type"], "B厂家");
 
     let (status, body) = authed_json(
         app.clone(),
@@ -700,6 +798,21 @@ async fn admin_can_configure_generate_and_list_managed_attendance() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["data"]["generated_count"], 6);
     assert_eq!(body["data"]["attendance_days"], 3);
+    let generated_jobs: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)
+        FROM device_dispatch_jobs
+        WHERE job_type = 'supplemental_attendance'
+          AND adapter_code = 'vendor_b'
+          AND transport = 'http_pull'
+          AND attendance_device_id = $1
+        "#,
+    )
+    .bind(Uuid::parse_str(attendance_device_id).unwrap())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(generated_jobs, 6);
 
     let (status, body) = get_authed(
         app.clone(),
@@ -717,12 +830,72 @@ async fn admin_can_configure_generate_and_list_managed_attendance() {
     assert_eq!(records[0]["shift"], "night");
     assert_eq!(records[0]["photo_group_name"], "张三夜班照片组");
     assert_eq!(records[0]["status"], "generated");
+    assert_eq!(records[0]["dispatch_status"], "pending");
+    let attendance_dates = records
+        .iter()
+        .filter_map(|record| record["attendance_date"].as_str())
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(attendance_dates.len(), 3);
     assert!(records.iter().any(|record| {
         record["direction"] == 0 && record["photo_url"] == "https://example.com/zhangsan-in.jpg"
     }));
     assert!(records.iter().any(|record| {
         record["direction"] == 1 && record["photo_url"] == "https://example.com/zhangsan-out.jpg"
     }));
+
+    let protected: (Uuid, chrono::DateTime<chrono::Utc>, serde_json::Value) = sqlx::query_as(
+        r#"
+        SELECT r.id, r.planned_at, j.payload
+        FROM construction_managed_attendance_records r
+        JOIN device_dispatch_jobs j ON j.managed_attendance_record_id = r.id
+        WHERE r.config_id = $1 AND r.direction = 0 AND r.is_deleted = FALSE
+        ORDER BY r.attendance_date
+        LIMIT 1
+        "#,
+    )
+    .bind(Uuid::parse_str(config_id).unwrap())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE device_dispatch_jobs SET status = 'delivered', device_result_status = 'success' WHERE managed_attendance_record_id = $1",
+    )
+    .bind(protected.0)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE construction_managed_attendance_configs SET check_in_time = '20:10' WHERE id = $1",
+    )
+    .bind(Uuid::parse_str(config_id).unwrap())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, regenerated) = authed_json(
+        app,
+        "POST",
+        &format!("/api/v1/admin/managed-attendance/configs/{config_id}/generate"),
+        &token,
+        json!({ "month": "2026-07" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{regenerated}");
+    let preserved: (chrono::DateTime<chrono::Utc>, serde_json::Value, String) = sqlx::query_as(
+        r#"
+        SELECT r.planned_at, j.payload, j.device_result_status
+        FROM construction_managed_attendance_records r
+        JOIN device_dispatch_jobs j ON j.managed_attendance_record_id = r.id
+        WHERE r.id = $1
+        "#,
+    )
+    .bind(protected.0)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(preserved.0, protected.1);
+    assert_eq!(preserved.1, protected.2);
+    assert_eq!(preserved.2, "success");
 }
 
 #[tokio::test]
@@ -2667,6 +2840,62 @@ async fn admin_api_accepts_form_style_nulls_by_column_type() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["data"]["photo_path"], "2026-03-18");
     assert_eq!(body["data"]["original_time"], Value::Null);
+}
+
+#[tokio::test]
+async fn supplemental_attendance_management_list_filters_all_queries_by_managed_projects() {
+    let (app, pool, _c) = build_test_app_with_pool().await;
+    let user_id = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        INSERT INTO users (email, username, role, is_active, email_verified)
+        VALUES ($1, $2, 'user', TRUE, TRUE)
+        RETURNING id
+        "#,
+    )
+    .bind(format!("supplemental-{}@example.com", Uuid::new_v4()))
+    .bind(format!("supplemental-{}", Uuid::new_v4()))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO role_menu_permissions (role_id, menu_key)
+        SELECT id, 'supplemental_attendance' FROM role_configs WHERE code = 'user'
+        ON CONFLICT DO NOTHING
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (allowed_project_id, allowed_record_id) =
+        insert_unassigned_managed_record(&pool, "授权补录项目").await;
+    let (_denied_project_id, denied_record_id) =
+        insert_unassigned_managed_record(&pool, "未授权补录项目").await;
+    sqlx::query("INSERT INTO user_managed_projects (user_id, project_id) VALUES ($1, $2)")
+        .bind(user_id)
+        .bind(allowed_project_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let token = user_token(user_id);
+    let (status, body) = get_authed(
+        app,
+        "/api/v1/management/supplemental-attendance/records?month=2026-08&page=1&page_size=100",
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["total"], 1);
+    assert_eq!(body["data"]["summary"]["total"], 1);
+    assert_eq!(body["data"]["summary"]["unassigned"], 1);
+    assert_eq!(
+        body["data"]["items"][0]["id"],
+        allowed_record_id.to_string()
+    );
+    assert_eq!(body["data"]["items"][0]["send_status"], "unassigned");
+    assert!(body["data"]["items"][0]["device_result_status"].is_null());
+    assert_ne!(body["data"]["items"][0]["id"], denied_record_id.to_string());
 }
 
 #[tokio::test]

@@ -50,6 +50,10 @@ async fn main() -> eyre::Result<()> {
     if background_workers_enabled {
         // Attendance alert scheduler (daily 14:00 Asia/Shanghai).
         quax::feature::admin::attendance_alert::spawn_attendance_alert_scheduler(state.clone());
+        // Managed attendance scheduler (generate next month on the last day of each month).
+        quax::feature::admin::managed_attendance_scheduler::spawn_managed_attendance_scheduler(
+            state.clone(),
+        );
         // Attendance device MQTT consumers and integration outbox consumers.
         quax::feature::device_mqtt::worker::spawn_device_mqtt_worker(state.clone());
         quax::feature::device_mqtt::retry::spawn_device_issue_retry_worker(state.clone());

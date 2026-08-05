@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS idx_construction_attendance_records_generated_identity;

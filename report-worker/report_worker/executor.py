@@ -121,7 +121,7 @@ class RunExecutor:
             "download": {
                 "include_projects": include,
                 "exclude_projects": list(self.config_row["exclude_projects"]),
-                "latest_entry_days": int((self.config_row.get("settings") or {}).get("latest_entry_days", 30)),
+                "latest_entry_days": int((self.config_row.get("settings") or {}).get("latest_entry_days", 1)),
             },
             "browser": {
                 "download_dir": str(download_root), "output_dir": str(output_root), "error_dir": str(error_root),
@@ -349,6 +349,7 @@ class RunExecutor:
                 project_status = "partial_success" if failure else "validated" if result["status"] == "validated" else "success"
                 self.repo.update_project(
                     project_id, status=project_status, current_stage="target_upload", target_receipt=receipt,
+                    last_error=redact(result.get("error", "部分批次上传失败")) if failure else None,
                     upload_total_count=total, upload_success_count=success, upload_failure_count=failure,
                 )
                 if total > 1 and failure and person_results:
@@ -403,6 +404,7 @@ def aggregate_project_results(results):
             "already_exists": False,
             "person_details_available": True,
             "person_results": [],
+            "errors": [],
             "batches": [],
         })
         total = result.get("total_rows") or 0
@@ -421,6 +423,8 @@ def aggregate_project_results(results):
                 and bool(result.get("person_details_available"))
             )
         aggregate["person_results"].extend(result.get("person_results") or [])
+        if result.get("error") and result["error"] not in aggregate["errors"]:
+            aggregate["errors"].append(result["error"])
         aggregate["batches"].append({
             key: value for key, value in result.items()
             if key not in {"person_results", "project_name"}
@@ -433,6 +437,9 @@ def aggregate_project_results(results):
     for aggregate in grouped.values():
         if aggregate["total_rows"] > 1:
             aggregate["already_exists"] = False
+        if aggregate["errors"]:
+            aggregate["error"] = "；".join(aggregate["errors"])
+        aggregate.pop("errors", None)
     return list(grouped.values())
 
 

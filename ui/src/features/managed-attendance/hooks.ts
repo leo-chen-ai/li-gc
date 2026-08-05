@@ -9,7 +9,8 @@ import type {
 
 export const managedAttendanceKeys = {
   all: ["managed-attendance"] as const,
-  photoGroupsRoot: () => [...managedAttendanceKeys.all, "photo-groups"] as const,
+  photoGroupsRoot: () =>
+    [...managedAttendanceKeys.all, "photo-groups"] as const,
   photoGroups: (filters?: ManagedAttendanceListFilters) =>
     [...managedAttendanceKeys.photoGroupsRoot(), filters ?? {}] as const,
   configsRoot: () => [...managedAttendanceKeys.all, "configs"] as const,
@@ -21,7 +22,7 @@ export const managedAttendanceKeys = {
 };
 
 export function useManagedAttendancePhotoGroupsQuery(
-  filters?: ManagedAttendanceListFilters
+  filters?: ManagedAttendanceListFilters,
 ) {
   return useQuery({
     queryKey: managedAttendanceKeys.photoGroups(filters),
@@ -79,11 +80,12 @@ export function useDeleteManagedAttendancePhotoGroupMutation() {
 }
 
 export function useManagedAttendanceConfigsQuery(
-  filters?: ManagedAttendanceListFilters
+  filters?: ManagedAttendanceListFilters,
 ) {
   return useQuery({
     queryKey: managedAttendanceKeys.configs(filters),
     queryFn: () => managedAttendanceService.listConfigs(filters),
+    refetchInterval: 15_000,
   });
 }
 
@@ -145,15 +147,19 @@ export function useGenerateManagedAttendanceMutation() {
       queryClient.invalidateQueries({
         queryKey: managedAttendanceKeys.recordsRoot(),
       });
+      queryClient.invalidateQueries({
+        queryKey: managedAttendanceKeys.configsRoot(),
+      });
     },
   });
 }
 
 export function useManagedAttendanceRecordsQuery(
-  filters?: ManagedAttendanceListFilters
+  filters?: ManagedAttendanceListFilters,
 ) {
   return useQuery({
     queryKey: managedAttendanceKeys.records(filters),
     queryFn: () => managedAttendanceService.listRecords(filters),
+    refetchInterval: 15_000,
   });
 }

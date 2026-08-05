@@ -3,11 +3,13 @@ pub mod attendance_alert;
 pub mod construction;
 pub mod enterprise;
 pub mod log;
+pub mod managed_attendance_scheduler;
 pub mod registration_lead;
 pub mod report_forwarding;
 pub mod role;
 pub mod routes;
 pub mod stats;
+pub mod supplemental_attendance;
 pub mod upload;
 pub mod user;
 

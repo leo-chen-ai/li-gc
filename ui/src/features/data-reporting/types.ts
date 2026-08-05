@@ -128,6 +128,8 @@ export interface ReportRun {
   started_at: string | null;
   completed_at: string | null;
   error_summary: string | null;
+  failure_stage?: string | null;
+  failure_reason?: string | null;
   created_at: string;
   projects?: RunProject[];
   items?: ReportItem[];

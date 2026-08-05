@@ -73,7 +73,7 @@ class Downloader:
                 for name in page_names:
                     if name not in names:
                         names.append(name)
-                if not self._need_next_page(set(names)):
+                if not self._need_next_page():
                     break
             logger.info("项目读取完成，共 %s 个", len(names))
             return names
@@ -254,9 +254,6 @@ class Downloader:
 
             while True:
                 logger.info(f"=== 处理第 {page} 页 ===")
-                self._navigate_to_project_list()
-                time.sleep(3)
-
                 page_names = self._get_current_page_project_names()
                 if not page_names:
                     logger.info("当前页无项目，结束")
@@ -270,8 +267,9 @@ class Downloader:
                     if project_name in all_processed_names:
                         logger.info(f"项目已处理过，跳过: {project_name}")
                         continue
-                    all_processed_names.add(project_name)
-                    new_on_page += 1
+                    if not self._ensure_project_visible(project_name):
+                        logger.warning("无法重新定位项目，留待后续分页重试: %s", project_name)
+                        continue
                     try:
                         result = self._click_and_download(project_name)
                         if result:
@@ -279,6 +277,8 @@ class Downloader:
                     except Exception as e:
                         logger.error(f"下载项目 {project_name} 异常: {e}")
                     finally:
+                        all_processed_names.add(project_name)
+                        new_on_page += 1
                         self._navigate_to_project_list()
                         time.sleep(3)
 
@@ -287,10 +287,9 @@ class Downloader:
                     break
 
                 if new_on_page == 0:
-                    logger.info("当前页无新项目，分页结束")
-                    break
+                    logger.info("当前页无匹配项目，继续检查后续分页")
 
-                if not self._need_next_page(all_processed_names):
+                if not self._need_next_page():
                     break
                 page += 1
 
@@ -442,28 +441,23 @@ class Downloader:
                 names.append(text)
         return names
 
-    def _need_next_page(self, processed_names):
+    def _need_next_page(self):
         try:
-            total_el = self.driver.find_element(
-                By.XPATH,
-                "//span[contains(@class,'el-pagination__total')]"
-            )
-            total_text = total_el.text.strip()
-            import re as _re
-            m = _re.search(r'(\d+)', total_text)
-            if not m:
-                logger.info("无法解析总数，停止翻页")
-                return False
-            total = int(m.group(1))
-            processed = len(processed_names)
-            logger.info(f"总项目数: {total}, 已处理: {processed}")
-            if processed >= total:
-                logger.info("已处理所有项目，停止")
-                return False
-            logger.info("还有未处理项目，翻页继续")
             next_btn = self.driver.find_element(
                 By.XPATH, "//button[contains(@class,'btn-next')]"
             )
+            button_class = next_btn.get_attribute("class") or ""
+            disabled = (
+                not next_btn.is_enabled()
+                or next_btn.get_attribute("disabled") is not None
+                or next_btn.get_attribute("aria-disabled") == "true"
+                or "is-disabled" in button_class
+            )
+            if disabled:
+                logger.info("已到最后一页，停止翻页")
+                return False
+
+            logger.info("还有后续分页，继续查找项目")
             self.driver.execute_script("arguments[0].click();", next_btn)
             time.sleep(3)
             return True
@@ -473,6 +467,20 @@ class Downloader:
         except Exception as e:
             logger.info(f"翻页判断异常: {e}")
             return False
+
+    def _ensure_project_visible(self, project_name):
+        target = _normalized_project_name(project_name)
+        seen_pages = set()
+        while True:
+            page_names = self._get_current_page_project_names()
+            signature = tuple(_normalized_project_name(name) for name in page_names)
+            if target in signature:
+                return True
+            if not signature or signature in seen_pages:
+                return False
+            seen_pages.add(signature)
+            if not self._need_next_page():
+                return False
 
     def _filter_projects(self, project_names):
         include = self.download_settings.get('include_projects', 'all')

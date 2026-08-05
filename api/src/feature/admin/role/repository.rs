@@ -231,8 +231,9 @@ const ROLE_SELECT_BASE_SQL: &str = r#"
                         WHEN 'attendance_device_issue_reports' THEN 60
                         WHEN 'attendance_alerts' THEN 61
                         WHEN 'managed_attendance' THEN 62
-                        WHEN 'environment_monitoring' THEN 63
-                        WHEN 'video_monitoring' THEN 64
+                        WHEN 'supplemental_attendance' THEN 63
+                        WHEN 'environment_monitoring' THEN 64
+                        WHEN 'video_monitoring' THEN 65
                         WHEN 'quality_safety' THEN 66
                         WHEN 'safety_management' THEN 68
                         WHEN 'material_management' THEN 70

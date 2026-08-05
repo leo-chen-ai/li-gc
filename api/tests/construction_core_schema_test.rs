@@ -596,6 +596,67 @@ async fn integration_and_device_messaging_tables_support_job_ledgers() {
             "retry_locked_until",
         ],
     );
+    assert_has_columns(
+        &table_columns(&pool, "construction_managed_attendance_configs").await,
+        &["attendance_device_id"],
+    );
+    assert_has_columns(
+        &table_columns(&pool, "device_dispatch_jobs").await,
+        &[
+            "job_type",
+            "adapter_code",
+            "transport",
+            "managed_attendance_record_id",
+            "device_result_status",
+            "device_result_message",
+            "device_reported_at",
+        ],
+    );
+    for (table, column) in [
+        (
+            "construction_managed_attendance_configs",
+            "attendance_device_id",
+        ),
+        ("device_dispatch_jobs", "mqtt_topic"),
+        ("device_dispatch_jobs", "status"),
+        ("device_dispatch_jobs", "job_type"),
+        ("device_dispatch_jobs", "adapter_code"),
+        ("device_dispatch_jobs", "transport"),
+        ("device_dispatch_jobs", "managed_attendance_record_id"),
+        ("device_dispatch_jobs", "device_result_status"),
+        ("device_dispatch_jobs", "device_result_message"),
+        ("device_dispatch_jobs", "device_reported_at"),
+    ] {
+        let comment: Option<String> = sqlx::query_scalar(
+            r#"
+            SELECT col_description(c.oid, a.attnum)
+            FROM pg_class c
+            JOIN pg_attribute a ON a.attrelid = c.oid
+            WHERE c.relname = $1 AND a.attname = $2
+            "#,
+        )
+        .bind(table)
+        .bind(column)
+        .fetch_one(&pool)
+        .await
+        .expect("read supplemental attendance column comment");
+        assert!(
+            comment.is_some_and(|value| !value.trim().is_empty()),
+            "{table}.{column}"
+        );
+    }
+    let supplemental_admin_menu: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)
+        FROM role_menu_permissions permission
+        JOIN role_configs role ON role.id = permission.role_id
+        WHERE role.code = 'admin' AND permission.menu_key = 'supplemental_attendance'
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("read supplemental attendance admin menu");
+    assert_eq!(supplemental_admin_menu, 1);
 
     let project_id: uuid::Uuid = sqlx::query_scalar(
         r#"

@@ -34,7 +34,7 @@ services:
       BOOTSTRAP_ENABLED: "false"
       BACKGROUND_WORKERS_ENABLED: "false"
     ports:
-      - "8080:8080"
+      - "${REPORT_LOCAL_API_PORT:-8080}:8080"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -80,7 +80,7 @@ services:
       dockerfile: Dockerfile
     image: shanhuai-report-local-ui
     ports:
-      - "8073:80"
+      - "${REPORT_LOCAL_UI_PORT:-8073}:80"
     restart: unless-stopped
     depends_on:
       shanhuai-api:

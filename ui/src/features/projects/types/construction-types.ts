@@ -281,6 +281,7 @@ export type ConstructionAttendanceRecord = {
   overall_photo: string | null;
   closeup_photo: string | null;
   original_time: string | null;
+  is_generated?: boolean;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -311,6 +312,37 @@ export type ConstructionAttendanceCalendarResponse = {
   items: ConstructionAttendanceCalendarRow[];
   month: string;
   view: "calendar";
+};
+
+export type AttendanceGeneratorPreviewRequest = {
+  worker_ids: string[];
+  month: string;
+  attendance_days: number;
+  include_weekends: boolean;
+  prioritize_weekends: boolean;
+  morning_start: string;
+  morning_end: string;
+  evening_start: string;
+  evening_end: string;
+  include_midday: boolean;
+  lunch_out_start?: string;
+  lunch_out_end?: string;
+  lunch_in_start?: string;
+  lunch_in_end?: string;
+};
+
+export type GeneratedAttendancePreviewRecord = {
+  worker_id: string;
+  worker_name: string;
+  team_name: string | null;
+  direction: 0 | 1;
+  trigger_time: string;
+};
+
+export type AttendanceGeneratorPreviewResponse = {
+  record_count: number;
+  worker_count: number;
+  records: GeneratedAttendancePreviewRecord[];
 };
 
 export type ConstructionAttendanceDevice = {

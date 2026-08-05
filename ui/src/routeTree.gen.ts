@@ -48,6 +48,7 @@ import { Route as AppAdminQualitySafetyRouteImport } from './routes/app/admin/qu
 import { Route as AppAdminRegistrationLeadsRouteImport } from './routes/app/admin/registration-leads'
 import { Route as AppAdminRolesRouteImport } from './routes/app/admin/roles'
 import { Route as AppAdminSafetyManagementRouteImport } from './routes/app/admin/safety-management'
+import { Route as AppAdminSupplementalAttendanceRouteImport } from './routes/app/admin/supplemental-attendance'
 import { Route as AppAdminUploadsRouteImport } from './routes/app/admin/uploads'
 import { Route as AppAdminUsersRouteImport } from './routes/app/admin/users'
 import { Route as AppAdminVideoMonitoringRouteImport } from './routes/app/admin/video-monitoring'
@@ -280,6 +281,12 @@ const AppAdminSafetyManagementRoute =
     path: '/safety-management',
     getParentRoute: () => AppAdminRoute,
   } as any)
+const AppAdminSupplementalAttendanceRoute =
+  AppAdminSupplementalAttendanceRouteImport.update({
+    id: '/supplemental-attendance',
+    path: '/supplemental-attendance',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
 const AppAdminUploadsRoute = AppAdminUploadsRouteImport.update({
   id: '/uploads',
   path: '/uploads',
@@ -378,6 +385,7 @@ export interface FileRoutesByFullPath {
   '/app/admin/registration-leads': typeof AppAdminRegistrationLeadsRoute
   '/app/admin/roles': typeof AppAdminRolesRoute
   '/app/admin/safety-management': typeof AppAdminSafetyManagementRoute
+  '/app/admin/supplemental-attendance': typeof AppAdminSupplementalAttendanceRoute
   '/app/admin/uploads': typeof AppAdminUploadsRoute
   '/app/admin/users': typeof AppAdminUsersRoute
   '/app/admin/video-monitoring': typeof AppAdminVideoMonitoringRoute
@@ -427,6 +435,7 @@ export interface FileRoutesByTo {
   '/app/admin/registration-leads': typeof AppAdminRegistrationLeadsRoute
   '/app/admin/roles': typeof AppAdminRolesRoute
   '/app/admin/safety-management': typeof AppAdminSafetyManagementRoute
+  '/app/admin/supplemental-attendance': typeof AppAdminSupplementalAttendanceRoute
   '/app/admin/uploads': typeof AppAdminUploadsRoute
   '/app/admin/users': typeof AppAdminUsersRoute
   '/app/admin/video-monitoring': typeof AppAdminVideoMonitoringRoute
@@ -480,6 +489,7 @@ export interface FileRoutesById {
   '/app/admin/registration-leads': typeof AppAdminRegistrationLeadsRoute
   '/app/admin/roles': typeof AppAdminRolesRoute
   '/app/admin/safety-management': typeof AppAdminSafetyManagementRoute
+  '/app/admin/supplemental-attendance': typeof AppAdminSupplementalAttendanceRoute
   '/app/admin/uploads': typeof AppAdminUploadsRoute
   '/app/admin/users': typeof AppAdminUsersRoute
   '/app/admin/video-monitoring': typeof AppAdminVideoMonitoringRoute
@@ -534,6 +544,7 @@ export interface FileRouteTypes {
     | '/app/admin/registration-leads'
     | '/app/admin/roles'
     | '/app/admin/safety-management'
+    | '/app/admin/supplemental-attendance'
     | '/app/admin/uploads'
     | '/app/admin/users'
     | '/app/admin/video-monitoring'
@@ -583,6 +594,7 @@ export interface FileRouteTypes {
     | '/app/admin/registration-leads'
     | '/app/admin/roles'
     | '/app/admin/safety-management'
+    | '/app/admin/supplemental-attendance'
     | '/app/admin/uploads'
     | '/app/admin/users'
     | '/app/admin/video-monitoring'
@@ -635,6 +647,7 @@ export interface FileRouteTypes {
     | '/app/admin/registration-leads'
     | '/app/admin/roles'
     | '/app/admin/safety-management'
+    | '/app/admin/supplemental-attendance'
     | '/app/admin/uploads'
     | '/app/admin/users'
     | '/app/admin/video-monitoring'
@@ -929,6 +942,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdminSafetyManagementRouteImport
       parentRoute: typeof AppAdminRoute
     }
+    '/app/admin/supplemental-attendance': {
+      id: '/app/admin/supplemental-attendance'
+      path: '/supplemental-attendance'
+      fullPath: '/app/admin/supplemental-attendance'
+      preLoaderRoute: typeof AppAdminSupplementalAttendanceRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
     '/app/admin/uploads': {
       id: '/app/admin/uploads'
       path: '/uploads'
@@ -1082,6 +1102,7 @@ interface AppAdminRouteChildren {
   AppAdminRegistrationLeadsRoute: typeof AppAdminRegistrationLeadsRoute
   AppAdminRolesRoute: typeof AppAdminRolesRoute
   AppAdminSafetyManagementRoute: typeof AppAdminSafetyManagementRoute
+  AppAdminSupplementalAttendanceRoute: typeof AppAdminSupplementalAttendanceRoute
   AppAdminUploadsRoute: typeof AppAdminUploadsRoute
   AppAdminUsersRoute: typeof AppAdminUsersRoute
   AppAdminVideoMonitoringRoute: typeof AppAdminVideoMonitoringRoute
@@ -1124,6 +1145,7 @@ const AppAdminRouteChildren: AppAdminRouteChildren = {
   AppAdminRegistrationLeadsRoute: AppAdminRegistrationLeadsRoute,
   AppAdminRolesRoute: AppAdminRolesRoute,
   AppAdminSafetyManagementRoute: AppAdminSafetyManagementRoute,
+  AppAdminSupplementalAttendanceRoute: AppAdminSupplementalAttendanceRoute,
   AppAdminUploadsRoute: AppAdminUploadsRoute,
   AppAdminUsersRoute: AppAdminUsersRoute,
   AppAdminVideoMonitoringRoute: AppAdminVideoMonitoringRoute,

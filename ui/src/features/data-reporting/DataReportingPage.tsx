@@ -31,8 +31,8 @@ type ConfigForm = {
 const emptyForm: ConfigForm = {
   name: "", source_username: "", source_password: "", project_mode: "all", include_projects: "",
   exclude_projects: "", target_username: "", target_password: "", feishu_app_id: "", feishu_app_secret: "",
-  feishu_chat_id: "", schedule_time: "23:00", lifecycle_status: "draft", is_enabled: false,
-  headless: true, upload_timeout_minutes: "10", latest_entry_days: "30", remark: "",
+  feishu_chat_id: "", schedule_time: "19:00", lifecycle_status: "production", is_enabled: false,
+  headless: true, upload_timeout_minutes: "10", latest_entry_days: "1", remark: "",
 };
 
 const testCases: Array<{ mode: RunMode; title: string; description: string; danger?: boolean; needsSource?: "raw" | "converted" }> = [
@@ -136,7 +136,7 @@ export function DataReportingPage() {
         feishu_chat_id: detail.verification_config?.chat_id ?? "", schedule_time: detail.schedule_time.slice(0, 5), lifecycle_status: detail.lifecycle_status,
         is_enabled: detail.is_enabled, headless: detail.settings.headless !== false,
         upload_timeout_minutes: String(detail.settings.upload_timeout_minutes ?? 10),
-        latest_entry_days: String(detail.settings.latest_entry_days ?? 30), remark: detail.remark ?? "",
+        latest_entry_days: String(detail.settings.latest_entry_days ?? 1), remark: detail.remark ?? "",
       });
       setFormOpen(true);
     } catch (error) { toast.error(errorMessage(error)); }
@@ -161,7 +161,7 @@ export function DataReportingPage() {
       is_enabled: form.is_enabled, settings: {
         headless: form.headless,
         upload_timeout_minutes: Math.min(10, Math.max(1, Number(form.upload_timeout_minutes) || 10)),
-        latest_entry_days: Math.max(1, Number(form.latest_entry_days) || 30),
+        latest_entry_days: Math.max(1, Number(form.latest_entry_days) || 1),
       },
       remark: form.remark.trim() || null,
     };
@@ -237,7 +237,7 @@ function ConfigTable({ rows, loading, onEdit, onRun, onDelete }: { rows: ReportC
   return <div className="space-y-4">{rows.map((row) => {
     const headless = row.settings.headless !== false;
     const timeout = Math.min(10, Number(row.settings.upload_timeout_minutes ?? 10));
-    const latestEntryDays = Number(row.settings.latest_entry_days ?? 30);
+    const latestEntryDays = Number(row.settings.latest_entry_days ?? 1);
     return <section key={row.id} className="overflow-hidden rounded-xl border bg-white shadow-sm">
       <header className="flex flex-wrap items-start justify-between gap-3 border-b bg-slate-50/70 px-5 py-4">
         <div className="min-w-0">
@@ -310,7 +310,7 @@ function TestCenter({ configs, selectedConfig, onConfig, sourceRun, onSourceRun,
 }
 
 function RunsTable({ rows, loading, onDetail, onCancel, onRetry }: { rows: ReportRun[]; loading: boolean; onDetail: (id: string) => void; onCancel: (run: ReportRun) => void; onRetry: (run: ReportRun) => void }) {
-  return <section className="overflow-hidden rounded-xl border bg-white"><Table><TableHeader><TableRow><TableHead>配置/类型</TableHead><TableHead>状态</TableHead><TableHead>阶段</TableHead><TableHead>项目</TableHead><TableHead>人员</TableHead><TableHead>成功/失败</TableHead><TableHead>开始时间</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader><TableBody>{loading ? <MessageRow text="任务加载中" /> : rows.length ? rows.map((run) => <TableRow key={run.id}><TableCell><button className="text-left font-medium hover:underline" onClick={() => onDetail(run.id)}>{run.config_name}</button><div className="text-xs text-slate-500">{modeLabel(run.run_mode)}</div></TableCell><TableCell><StatusBadge status={run.status} /></TableCell><TableCell>{stageLabel(run.current_stage)}</TableCell><TableCell>{run.discovered_count}</TableCell><TableCell>{run.item_count}</TableCell><TableCell>{run.success_count}/{run.failure_count}</TableCell><TableCell>{formatTime(run.started_at || run.created_at)}</TableCell><TableCell className="text-right"><div className="flex justify-end gap-1"><Button size="sm" variant="outline" onClick={() => onDetail(run.id)}>详情</Button>{["pending", "running"].includes(run.status) && <Button size="icon" variant="ghost" title="取消" onClick={() => onCancel(run)}><Square className="size-4" /></Button>}{["failed", "partial_success", "cancelled"].includes(run.status) && <Button size="icon" variant="ghost" title="重试" onClick={() => onRetry(run)}><RefreshCw className="size-4" /></Button>}</div></TableCell></TableRow>) : <MessageRow text="暂无运行任务" />}</TableBody></Table></section>;
+  return <section className="overflow-hidden rounded-xl border bg-white"><Table><TableHeader><TableRow><TableHead>配置/类型</TableHead><TableHead>状态</TableHead><TableHead className="min-w-64">阶段 / 失败原因</TableHead><TableHead>项目</TableHead><TableHead>人员</TableHead><TableHead>成功/失败</TableHead><TableHead>开始时间</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader><TableBody>{loading ? <MessageRow text="任务加载中" /> : rows.length ? rows.map((run) => { const failed = ["failed", "partial_success"].includes(run.status); const retryable = failed || run.status === "cancelled"; return <TableRow key={run.id}><TableCell><button className="text-left font-medium hover:underline" onClick={() => onDetail(run.id)}>{run.config_name}</button><div className="text-xs text-slate-500">{modeLabel(run.run_mode)}</div></TableCell><TableCell><StatusBadge status={run.status} /></TableCell><TableCell><div>{stageLabel(run.failure_stage || run.current_stage)}</div>{failed && <div className="mt-1 max-w-md whitespace-normal text-xs leading-5 text-red-600" title={run.failure_reason || undefined}>{run.failure_reason || "暂无详细失败原因，请进入详情查看运行日志"}</div>}</TableCell><TableCell>{run.discovered_count}</TableCell><TableCell>{run.item_count}</TableCell><TableCell>{run.success_count}/{run.failure_count}</TableCell><TableCell>{formatTime(run.started_at || run.created_at)}</TableCell><TableCell className="text-right"><div className="flex justify-end gap-1"><Button size="sm" variant="outline" onClick={() => onDetail(run.id)}>详情</Button>{["pending", "running"].includes(run.status) && <Button size="icon" variant="ghost" title="取消" onClick={() => onCancel(run)}><Square className="size-4" /></Button>}{retryable && <Button size="icon" variant="ghost" title="重试" onClick={() => onRetry(run)}><RefreshCw className="size-4" /></Button>}</div></TableCell></TableRow>; }) : <MessageRow text="暂无运行任务" />}</TableBody></Table></section>;
 }
 
 function DataPanel({ runs, runId, onRun, result, loading, page, onPage, outcome, onOutcome, onExport }: { runs: ReportRun[]; runId: string; onRun: (id: string) => void; result?: Awaited<ReturnType<typeof reportService.items>>; loading: boolean; page: number; onPage: (page: number) => void; outcome: ResultOutcome; onOutcome: (value: ResultOutcome) => void; onExport: () => void }) {

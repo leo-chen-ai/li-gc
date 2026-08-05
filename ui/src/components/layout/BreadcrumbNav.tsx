@@ -16,6 +16,7 @@ const routeLabels: Record<string, string> = {
   admin: "Admin",
   "attendance-alerts": "考勤预警",
   "managed-attendance": "自动托管",
+  "supplemental-attendance": "补考勤",
 };
 
 export function BreadcrumbNav() {

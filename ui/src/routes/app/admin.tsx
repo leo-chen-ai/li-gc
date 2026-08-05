@@ -75,6 +75,10 @@ function AdminContent() {
       path: "/app/admin/attendance-device-issue-reports",
       menuKey: "attendance_device_issue_reports",
     },
+    {
+      path: "/app/admin/supplemental-attendance",
+      menuKey: "supplemental_attendance",
+    },
     { path: "/app/admin/personnel-workers", menuKey: "personnel_workers" },
   ] satisfies Array<{ path: string; menuKey: MenuPermissionKey }>;
   const currentScopedPage = scopedUserPages.find(

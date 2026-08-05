@@ -15,7 +15,7 @@ use crate::{
 
 use super::{
     attendance_alert, construction, enterprise, log, registration_lead, report_forwarding, role,
-    stats, upload, user,
+    stats, supplemental_attendance, upload, user,
 };
 
 fn report_forward_routes() -> Router<AppState> {
@@ -432,6 +432,14 @@ pub fn admin_routes() -> Router<AppState> {
             put(user::handler::update_user_projects),
         )
         .route("/stats", get(stats::handler::get_dashboard_stats))
+        .route(
+            "/projects/{project_id}/attendance-generator/preview",
+            post(construction::handler::preview_generated_attendance),
+        )
+        .route(
+            "/projects/{project_id}/attendance-generator/commit",
+            post(construction::handler::commit_generated_attendance),
+        )
         .route_layer(middleware::from_fn(admin_middleware))
         .route_layer(middleware::from_fn(auth_middleware))
 }
@@ -446,6 +454,10 @@ pub fn management_routes(state: AppState) -> Router<AppState> {
         .route(
             "/role-permissions",
             get(role::handler::current_role_permissions),
+        )
+        .route(
+            "/supplemental-attendance/records",
+            get(supplemental_attendance::list_records),
         )
         .route("/projects", get(construction::handler::list_projects))
         .route(
@@ -665,6 +677,7 @@ fn allowed_menu_keys_for_management_path(path: &str) -> Option<&'static [&'stati
             "attendance_devices",
             "attendance_device_issue_reports",
             "personnel_workers",
+            "supplemental_attendance",
         ]);
     }
 
@@ -682,6 +695,10 @@ fn allowed_menu_keys_for_management_path(path: &str) -> Option<&'static [&'stati
 
     if management_path.starts_with("/personnel-workers") {
         return Some(&["personnel_workers"]);
+    }
+
+    if management_path.starts_with("/supplemental-attendance") {
+        return Some(&["supplemental_attendance"]);
     }
 
     None
@@ -706,6 +723,12 @@ mod management_permission_tests {
         assert_eq!(
             allowed_menu_keys_for_management_path("/api/v1/management/report-forward/summary"),
             None
+        );
+        assert_eq!(
+            allowed_menu_keys_for_management_path(
+                "/api/v1/management/supplemental-attendance/records"
+            ),
+            Some(&["supplemental_attendance"][..])
         );
     }
 }

@@ -40,6 +40,20 @@ def test_browser_profile_is_stable_per_site_and_account(monkeypatch, tmp_path):
     assert "same-account" not in first
 
 
+def test_browser_profile_removes_stale_chromium_singleton_locks(tmp_path):
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    for name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+        (profile / name).write_text("stale", encoding="utf-8")
+    cookie_store = profile / "session-cookies.json"
+    cookie_store.write_text("[]", encoding="utf-8")
+
+    browser_runtime._remove_stale_profile_locks(str(profile))
+
+    assert not any((profile / name).exists() for name in ("SingletonLock", "SingletonCookie", "SingletonSocket"))
+    assert cookie_store.exists()
+
+
 def test_close_driver_exports_session_cookies(monkeypatch, tmp_path):
     profile = tmp_path / "profile"
     profile.mkdir()
@@ -406,6 +420,108 @@ def test_selected_projects_completion_normalizes_full_width_punctuation():
     assert downloader._selected_projects_complete({"东部新城工程（二期）"}) is True
 
 
+def test_selected_project_search_continues_after_page_without_matches(monkeypatch):
+    instance = executor_module.Downloader.__new__(executor_module.Downloader)
+    instance.download_settings = {
+        "include_projects": ["目标项目"],
+        "exclude_projects": [],
+    }
+    pages = [["第一页其他项目"], ["目标项目"]]
+    page_index = 0
+    visited_pages = []
+    list_navigation_count = 0
+
+    instance._enter_project_list = lambda: True
+
+    def navigate_to_project_list():
+        nonlocal list_navigation_count
+        list_navigation_count += 1
+
+    instance._navigate_to_project_list = navigate_to_project_list
+
+    def current_page_names():
+        visited_pages.append(page_index + 1)
+        return pages[page_index]
+
+    def next_page():
+        nonlocal page_index
+        if page_index + 1 >= len(pages):
+            return False
+        page_index += 1
+        return True
+
+    instance._get_current_page_project_names = current_page_names
+    instance._need_next_page = next_page
+    instance._click_and_download = lambda name: f"/tmp/{name}.xlsx"
+    monkeypatch.setattr(downloader.time, "sleep", lambda _seconds: None)
+
+    assert instance.download_all() == ["/tmp/目标项目.xlsx"]
+    assert visited_pages == [1, 2, 2]
+    assert list_navigation_count == 1
+
+
+def test_multiple_selected_projects_on_later_page_are_each_relocated(monkeypatch):
+    instance = executor_module.Downloader.__new__(executor_module.Downloader)
+    instance.download_settings = {
+        "include_projects": ["目标项目甲", "目标项目乙"],
+        "exclude_projects": [],
+    }
+    pages = [["第一页其他项目"], ["目标项目甲", "目标项目乙"]]
+    page_index = 0
+    attempts = []
+
+    instance._enter_project_list = lambda: True
+
+    def navigate_to_project_list():
+        nonlocal page_index
+        page_index = 0
+
+    def current_page_names():
+        return pages[page_index]
+
+    def next_page():
+        nonlocal page_index
+        if page_index + 1 >= len(pages):
+            return False
+        page_index += 1
+        return True
+
+    def click_and_download(name):
+        assert name in pages[page_index]
+        attempts.append(name)
+        return f"/tmp/{name}.xlsx"
+
+    instance._navigate_to_project_list = navigate_to_project_list
+    instance._get_current_page_project_names = current_page_names
+    instance._need_next_page = next_page
+    instance._click_and_download = click_and_download
+    monkeypatch.setattr(downloader.time, "sleep", lambda _seconds: None)
+
+    assert instance.download_all() == ["/tmp/目标项目甲.xlsx", "/tmp/目标项目乙.xlsx"]
+    assert attempts == ["目标项目甲", "目标项目乙"]
+
+
+def test_project_discovery_uses_next_button_until_last_page():
+    instance = executor_module.Downloader.__new__(executor_module.Downloader)
+    pages = [["项目甲"], ["项目乙"]]
+    page_index = 0
+    instance.login = lambda: True
+    instance._enter_project_list = lambda: True
+    instance.close = lambda: None
+    instance._get_current_page_project_names = lambda: pages[page_index]
+
+    def next_page():
+        nonlocal page_index
+        if page_index + 1 >= len(pages):
+            return False
+        page_index += 1
+        return True
+
+    instance._need_next_page = next_page
+
+    assert instance.discover_projects() == ["项目甲", "项目乙"]
+
+
 def test_login_feedback_does_not_wait_for_absent_optional_messages():
     class FakeDriver:
         def __init__(self):
@@ -661,6 +777,46 @@ def test_repository_only_schedules_three_retries():
     assert not any("status='pending'" in sql for sql, _params in connection.calls)
 
 
+def test_optional_authorization_page_is_checked_and_accepted(tmp_path):
+    class FakeElement:
+        def __init__(self, selected=False):
+            self.selected = selected
+            self.clicked = 0
+
+        def is_displayed(self):
+            return True
+
+        def is_selected(self):
+            return self.selected
+
+        def click(self):
+            self.clicked += 1
+            self.selected = True
+
+    checkbox = FakeElement()
+    agree = FakeElement()
+
+    class FakeDriver:
+        def find_elements(self, _by, selector):
+            if "@type='checkbox'" in selector:
+                return [checkbox]
+            if "同意授权" in selector:
+                return [agree]
+            return []
+
+    config = {
+        "browser": {
+            "output_dir": str(tmp_path / "output"),
+            "error_dir": str(tmp_path / "errors"),
+        },
+    }
+    instance = uploader.Uploader(config, driver=FakeDriver())
+
+    assert instance._handle_authorization_confirmation() is True
+    assert checkbox.clicked == 1
+    assert agree.clicked == 1
+
+
 def test_uploader_retries_only_the_failed_project(monkeypatch, tmp_path):
     output_root = tmp_path / "output"
     dated_output = output_root / executor_module.datetime.now().strftime("%Y%m%d")
@@ -711,6 +867,19 @@ def test_split_upload_workbook_uses_200_row_batches(tmp_path):
 
     assert [uploader.count_upload_rows(batch) for batch in batches] == [200, 200, 200, 53]
     assert all(uploader.extract_project_name(batch) == "测试项目" for batch in batches)
+
+
+def test_aggregate_project_results_preserves_detailed_failure_reason():
+    results = aggregate_project_results([{
+        "project_name": "测试项目",
+        "status": "failed",
+        "error": "未找到'建筑项目人员备案登记'",
+        "total_rows": 3,
+        "success_rows": 0,
+        "failure_rows": 3,
+    }])
+
+    assert results[0]["error"] == "未找到'建筑项目人员备案登记'"
 
 
 def test_aggregate_project_results_sums_upload_batches():

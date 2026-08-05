@@ -404,6 +404,8 @@ class Uploader:
 
         self._click_online_handle()
 
+        self._handle_authorization_confirmation()
+
         self._handle_draft_popup()
 
         self._select_registration_type()
@@ -493,9 +495,11 @@ class Uploader:
         ]
         el = _find_first(self.driver, selectors)
         if el:
+            original_handles = set(self.driver.window_handles)
+            original_url = self.driver.current_url
             self._click(el)
             logger.info("已点击'建筑项目人员工伤参保登记'")
-            time.sleep(2)
+            self._wait_for_search_result_navigation(original_handles, original_url)
             return
 
         logger.info("首页未找到直接链接，通过搜索框搜索...")
@@ -569,29 +573,31 @@ class Uploader:
         for xpath in xpaths:
             try:
                 el = self.long_wait.until(EC.element_to_be_clickable((By.XPATH, xpath)))
+                original_handles = set(self.driver.window_handles)
+                original_url = self.driver.current_url
                 self._click(el)
                 logger.info(f"已点击搜索结果 ({xpath})")
-                self._wait_for_search_result_navigation()
+                self._wait_for_search_result_navigation(original_handles, original_url, strict=True)
                 return
             except TimeoutException:
                 continue
 
         logger.info("JS 查找兜底...")
+        original_handles = set(self.driver.window_handles)
+        original_url = self.driver.current_url
         found = self._find_and_click_result_js('建筑项目人员工伤参保登记')
         if found:
-            self._wait_for_search_result_navigation()
+            self._wait_for_search_result_navigation(original_handles, original_url, strict=True)
             return
 
         raise RuntimeError("未找到搜索结果")
 
-    def _wait_for_search_result_navigation(self):
-        logger.info("等待搜索结果打开新页面...")
-        original_handles = set(self.driver.window_handles)
-
-        for _ in range(8):
+    def _wait_for_search_result_navigation(self, original_handles, original_url, strict=False):
+        logger.info("等待办事页面打开...")
+        for _ in range(10):
             time.sleep(1)
             current_handles = set(self.driver.window_handles)
-            new_handles = current_handles - original_handles
+            new_handles = current_handles - set(original_handles)
             if new_handles:
                 handle = new_handles.pop()
                 self.driver.switch_to.window(handle)
@@ -602,10 +608,26 @@ class Uploader:
                     )
                 except TimeoutException:
                     pass
-                time.sleep(2)
-                return
+                time.sleep(1)
+                return True
+            if self.driver.current_url != original_url:
+                logger.info(f"当前窗口已跳转到办事页面: {self.driver.current_url}")
+                time.sleep(1)
+                return True
+            if _find_first(self.driver, [
+                (By.XPATH, "//*[normalize-space(.)='同意授权']"),
+                (By.XPATH, "//button[contains(.,'在线办理')]"),
+                (By.XPATH, "//a[contains(.,'在线办理')]"),
+                (By.XPATH, "//li[contains(text(),'宁波')]"),
+            ]):
+                logger.info("当前窗口已渲染办事或授权页面")
+                return True
 
-        logger.error("搜索结果点击后未打开新页面")
+        message = f"点击办事入口后页面未跳转，仍停留在: {self.driver.current_url}"
+        logger.error(message)
+        if strict:
+            raise RuntimeError(message)
+        return False
 
     def _handle_site_selection(self):
         logger.info("检查站点选择弹窗")
@@ -715,6 +737,47 @@ class Uploader:
             )
         except Exception as error:
             logger.warning(f"记录页面现场失败: {error}")
+
+    def _handle_authorization_confirmation(self):
+        """Accept the optional government authorization page before entering the form."""
+        logger.info("检查是否出现授权确认页")
+        agree_selectors = [
+            (By.XPATH, "//button[normalize-space(.)='同意授权']"),
+            (By.XPATH, "//a[normalize-space(.)='同意授权']"),
+            (By.XPATH, "//input[@type='button' and @value='同意授权']"),
+            (By.XPATH, "//*[contains(@class,'button') and normalize-space(.)='同意授权']"),
+        ]
+        agree = None
+        for _ in range(6):
+            agree = _find_first(self.driver, agree_selectors)
+            if agree:
+                break
+            time.sleep(0.5)
+        if not agree:
+            logger.info("未出现授权确认页，继续办理")
+            return False
+
+        logger.info("检测到授权确认页，勾选以后无需授权并同意授权")
+        checkbox = _find_first(self.driver, [
+            (By.XPATH, "//input[@type='checkbox']"),
+            (By.XPATH, "//*[@role='checkbox']"),
+            (By.XPATH, "//*[contains(normalize-space(.),'以后无需授权')]/preceding::input[@type='checkbox'][1]"),
+            (By.XPATH, "//*[contains(normalize-space(.),'以后无需授权') and (self::label or self::span)]"),
+        ])
+        if checkbox:
+            try:
+                if not getattr(checkbox, 'is_selected', lambda: False)():
+                    self._click(checkbox)
+                    logger.info("已勾选'以后无需授权可直接使用您的信息'")
+            except Exception as error:
+                logger.warning(f"勾选授权选项失败，仍尝试同意授权: {error}")
+        else:
+            logger.warning("未找到'以后无需授权'勾选框，仍尝试同意授权")
+
+        self._click(agree)
+        logger.info("已点击'同意授权'")
+        time.sleep(2)
+        return True
 
     def _handle_draft_popup(self):
         logger.info("检查草稿弹窗")

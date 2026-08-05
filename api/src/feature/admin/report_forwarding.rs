@@ -431,8 +431,41 @@ pub async fn list_runs(State(state): State<AppState>, uri: Uri) -> ApiResult<Val
         FROM (
             SELECT r.*,
                    (SELECT COUNT(*)::int FROM report_forward_events e WHERE e.run_id=r.id) AS event_count,
-                   (SELECT COUNT(*)::int FROM report_forward_artifacts a WHERE a.run_id=r.id) AS artifact_count
+                   (SELECT COUNT(*)::int FROM report_forward_artifacts a WHERE a.run_id=r.id) AS artifact_count,
+                   COALESCE(failure_event.stage, failure_project.current_stage,
+                            CASE WHEN r.current_stage NOT IN ('failed', 'success', 'cancelled') THEN r.current_stage END
+                   ) AS failure_stage,
+                   COALESCE(
+                       NULLIF(BTRIM(r.error_summary), ''),
+                       failure_project.detailed_error,
+                       failure_item.detailed_error,
+                       NULLIF(BTRIM(failure_event.message), '任务执行失败'),
+                       failure_project.any_error,
+                       failure_item.any_error
+                   ) AS failure_reason
             FROM report_forward_runs r
+            LEFT JOIN LATERAL (
+                SELECT e.stage, e.message
+                FROM report_forward_events e
+                WHERE e.run_id=r.id AND e.level='error'
+                ORDER BY e.id DESC LIMIT 1
+            ) failure_event ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT p.current_stage,
+                       MAX(NULLIF(BTRIM(p.last_error), '')) FILTER (
+                           WHERE BTRIM(p.last_error) NOT IN ('上传失败', '任务执行失败')
+                       ) AS detailed_error,
+                       MAX(NULLIF(BTRIM(p.last_error), '')) AS any_error
+                FROM report_forward_run_projects p WHERE p.run_id=r.id
+                GROUP BY p.current_stage ORDER BY COUNT(*) DESC LIMIT 1
+            ) failure_project ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT MAX(NULLIF(BTRIM(i.last_error), '')) FILTER (
+                           WHERE BTRIM(i.last_error) NOT IN ('上传失败', '任务执行失败')
+                       ) AS detailed_error,
+                       MAX(NULLIF(BTRIM(i.last_error), '')) AS any_error
+                FROM report_forward_items i WHERE i.run_id=r.id
+            ) failure_item ON TRUE
             WHERE ($1 = '%%' OR r.config_name ILIKE $1 OR r.error_summary ILIKE $1)
               AND ($2::text IS NULL OR r.status = $2)
               AND ($3::uuid IS NULL OR r.config_id = $3)
@@ -1078,6 +1111,13 @@ fn validate_config(mut input: ConfigInput, create: bool) -> Result<ConfigInput, 
             "verification_config 和 settings 必须是 JSON 对象",
         ));
     }
+    if create && input.settings.get("latest_entry_days").is_none() {
+        input
+            .settings
+            .as_object_mut()
+            .expect("settings was checked as an object")
+            .insert("latest_entry_days".to_owned(), Value::from(1));
+    }
     if let Some(verification) = input.verification_config.as_ref() {
         for field in ["app_id", "app_secret", "chat_id"] {
             if verification
@@ -1241,13 +1281,13 @@ fn default_verification_type() -> String {
     "feishu".to_owned()
 }
 fn default_schedule_time() -> String {
-    "23:00".to_owned()
+    "19:00".to_owned()
 }
 fn default_timezone() -> String {
     DEFAULT_TIMEZONE.to_owned()
 }
 fn default_lifecycle() -> String {
-    "draft".to_owned()
+    "production".to_owned()
 }
 fn default_production_mode() -> String {
     "production".to_owned()
@@ -1290,9 +1330,9 @@ mod tests {
             verification_config: Some(json!({
                 "app_id": "cli_test", "app_secret": "secret", "chat_id": "oc_test"
             })),
-            schedule_time: "23:00".to_owned(),
+            schedule_time: "19:00".to_owned(),
             schedule_timezone: DEFAULT_TIMEZONE.to_owned(),
-            lifecycle_status: "draft".to_owned(),
+            lifecycle_status: "production".to_owned(),
             is_enabled: false,
             settings: json!({}),
             remark: None,
@@ -1309,6 +1349,7 @@ mod tests {
     #[test]
     fn only_production_can_enable_schedule() {
         let mut value = input();
+        value.lifecycle_status = "draft".to_owned();
         value.is_enabled = true;
         assert!(validate_config(value, true).is_err());
     }

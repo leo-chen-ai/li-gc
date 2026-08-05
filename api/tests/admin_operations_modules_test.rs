@@ -959,3 +959,95 @@ async fn admin_overview_returns_construction_metrics_and_chart_data() {
             >= 1
     );
 }
+
+#[tokio::test]
+async fn admin_can_preview_and_commit_generated_attendance_with_source_flag() {
+    let (app, pool, _container) = build_test_app_with_pool().await;
+    let token = admin_token();
+    let (project_id, _unit_id, _team_id, worker_id) =
+        create_project_unit_team_worker(app.clone(), &token).await;
+
+    let preview_payload = json!({
+        "worker_ids": [worker_id],
+        "month": "2026-06",
+        "attendance_days": 2,
+        "include_weekends": false,
+        "prioritize_weekends": false,
+        "morning_start": "07:00",
+        "morning_end": "08:00",
+        "evening_start": "17:00",
+        "evening_end": "18:00",
+        "include_midday": false
+    });
+    let (status, preview) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/attendance-generator/preview"),
+        &token,
+        preview_payload.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    assert_eq!(preview["data"]["worker_count"], 1);
+    assert_eq!(preview["data"]["record_count"], 4);
+    assert_eq!(preview["data"]["records"].as_array().unwrap().len(), 4);
+
+    let user_token = create_token_pair(Uuid::new_v4(), "user@example.com", &[Role::User])
+        .expect("user token")
+        .access_token;
+    let (status, _) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/attendance-generator/preview"),
+        &user_token,
+        preview_payload,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let commit_payload = json!({ "records": preview["data"]["records"] });
+    let (status, committed) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/attendance-generator/commit"),
+        &token,
+        commit_payload.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{committed}");
+    assert_eq!(committed["data"]["inserted_count"], 4);
+
+    let (status, repeated) = authed_json(
+        app,
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/attendance-generator/commit"),
+        &token,
+        commit_payload,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{repeated}");
+    assert_eq!(repeated["data"]["inserted_count"], 0);
+
+    let generated: (i64, bool, String) = sqlx::query_as(
+        r#"
+        SELECT COUNT(*), BOOL_AND(is_generated), MIN(equipment_id)
+        FROM construction_attendance_records
+        WHERE project_id = $1 AND is_deleted = FALSE
+        "#,
+    )
+    .bind(Uuid::parse_str(&project_id).unwrap())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(generated.0, 4);
+    assert!(generated.1);
+    assert_eq!(generated.2, "考勤生成工具");
+
+    let comment: String = sqlx::query_scalar(
+        "SELECT col_description('construction_attendance_records'::regclass, attnum) FROM pg_attribute WHERE attrelid = 'construction_attendance_records'::regclass AND attname = 'is_generated'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(comment.contains("后台考勤生成工具"));
+}

@@ -76,6 +76,16 @@ def close_driver(driver):
     driver.quit()
 
 
+def _remove_stale_profile_locks(profile_dir):
+    for name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+        path = os.path.join(profile_dir, name)
+        try:
+            if os.path.lexists(path):
+                os.unlink(path)
+        except OSError:
+            pass
+
+
 def create_driver(download_dir=None, headless=True, profile_dir=None):
     options = Options()
     # Dynamic government pages continue loading analytics and secondary assets
@@ -95,6 +105,7 @@ def create_driver(download_dir=None, headless=True, profile_dir=None):
     options.add_argument("--lang=zh-CN")
     if profile_dir:
         os.makedirs(profile_dir, mode=0o700, exist_ok=True)
+        _remove_stale_profile_locks(profile_dir)
         options.add_argument(f"--user-data-dir={os.path.abspath(profile_dir)}")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     if download_dir:

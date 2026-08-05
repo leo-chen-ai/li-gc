@@ -16,6 +16,7 @@ export type MenuPermissionKey =
   | "attendance_device_issue_reports"
   | "attendance_alerts"
   | "managed_attendance"
+  | "supplemental_attendance"
   | "environment_monitoring"
   | "video_monitoring"
   | "quality_safety"
@@ -169,6 +170,13 @@ export const menuPermissions: MenuPermission[] = [
     description: "维护托管配置、照片组和月度托管数据",
   },
   {
+    key: "supplemental_attendance",
+    name: "补考勤",
+    group: "劳务管理",
+    path: "/app/admin/supplemental-attendance",
+    description: "查看补考勤从平台发送到考勤机返回的全链路状态",
+  },
+  {
     key: "environment_monitoring",
     name: "环境检测",
     group: "劳务管理",
@@ -318,6 +326,7 @@ export function getMenuKeysForUserRole(
     "attendance_device_issue_reports",
     "attendance_alerts",
     "managed_attendance",
+    "supplemental_attendance",
     "environment_monitoring",
     "video_monitoring",
     "quality_safety",

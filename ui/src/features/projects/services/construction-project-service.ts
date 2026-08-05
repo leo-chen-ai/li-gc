@@ -17,6 +17,9 @@ import type {
   ConstructionAttendanceCalendarResponse,
   ConstructionAttendancePayload,
   ConstructionAttendanceRecord,
+  AttendanceGeneratorPreviewRequest,
+  AttendanceGeneratorPreviewResponse,
+  GeneratedAttendancePreviewRecord,
   ConstructionContractTemplate,
   ConstructionContractTemplatePayload,
   ConstructionModuleListFilters,
@@ -522,6 +525,28 @@ export const constructionProjectService = {
     await apiClient.delete<ApiResponse<void>>(
       API_ENDPOINTS.MANAGEMENT.PROJECT_ATTENDANCE_RECORD(projectId, attendanceId)
     );
+  },
+
+  previewGeneratedAttendance: async (
+    projectId: string,
+    payload: AttendanceGeneratorPreviewRequest
+  ): Promise<AttendanceGeneratorPreviewResponse> => {
+    const response = await apiClient.post<ApiResponse<AttendanceGeneratorPreviewResponse>>(
+      API_ENDPOINTS.ADMIN.PROJECT_ATTENDANCE_GENERATOR_PREVIEW(projectId),
+      payload
+    );
+    return unwrapData(response.data, "生成考勤预览失败");
+  },
+
+  commitGeneratedAttendance: async (
+    projectId: string,
+    records: GeneratedAttendancePreviewRecord[]
+  ): Promise<{ inserted_count: number }> => {
+    const response = await apiClient.post<ApiResponse<{ inserted_count: number }>>(
+      API_ENDPOINTS.ADMIN.PROJECT_ATTENDANCE_GENERATOR_COMMIT(projectId),
+      { records }
+    );
+    return unwrapData(response.data, "写入生成考勤失败");
   },
 
   listWageBatches: async (

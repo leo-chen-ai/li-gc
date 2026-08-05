@@ -21,6 +21,7 @@ import {
   SlidersHorizontal,
   Upload,
   Users,
+  WandSparkles,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
@@ -63,6 +64,7 @@ import {
 } from "@/components/ui/table";
 import { getApiUrl } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { useAuthUser } from "@/stores/use-auth-store";
 import {
   attendanceFormFields,
   buildDefaultFormState,
@@ -173,6 +175,7 @@ import {
 import { constructionProjectService } from "../services/construction-project-service";
 import { MetricCell } from "./MetricCell";
 import { ConstructionRecordForm } from "./ConstructionRecordForm";
+import { AttendanceGeneratorDialog } from "./AttendanceGeneratorDialog";
 import { ProjectStatusBadge } from "./ProjectStatusBadge";
 import { ProjectReportingPlatforms } from "./ProjectReportingPlatforms";
 
@@ -371,6 +374,8 @@ const wageFormFields: ConstructionFormField[] = [
 
 export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient();
+  const authUser = useAuthUser();
+  const isSystemAdmin = authUser?.role === "admin";
   const [unitPage, setUnitPage] = useState(1);
   const [teamPage, setTeamPage] = useState(1);
   const [workerPage, setWorkerPage] = useState(1);
@@ -679,6 +684,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const [projectFormState, setProjectFormState] = useState<DetailFormState>({});
   const [projectFormOpen, setProjectFormOpen] = useState(false);
   const [advancedExportOpen, setAdvancedExportOpen] = useState(false);
+  const [attendanceGeneratorOpen, setAttendanceGeneratorOpen] = useState(false);
   const [advancedExportTarget, setAdvancedExportTarget] = useState<AdvancedExportTarget>("workers");
   const [advancedExportFormats, setAdvancedExportFormats] = useState<string[]>([]);
   const [advancedExportScope, setAdvancedExportScope] = useState<AdvancedExportScopeFilters>(
@@ -1187,6 +1193,16 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {activeTab === "考勤记录" && isSystemAdmin ? (
+              <Button
+                size="sm"
+                className="h-8 gap-2 bg-violet-600 text-white hover:bg-violet-700"
+                onClick={() => setAttendanceGeneratorOpen(true)}
+              >
+                <WandSparkles className="size-4" />
+                考勤生成工具
+              </Button>
+            ) : null}
             <Button
               size="sm"
               variant="outline"
@@ -1368,6 +1384,17 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
           )}
         </div>
       </section>
+
+      <AttendanceGeneratorDialog
+        open={attendanceGeneratorOpen}
+        projectId={projectId}
+        workers={projectWorkers}
+        onOpenChange={setAttendanceGeneratorOpen}
+        onCommitted={() => {
+          setAttendancePage(1);
+          void queryClient.invalidateQueries({ queryKey: constructionProjectKeys.attendanceRoot(projectId) });
+        }}
+      />
 
       <AdvancedExportDialog
         open={advancedExportOpen}
@@ -3658,7 +3685,7 @@ function AttendanceTab({
       {viewMode === "list" ? (
         <DataTable
           empty="暂无考勤记录"
-          headers={["照片", "工人", "班组名称", "工种", "工人类型", "考勤天数", "进出", "考勤时间", "设备"]}
+          headers={["照片", "工人", "班组名称", "工种", "工人类型", "考勤天数", "进出", "考勤时间", "来源", "设备"]}
           rows={records.map((record) => [
             <AttendancePhoto key={`${record.id}-photo`} src={record.photoUrl} alt={`${record.worker} 考勤照片`} />,
             record.worker,
@@ -3668,10 +3695,11 @@ function AttendanceTab({
             record.attendanceDays ?? 0,
             <AttendanceDirectionBadge key={`${record.id}-direction`} direction={record.direction} />,
             record.time,
+            record.generated ? <span key={`${record.id}-generated`} className="rounded border border-violet-200 bg-violet-50 px-2 py-1 text-xs font-medium text-violet-700 dark:border-violet-900 dark:bg-violet-950/40 dark:text-violet-300">生成</span> : "设备",
             record.device,
           ])}
-          tableClassName="min-w-[980px]"
-          cellClassNames={["w-16", "w-24", "w-28", "w-24", "w-24", "w-20 text-right", "w-20", "w-44", "w-36"]}
+          tableClassName="min-w-[1060px]"
+          cellClassNames={["w-16", "w-24", "w-28", "w-24", "w-24", "w-20 text-right", "w-20", "w-44", "w-20", "w-36"]}
           scrollX
           pagination={pagination}
         />
@@ -4662,6 +4690,7 @@ function apiAttendanceToDetail(
     time: formatBeijingDateTime(record.trigger_time) || formatBeijingDateTime(record.original_time),
     device: record.equipment_id ?? record.serial_number ?? "未填写",
     photoUrl: normalizeAttendancePhoto(record.closeup_photo ?? record.photo_path ?? record.overall_photo),
+    generated: record.is_generated,
     status: "有效",
   };
 }
