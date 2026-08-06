@@ -1071,6 +1071,44 @@ def test_uploader_retries_only_the_failed_project(monkeypatch, tmp_path):
     assert restarts == [True]
 
 
+def test_uploader_does_not_retry_government_business_rejection(monkeypatch, tmp_path):
+    output_root = tmp_path / "output"
+    dated_output = output_root / executor_module.datetime.now().strftime("%Y%m%d")
+    dated_output.mkdir(parents=True)
+    source = dated_output / "测试项目.xlsx"
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "sheet1"
+    sheet.cell(row=3, column=1, value="张三")
+    sheet.cell(row=3, column=5, value="330203199001011234")
+    workbook.save(source)
+    workbook.close()
+    config = {
+        "browser": {
+            "output_dir": str(output_root),
+            "error_dir": str(tmp_path / "errors"),
+            "upload_timeout": 1,
+        },
+        "runtime": {"max_execution_retries": 3},
+    }
+    instance = uploader.Uploader(config, driver=object())
+    attempts = []
+
+    def reject_upload(*_args, **_kwargs):
+        attempts.append(True)
+        raise RuntimeError("政府平台未接受该人员，且未返回‘已存在’结果")
+
+    monkeypatch.setattr(instance, "_upload_single_file", reject_upload)
+    monkeypatch.setattr(uploader, "split_upload_workbook", lambda path: [path])
+    monkeypatch.setattr(instance, "_log_page_state", lambda *_args: None)
+
+    results = instance._do_uploads()
+
+    assert len(attempts) == 1
+    assert results[0]["status"] == "failed"
+    assert results[0]["execution_error"] is False
+
+
 def test_split_upload_workbook_uses_200_row_batches(tmp_path):
     path = tmp_path / "20260803_测试项目_姜太公导出.xlsx"
     workbook = openpyxl.Workbook()

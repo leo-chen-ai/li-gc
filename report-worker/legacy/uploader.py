@@ -361,7 +361,11 @@ class Uploader:
                 except Exception as e:
                     self._log_page_state("上传失败现场")
                     session_needs_restart = True
-                    if attempt < self.max_execution_retries:
+                    error = str(e)
+                    is_business_rejection = error.startswith(
+                        "政府平台未接受该人员"
+                    )
+                    if attempt < self.max_execution_retries and not is_business_rejection:
                         logger.warning(
                             "上传执行异常 %s，准备自动重试 %s/%s: %s",
                             project_name,
@@ -371,22 +375,22 @@ class Uploader:
                             exc_info=True,
                         )
                         continue
+                    if is_business_rejection:
+                        logger.info("政府平台已返回业务拒绝明细，不再重试上传")
                     logger.error(f"上传失败 {project_name}: {e}", exc_info=True)
                     batch_rows = count_upload_rows(file_path)
-                    error = str(e)
                     self.results.append({
                         'project_name': project_name,
                         'status': 'failed',
                         'error': error,
                         # 对方平台明确拒绝人员是业务结果；找不到按钮、
                         # 页面未跳转等其他异常是自动化执行错误，必须让任务失败。
-                        'execution_error': not error.startswith(
-                            "政府平台未接受该人员"
-                        ),
+                        'execution_error': not is_business_rejection,
                         'total_rows': batch_rows,
                         'success_rows': 0,
                         'failure_rows': batch_rows,
                     })
+                    break
 
         logger.info(f"全部上传完成，失败/错误文件: {len(self.error_files)}")
         return self.results
