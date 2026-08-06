@@ -373,10 +373,16 @@ class Uploader:
                         continue
                     logger.error(f"上传失败 {project_name}: {e}", exc_info=True)
                     batch_rows = count_upload_rows(file_path)
+                    error = str(e)
                     self.results.append({
                         'project_name': project_name,
                         'status': 'failed',
-                        'error': str(e),
+                        'error': error,
+                        # 对方平台明确拒绝人员是业务结果；找不到按钮、
+                        # 页面未跳转等其他异常是自动化执行错误，必须让任务失败。
+                        'execution_error': not error.startswith(
+                            "政府平台未接受该人员"
+                        ),
                         'total_rows': batch_rows,
                         'success_rows': 0,
                         'failure_rows': batch_rows,

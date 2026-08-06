@@ -327,6 +327,7 @@ class RunExecutor:
             self._store_diagnostics()
         if not results:
             raise RuntimeError("目标网站未产生上传结果")
+        execution_errors = []
         for result in results:
             name = result["project_name"]
             project_id = self.project_ids.get(name) or self.repo.upsert_project(self.run_id, name)
@@ -347,6 +348,10 @@ class RunExecutor:
                 self.failed_projects += 1
                 self.repo.update_project(project_id, status="failed", current_stage="target_upload", last_error=redact(result.get("error", "上传失败")), upload_failure_count=failure)
                 self.repo.mark_project_items(project_id, "failed", receipt, redact(result.get("error", "上传失败")))
+                if result.get("execution_error"):
+                    execution_errors.append(
+                        f"{name}: {redact(result.get('error', '上传执行失败'))}"
+                    )
             else:
                 if success > 0 or failure == 0:
                     self.successful_projects += 1
@@ -371,6 +376,8 @@ class RunExecutor:
                     else:
                         item_status = "validated_with_errors" if result["status"] == "validated" and failure else "validated" if result["status"] == "validated" else "submitted_with_errors" if failure else "submitted"
                     self.repo.mark_project_items(project_id, item_status, receipt)
+        if execution_errors:
+            raise RuntimeError("目标网站自动化执行失败：" + "；".join(execution_errors))
         error_dir = Path(self.config["browser"]["error_dir"]) / datetime.now().strftime("%Y%m%d")
         if error_dir.exists():
             for path in error_dir.glob("*.xlsx"):
@@ -408,6 +415,7 @@ def aggregate_project_results(results):
             "success_rows": 0,
             "failure_rows": 0,
             "already_exists": False,
+            "execution_error": False,
             "person_details_available": True,
             "person_results": [],
             "errors": [],
@@ -431,6 +439,9 @@ def aggregate_project_results(results):
         aggregate["person_results"].extend(result.get("person_results") or [])
         if result.get("error") and result["error"] not in aggregate["errors"]:
             aggregate["errors"].append(result["error"])
+        aggregate["execution_error"] = (
+            aggregate["execution_error"] or bool(result.get("execution_error"))
+        )
         aggregate["batches"].append({
             key: value for key, value in result.items()
             if key not in {"person_results", "project_name"}

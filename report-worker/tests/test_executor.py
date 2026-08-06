@@ -624,6 +624,49 @@ def test_upload_with_row_failures_is_partial_success(monkeypatch, tmp_path):
     assert executor.repo.item_status == "result_unknown"
 
 
+def test_upload_execution_error_fails_the_run_after_recording_project(monkeypatch, tmp_path):
+    class FakeUploader:
+        def __init__(self, _config):
+            pass
+
+        def run(self):
+            return [{
+                "project_name": "测试项目", "status": "failed",
+                "error": "备案类型选择弹窗仍在，但未找到确认按钮",
+                "execution_error": True,
+                "total_rows": 3, "success_rows": 0, "failure_rows": 3,
+            }]
+
+    class FakeRepository:
+        def __init__(self):
+            self.project_update = None
+
+        def update_project(self, _project_id, **fields):
+            self.project_update = fields
+
+        def mark_project_items(self, *_args):
+            pass
+
+        def upsert_project(self, *_args):
+            return "project-id"
+
+    monkeypatch.setattr(executor_module, "Uploader", FakeUploader)
+    executor = RunExecutor.__new__(RunExecutor)
+    executor.config = {"browser": {"error_dir": str(tmp_path / "errors")}}
+    executor.config_id = "config-id"
+    executor.run_id = "run-id"
+    executor.project_ids = {"测试项目": "project-id"}
+    executor.successful_projects = 0
+    executor.failed_projects = 0
+    executor.repo = FakeRepository()
+    executor.stage = lambda *_args, **_kwargs: None
+
+    with pytest.raises(RuntimeError, match="目标网站自动化执行失败"):
+        executor._upload()
+
+    assert executor.repo.project_update["status"] == "failed"
+
+
 def test_upload_maps_error_detail_people_and_infers_success(monkeypatch, tmp_path):
     failed_fingerprint = hashlib.sha256(b"330203199001011234").hexdigest()
 
