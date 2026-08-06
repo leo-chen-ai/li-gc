@@ -180,9 +180,15 @@ class RunExecutor:
                     self._convert()
                     self._upload()
             self.stage("finalizing", "正在汇总运行结果")
-            status = "partial_success" if self.failed_projects and self.successful_projects else "failed" if self.failed_projects else "success"
+            # 对方平台拒绝、数据已存在或业务规则跳过，都表示自动化流程已经
+            # 正常执行完毕。只有抛出系统执行异常时，任务才记为 failed。
+            status = "success"
             self.repo.complete(self.run_id, status)
-            self.repo.event(self.run_id, "completed", f"任务结束：{status}")
+            self.repo.event(
+                self.run_id,
+                "completed",
+                f"任务执行完成：成功项目 {self.successful_projects} 个，含跳过项目 {self.failed_projects} 个",
+            )
             return status
         except CancelledError as error:
             self.repo.event(self.run_id, self.context["stage"], str(error), "warning")

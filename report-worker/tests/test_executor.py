@@ -7,6 +7,7 @@ from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import openpyxl
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -702,6 +703,38 @@ def test_executor_requeues_mid_run_exception(monkeypatch):
     assert executor.repo.retry == ("run-id", "network error", 3)
 
 
+def test_executor_marks_completed_business_rejections_as_success():
+    class FakeRepository:
+        def __init__(self):
+            self.completed = None
+
+        def event(self, *_args, **_kwargs):
+            pass
+
+        def complete(self, run_id, status, error=None):
+            self.completed = (run_id, status, error)
+
+    class FakeTemp:
+        def cleanup(self):
+            pass
+
+    executor = RunExecutor.__new__(RunExecutor)
+    executor.repo = FakeRepository()
+    executor.run_id = "run-id"
+    executor.mode = "production"
+    executor.context = {"stage": "starting", "project_id": None}
+    executor.temp = FakeTemp()
+    executor.successful_projects = 0
+    executor.failed_projects = 2
+    executor.stage = lambda *_args, **_kwargs: None
+    executor._download = lambda: None
+    executor._convert = lambda: None
+    executor._upload = lambda: None
+
+    assert executor.execute() == "success"
+    assert executor.repo.completed == ("run-id", "success", None)
+
+
 def test_executor_finishes_failed_after_retry_limit(monkeypatch):
     class FakeRepository:
         def __init__(self):
@@ -815,6 +848,76 @@ def test_optional_authorization_page_is_checked_and_accepted(tmp_path):
     assert instance._handle_authorization_confirmation() is True
     assert checkbox.clicked == 1
     assert agree.clicked == 1
+
+
+def test_online_handle_accepts_same_window_form_navigation(monkeypatch):
+    class FakeElement:
+        def __init__(self):
+            self.clicked = False
+
+        def click(self):
+            self.clicked = True
+
+    class FakeSwitch:
+        def window(self, _handle):
+            raise AssertionError("same-window navigation must not switch windows")
+
+    class FakeDriver:
+        current_url = "https://www.zjzwfw.gov.cn/zjservice-fe/#/workguide"
+        window_handles = ["guide"]
+        switch_to = FakeSwitch()
+
+    button = FakeElement()
+    instance = uploader.Uploader.__new__(uploader.Uploader)
+    instance.driver = FakeDriver()
+    instance.long_wait = object()
+    instance._is_upload_form_visible = lambda: button.clicked
+
+    monkeypatch.setattr(
+        uploader,
+        "_find_first",
+        lambda _driver, selectors, **_kwargs: (
+            button if any("在线办理" in selector for _by, selector in selectors) else None
+        ),
+    )
+
+    instance._click_online_handle()
+
+    assert button.clicked is True
+
+
+def test_confirmation_is_skipped_when_form_is_already_visible():
+    instance = uploader.Uploader.__new__(uploader.Uploader)
+    instance._is_upload_form_visible = lambda: True
+
+    assert instance._select_registration_type() is False
+    assert instance._confirm_selection() is False
+
+
+def test_registration_selection_does_not_match_workguide_heading(monkeypatch):
+    class FakeDriver:
+        current_url = "https://www.zjzwfw.gov.cn/zjservice-fe/#/workguide"
+
+    instance = uploader.Uploader.__new__(uploader.Uploader)
+    instance.driver = FakeDriver()
+    instance._is_upload_form_visible = lambda: False
+    monkeypatch.setattr(instance, "_registration_confirm_button", lambda: None)
+
+    with pytest.raises(RuntimeError, match="未出现备案类型选择弹窗"):
+        instance._select_registration_type()
+
+
+def test_wait_for_upload_form_reports_the_actual_page(monkeypatch):
+    class FakeDriver:
+        current_url = "https://search.zj.gov.cn/no-result"
+
+    instance = uploader.Uploader.__new__(uploader.Uploader)
+    instance.driver = FakeDriver()
+    instance._is_upload_form_visible = lambda: False
+    monkeypatch.setattr(uploader.time, "sleep", lambda _seconds: None)
+
+    with pytest.raises(RuntimeError, match="search.zj.gov.cn/no-result"):
+        instance._wait_for_upload_form(timeout=0)
 
 
 def test_uploader_retries_only_the_failed_project(monkeypatch, tmp_path):

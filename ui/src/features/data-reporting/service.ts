@@ -10,7 +10,7 @@ function data<T>(response: { data: ApiSuccess<T> }, fallback: T): T {
 
 export const reportService = {
   summary: async () => data(await apiClient.get<ApiSuccess<ReportSummary>>(API_ENDPOINTS.ADMIN.REPORT_FORWARD_SUMMARY), {} as ReportSummary),
-  configs: async () => data(await apiClient.get<ApiSuccess<PageResult<ReportConfig>>>(API_ENDPOINTS.ADMIN.REPORT_FORWARD_CONFIGS, { params: { page: 1, page_size: 100 } }), { items: [], total: 0, page: 1, page_size: 100 }),
+  configs: async (page = 1, keyword = "", pageSize = 10, status = "") => data(await apiClient.get<ApiSuccess<PageResult<ReportConfig>>>(API_ENDPOINTS.ADMIN.REPORT_FORWARD_CONFIGS, { params: { page, page_size: pageSize, keyword, status: status || undefined } }), { items: [], total: 0, page, page_size: pageSize }),
   config: async (id: string) => data(await apiClient.get<ApiSuccess<ReportConfig>>(API_ENDPOINTS.ADMIN.REPORT_FORWARD_CONFIG(id)), null as unknown as ReportConfig),
   createConfig: async (payload: ReportConfigPayload) => data(await apiClient.post<ApiSuccess<ReportConfig>>(API_ENDPOINTS.ADMIN.REPORT_FORWARD_CONFIGS, payload), null as unknown as ReportConfig),
   updateConfig: async (id: string, payload: ReportConfigPayload) => data(await apiClient.put<ApiSuccess<ReportConfig>>(API_ENDPOINTS.ADMIN.REPORT_FORWARD_CONFIG(id), payload), null as unknown as ReportConfig),

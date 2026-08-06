@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity, AlertTriangle, Beaker, CheckCircle2, Clock3, Download,
   Loader2, Pencil, Play, Plus, RefreshCw, Send,
-  Settings2, Square, Trash2, Users,
+  Search, Settings2, Square, Trash2, Users,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -51,8 +51,8 @@ export function DataReportingPage() {
   const user = useAuthUser();
   // 非管理员（如数据报送角色）只能看运行任务；工作台/报送配置/测试中心/报送数据仅管理员可见
   const isAdmin = user?.role === "admin";
-  const visibleTabs: Tab[] = isAdmin ? ["dashboard", "configs", "tests", "runs", "data"] : ["runs"];
-  const [tab, setTab] = useState<Tab>(isAdmin ? "dashboard" : "runs");
+  const visibleTabs: Tab[] = isAdmin ? ["configs", "runs", "dashboard", "tests", "data"] : ["runs"];
+  const [tab, setTab] = useState<Tab>(isAdmin ? "configs" : "runs");
   // 角色信息异步就绪后可能停在不可见 tab，渲染时直接收敛到运行任务
   const activeTab: Tab = visibleTabs.includes(tab) ? tab : "runs";
   const [formOpen, setFormOpen] = useState(false);
@@ -66,10 +66,22 @@ export function DataReportingPage() {
   const [dataRunId, setDataRunId] = useState("");
   const [dataPage, setDataPage] = useState(1);
   const [dataOutcome, setDataOutcome] = useState<ResultOutcome>("all");
+  const [configPage, setConfigPage] = useState(1);
+  const [configPageSize, setConfigPageSize] = useState(10);
+  const [configKeywordInput, setConfigKeywordInput] = useState("");
+  const [configKeyword, setConfigKeyword] = useState("");
+  const [configStatus, setConfigStatus] = useState("");
+  const [runPage, setRunPage] = useState(1);
+  const [runPageSize, setRunPageSize] = useState(10);
+  const [runKeywordInput, setRunKeywordInput] = useState("");
+  const [runKeyword, setRunKeyword] = useState("");
+  const [runStatus, setRunStatus] = useState("");
 
   const summary = useQuery({ queryKey: ["report-summary"], queryFn: reportService.summary, refetchInterval: 10_000 });
-  const configs = useQuery({ queryKey: ["report-configs"], queryFn: reportService.configs, refetchInterval: 15_000 });
-  const runs = useQuery({ queryKey: ["report-runs"], queryFn: () => reportService.runs(), refetchInterval: 5_000 });
+  const configs = useQuery({ queryKey: ["report-configs", "list", configPage, configPageSize, configKeyword, configStatus], queryFn: () => reportService.configs(configPage, configKeyword, configPageSize, configStatus), refetchInterval: 15_000 });
+  const configOptions = useQuery({ queryKey: ["report-configs", "options"], queryFn: () => reportService.configs(1, "", 100), refetchInterval: 30_000 });
+  const runs = useQuery({ queryKey: ["report-runs", "options"], queryFn: () => reportService.runs({ page: 1, page_size: 100 }), refetchInterval: 10_000 });
+  const runList = useQuery({ queryKey: ["report-runs", "list", runPage, runPageSize, runKeyword, runStatus], queryFn: () => reportService.runs({ page: runPage, page_size: runPageSize, keyword: runKeyword, status: runStatus || undefined }), refetchInterval: 5_000 });
   const detail = useQuery({ queryKey: ["report-run", detailRunId], queryFn: () => reportService.run(detailRunId!), enabled: Boolean(detailRunId), refetchInterval: (query) => query.state.data && ["pending", "running", "cancelling"].includes(query.state.data.status) ? 3_000 : false });
   const detailItems = useQuery({ queryKey: ["report-detail-items", detailRunId, detailOutcome, detailItemPage], queryFn: () => reportService.items(detailRunId!, detailItemPage, detailOutcome), enabled: Boolean(detailRunId) });
   const items = useQuery({ queryKey: ["report-items", dataRunId, dataOutcome, dataPage], queryFn: () => reportService.items(dataRunId, dataPage, dataOutcome), enabled: Boolean(dataRunId) });
@@ -89,8 +101,10 @@ export function DataReportingPage() {
   const retryRun = useMutation({ mutationFn: reportService.retryRun, onSuccess: invalidate });
 
   const configRows = useMemo(() => configs.data?.items ?? [], [configs.data?.items]);
+  const configOptionRows = useMemo(() => configOptions.data?.items ?? [], [configOptions.data?.items]);
   const runRows = useMemo(() => runs.data?.items ?? [], [runs.data?.items]);
-  const selectedTestConfigId = testConfigId || configRows[0]?.id || "";
+  const runListRows = useMemo(() => runList.data?.items ?? [], [runList.data?.items]);
+  const selectedTestConfigId = testConfigId || configOptionRows[0]?.id || "";
   const rawSourceRuns = useMemo(() => runRows.filter((run) => run.config_id === selectedTestConfigId && run.downloaded_count > 0 && ["success", "partial_success"].includes(run.status)), [runRows, selectedTestConfigId]);
   const convertedSourceRuns = useMemo(() => runRows.filter((run) => run.config_id === selectedTestConfigId && run.converted_count > 0 && ["success", "partial_success"].includes(run.status)), [runRows, selectedTestConfigId]);
   const completedDataRuns = useMemo(() => runRows.filter((run) => run.item_count > 0), [runRows]);
@@ -210,9 +224,9 @@ export function DataReportingPage() {
       </nav>
 
       {activeTab === "dashboard" && isAdmin && <Dashboard summary={summary.data} runs={runRows.slice(0, 6)} onRun={setDetailRunId} />}
-      {activeTab === "configs" && isAdmin && <ConfigTable rows={configRows} loading={configs.isLoading} onEdit={openEdit} onRun={startProduction} onDelete={async (config) => { if (!window.confirm(`确认删除“${config.name}”？历史数据仍会保留。`)) return; try { await deleteConfig.mutateAsync(config.id); toast.success("配置已删除"); } catch (error) { toast.error(errorMessage(error)); } }} />}
-      {activeTab === "tests" && isAdmin && <TestCenter configs={configRows} selectedConfig={selectedTestConfigId} onConfig={setTestConfigId} sourceRun={sourceRunId} onSourceRun={setSourceRunId} rawRuns={rawSourceRuns} convertedRuns={convertedSourceRuns} running={createRun.isPending} onRun={runTest} />}
-      {activeTab === "runs" && <RunsTable rows={runRows} loading={runs.isLoading} onDetail={setDetailRunId} onCancel={async (run) => { try { await cancelRun.mutateAsync(run.id); toast.success("已请求取消任务"); } catch (error) { toast.error(errorMessage(error)); } }} onRetry={async (run) => { if (["production", "test_submit", "test_full"].includes(run.run_mode) && !window.confirm("该任务可能已经产生过真实提交，重试可能再次向政务网提交数据，确认继续吗？")) return; try { await retryRun.mutateAsync(run.id); toast.success("重试任务已进入队列"); } catch (error) { toast.error(errorMessage(error)); } }} />}
+      {activeTab === "configs" && isAdmin && <ConfigPanel rows={configRows} result={configs.data} loading={configs.isLoading} keyword={configKeywordInput} onKeyword={setConfigKeywordInput} onSearch={() => { setConfigKeyword(configKeywordInput.trim()); setConfigPage(1); }} onClear={() => { setConfigKeywordInput(""); setConfigKeyword(""); setConfigPage(1); }} status={configStatus} onStatus={(value) => { setConfigStatus(value); setConfigPage(1); }} page={configPage} onPage={setConfigPage} pageSize={configPageSize} onPageSize={(value) => { setConfigPageSize(value); setConfigPage(1); }} onEdit={openEdit} onRun={startProduction} onDelete={async (config) => { if (!window.confirm(`确认删除“${config.name}”？历史数据仍会保留。`)) return; try { await deleteConfig.mutateAsync(config.id); toast.success("配置已删除"); } catch (error) { toast.error(errorMessage(error)); } }} />}
+      {activeTab === "tests" && isAdmin && <TestCenter configs={configOptionRows} selectedConfig={selectedTestConfigId} onConfig={setTestConfigId} sourceRun={sourceRunId} onSourceRun={setSourceRunId} rawRuns={rawSourceRuns} convertedRuns={convertedSourceRuns} running={createRun.isPending} onRun={runTest} />}
+      {activeTab === "runs" && <RunsPanel rows={runListRows} result={runList.data} loading={runList.isLoading} keyword={runKeywordInput} onKeyword={setRunKeywordInput} onSearch={() => { setRunKeyword(runKeywordInput.trim()); setRunPage(1); }} onClear={() => { setRunKeywordInput(""); setRunKeyword(""); setRunPage(1); }} status={runStatus} onStatus={(value) => { setRunStatus(value); setRunPage(1); }} page={runPage} onPage={setRunPage} pageSize={runPageSize} onPageSize={(value) => { setRunPageSize(value); setRunPage(1); }} onDetail={setDetailRunId} onCancel={async (run) => { try { await cancelRun.mutateAsync(run.id); toast.success("已请求取消任务"); } catch (error) { toast.error(errorMessage(error)); } }} onRetry={async (run) => { if (["production", "test_submit", "test_full"].includes(run.run_mode) && !window.confirm("该任务可能已经产生过真实提交，重试可能再次向政务网提交数据，确认继续吗？")) return; try { await retryRun.mutateAsync(run.id); toast.success("重试任务已进入队列"); } catch (error) { toast.error(errorMessage(error)); } }} />}
       {activeTab === "data" && isAdmin && <DataPanel runs={completedDataRuns} runId={dataRunId} onRun={(id) => { setDataRunId(id); setDataPage(1); setDataOutcome("all"); }} result={items.data} loading={items.isLoading} page={dataPage} onPage={setDataPage} outcome={dataOutcome} onOutcome={(value) => { setDataOutcome(value); setDataPage(1); }} onExport={() => void exportItems(dataRunId, dataOutcome)} />}
 
       <ConfigDialog open={formOpen} onOpen={setFormOpen} editing={editing} form={form} setForm={setForm} submit={submitConfig} saving={createConfig.isPending || updateConfig.isPending} />
@@ -227,90 +241,46 @@ function Dashboard({ summary, runs, onRun }: { summary?: Awaited<ReturnType<type
     ["等待队列", summary?.queued_count ?? 0, Clock3], ["今日成功", summary?.today_success_count ?? 0, CheckCircle2],
     ["今日异常", summary?.today_failure_count ?? 0, AlertTriangle], ["今日人员", summary?.today_item_count ?? 0, Users],
   ] as const;
-  return <div className="space-y-4"><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">{stats.map(([label, value, Icon]) => <div key={label} className="rounded-xl border bg-white p-4"><Icon className="size-4 text-[#0f6b5d]" /><div className="mt-3 text-2xl font-semibold">{value}</div><div className="text-xs text-slate-500">{label}</div></div>)}</div><div className="grid gap-4 lg:grid-cols-[1fr_320px]"><section className="rounded-xl border bg-white p-4"><h2 className="font-semibold">最近任务</h2><div className="mt-3 space-y-2">{runs.length ? runs.map((run) => <button key={run.id} onClick={() => onRun(run.id)} className="flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left hover:bg-slate-50"><div><div className="text-sm font-medium">{run.config_name}</div><div className="text-xs text-slate-500">{modeLabel(run.run_mode)} · {formatTime(run.created_at)}</div></div><StatusBadge status={run.status} /></button>) : <Empty text="暂无运行任务" />}</div></section><section className="rounded-xl border bg-white p-4"><h2 className="font-semibold">Worker 状态</h2><p className="mt-1 text-xs text-slate-500">最多一个 Worker 运行，每次只启动一个 Chromium。</p><div className="mt-3 space-y-2">{summary?.workers?.length ? summary.workers.map((worker) => <div key={worker.worker_id} className="rounded-lg border p-3"><div className="flex items-center justify-between"><span className="truncate text-sm font-medium">{worker.pod_name || worker.worker_id}</span><StatusBadge status={worker.status} /></div><div className="mt-1 text-xs text-slate-500">{worker.worker_version || "-"} · {formatTime(worker.last_seen_at)}</div></div>) : <Empty text="Worker 尚未连接" />}</div></section></div></div>;
+  return <div className="space-y-4"><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">{stats.map(([label, value, Icon]) => <div key={label} className="rounded-xl border bg-white p-4"><Icon className="size-4 text-[#0f6b5d]" /><div className="mt-3 text-2xl font-semibold">{value}</div><div className="text-xs text-slate-500">{label}</div></div>)}</div><div className="grid gap-4 lg:grid-cols-[1fr_320px]"><section className="rounded-xl border bg-white p-4"><h2 className="font-semibold">最近任务</h2><div className="mt-3 space-y-2">{runs.length ? runs.map((run) => <button key={run.id} onClick={() => onRun(run.id)} className="flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left hover:bg-slate-50"><div><div className="text-sm font-medium">{run.config_name}</div><div className="text-xs text-slate-500">{modeLabel(run.run_mode)} · {formatTime(run.created_at)}</div></div><RunStatusBadge status={run.status} /></button>) : <Empty text="暂无运行任务" />}</div></section><section className="rounded-xl border bg-white p-4"><h2 className="font-semibold">Worker 状态</h2><p className="mt-1 text-xs text-slate-500">最多一个 Worker 运行，每次只启动一个 Chromium。</p><div className="mt-3 space-y-2">{summary?.workers?.length ? summary.workers.map((worker) => <div key={worker.worker_id} className="rounded-lg border p-3"><div className="flex items-center justify-between"><span className="truncate text-sm font-medium">{worker.pod_name || worker.worker_id}</span><StatusBadge status={worker.status} /></div><div className="mt-1 text-xs text-slate-500">{worker.worker_version || "-"} · {formatTime(worker.last_seen_at)}</div></div>) : <Empty text="Worker 尚未连接" />}</div></section></div></div>;
 }
 
-function ConfigTable({ rows, loading, onEdit, onRun, onDelete }: { rows: ReportConfig[]; loading: boolean; onEdit: (row: ReportConfig) => void; onRun: (row: ReportConfig) => void; onDelete: (row: ReportConfig) => void }) {
-  if (loading) return <Empty text="配置加载中" />;
-  if (!rows.length) return <Empty text="暂无报送配置" />;
-
-  return <div className="space-y-4">{rows.map((row) => {
-    const headless = row.settings.headless !== false;
-    const timeout = Math.min(10, Number(row.settings.upload_timeout_minutes ?? 10));
-    const latestEntryDays = Number(row.settings.latest_entry_days ?? 1);
-    return <section key={row.id} className="overflow-hidden rounded-xl border bg-white shadow-sm">
-      <header className="flex flex-wrap items-start justify-between gap-3 border-b bg-slate-50/70 px-5 py-4">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-lg font-semibold">{row.name}</h2>
-            <LifecycleBadge config={row} />
-            {row.active_run_count > 0 && <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700">{row.active_run_count} 个任务运行中</Badge>}
-          </div>
-          <p className="mt-1 text-sm text-slate-500">{row.remark || "无备注"}</p>
-        </div>
-        <div className="flex items-center gap-1">
-          <Button size="sm" variant="outline" disabled={!row.is_enabled || row.lifecycle_status !== "production"} onClick={() => onRun(row)}><Play className="mr-2 size-4" />立即运行</Button>
-          <Button size="sm" variant="outline" onClick={() => onEdit(row)}><Pencil className="mr-2 size-4" />编辑</Button>
-          <Button size="icon" variant="ghost" title="删除" onClick={() => onDelete(row)}><Trash2 className="size-4 text-red-500" /></Button>
-        </div>
-      </header>
-
-      <div className="grid gap-5 p-5 xl:grid-cols-3">
-        <ConfigSection title="源网站">
-          <ConfigValue label="网站地址" value={row.source_base_url} mono />
-          <ConfigValue label="登录账号" value={row.source_username} mono />
-          <ConfigValue label="登录密码" value={<ConfiguredBadge configured={row.source_password_configured} />} />
-          <ConfigValue label="项目范围" value={row.project_mode === "all" ? "全部项目" : "仅拉取指定项目"} />
-          <ProjectNames label="拉取项目" names={row.include_projects} empty="全部项目" />
-          <ProjectNames label="排除项目" names={row.exclude_projects} empty="无" />
-        </ConfigSection>
-
-        <ConfigSection title="目标政务网与验证码">
-          <ConfigValue label="网站地址" value={row.target_base_url} mono />
-          <ConfigValue label="手机号/账号" value={row.target_username} mono />
-          <ConfigValue label="登录密码" value={<ConfiguredBadge configured={row.target_password_configured} />} />
-          <ConfigValue label="验证码方式" value={row.verification_type === "feishu" ? "飞书监听" : row.verification_type} />
-          <ConfigValue label="飞书配置" value={<ConfiguredBadge configured={row.verification_configured} />} />
-          <ConfigValue label="配置适配器" value={row.adapter || "xzy_zjzwfw"} mono />
-        </ConfigSection>
-
-        <ConfigSection title="运行策略">
-          <ConfigValue label="每日运行" value={`${row.schedule_time.slice(0, 5)} · ${row.schedule_timezone}`} />
-          <ConfigValue label="定时启用" value={row.is_enabled ? "已启用" : "未启用"} />
-          <ConfigValue label="下次运行" value={row.next_run_at ? formatTime(row.next_run_at) : "未调度"} />
-          <ConfigValue label="Chromium" value={headless ? "无界面模式" : "可视模式"} />
-          <ConfigValue label="上传超时" value={`${timeout} 分钟`} />
-          <ConfigValue label="最新进场" value={`最近 ${latestEntryDays} 天`} />
-          <ConfigValue label="创建时间" value={formatTime(row.created_at)} />
-          <ConfigValue label="最后更新" value={formatTime(row.updated_at)} />
-        </ConfigSection>
-      </div>
-    </section>;
-  })}</div>;
+function ConfigPanel({ rows, result, loading, keyword, onKeyword, onSearch, onClear, status, onStatus, page, onPage, pageSize, onPageSize, onEdit, onRun, onDelete }: { rows: ReportConfig[]; result?: Awaited<ReturnType<typeof reportService.configs>>; loading: boolean; keyword: string; onKeyword: (value: string) => void; onSearch: () => void; onClear: () => void; status: string; onStatus: (value: string) => void; page: number; onPage: (page: number) => void; pageSize: number; onPageSize: (value: number) => void; onEdit: (row: ReportConfig) => void; onRun: (row: ReportConfig) => void; onDelete: (row: ReportConfig) => void }) {
+  const total = result?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  return <div className="space-y-4">
+    <form className="flex flex-wrap gap-2 rounded-xl border bg-white p-4" onSubmit={(event) => { event.preventDefault(); onSearch(); }}>
+      <Input className="min-w-64 max-w-md flex-1" value={keyword} onChange={(event) => onKeyword(event.target.value)} placeholder="搜索配置名称、项目名称或账号" />
+      <select className="h-10 rounded-md border bg-background px-3 text-sm" value={status} onChange={(event) => onStatus(event.target.value)}><option value="">全部状态</option><option value="production">正式</option><option value="testing">测试中</option><option value="draft">草稿</option><option value="paused">暂停</option></select>
+      <Button type="submit" className="bg-[#0f6b5d]" disabled={loading}><Search className="mr-2 size-4" />搜索</Button>
+      {keyword && <Button type="button" variant="outline" onClick={onClear}>清空</Button>}
+    </form>
+    <ConfigTable rows={rows} loading={loading} page={page} pageSize={pageSize} onEdit={onEdit} onRun={onRun} onDelete={onDelete} />
+    <ResultPagination total={total} page={page} pageCount={pageCount} pageSize={pageSize} loading={loading} onPage={onPage} onPageSize={onPageSize} />
+  </div>;
 }
 
-function ConfigSection({ title, children }: { title: string; children: ReactNode }) {
-  return <section><h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-800"><span className="h-4 w-1 rounded-full bg-[#0f6b5d]" />{title}</h3><dl className="space-y-2.5">{children}</dl></section>;
-}
-
-function ConfigValue({ label, value, mono = false }: { label: string; value: ReactNode; mono?: boolean }) {
-  return <div className="grid grid-cols-[92px_minmax(0,1fr)] gap-3 text-sm"><dt className="text-slate-500">{label}</dt><dd className={`min-w-0 break-all text-slate-900 ${mono ? "font-mono text-xs" : ""}`}>{value}</dd></div>;
-}
-
-function ProjectNames({ label, names, empty }: { label: string; names: string[]; empty: string }) {
-  return <div className="grid grid-cols-[92px_minmax(0,1fr)] gap-3 text-sm"><dt className="text-slate-500">{label}</dt><dd className="flex min-w-0 flex-wrap gap-1.5">{names.length ? names.map((name) => <Badge key={name} variant="outline" className="max-w-full whitespace-normal text-left font-normal">{name}</Badge>) : <span className="text-slate-400">{empty}</span>}</dd></div>;
-}
-
-function ConfiguredBadge({ configured }: { configured: boolean }) {
-  return <Badge variant="outline" className={configured ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-red-200 bg-red-50 text-red-700"}>{configured ? "已配置" : "未配置"}</Badge>;
+function ConfigTable({ rows, loading, page, pageSize, onEdit, onRun, onDelete }: { rows: ReportConfig[]; loading: boolean; page: number; pageSize: number; onEdit: (row: ReportConfig) => void; onRun: (row: ReportConfig) => void; onDelete: (row: ReportConfig) => void }) {
+  return <section className="overflow-hidden rounded-xl border bg-white"><div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead className="w-16">序号</TableHead><TableHead>配置名称</TableHead><TableHead>状态</TableHead><TableHead>项目范围</TableHead><TableHead>每日运行</TableHead><TableHead>下次运行</TableHead><TableHead>更新时间</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader><TableBody>{loading ? <MessageRow text="配置加载中" /> : rows.length ? rows.map((row, index) => <TableRow key={row.id}><TableCell>{(page - 1) * pageSize + index + 1}</TableCell><TableCell><div className="max-w-72 truncate font-medium" title={row.name}>{row.name}</div>{row.active_run_count > 0 && <div className="mt-1 text-xs text-blue-600">{row.active_run_count} 个任务运行中</div>}</TableCell><TableCell><LifecycleBadge config={row} /></TableCell><TableCell><div className="max-w-80 truncate" title={row.project_mode === "all" ? "全部项目" : row.include_projects.join("、")}>{row.project_mode === "all" ? "全部项目" : `${row.include_projects.length} 个指定项目`}</div></TableCell><TableCell className="whitespace-nowrap">{row.schedule_time.slice(0, 5)}</TableCell><TableCell className="whitespace-nowrap">{row.next_run_at ? formatTime(row.next_run_at) : "未调度"}</TableCell><TableCell className="whitespace-nowrap">{formatTime(row.updated_at)}</TableCell><TableCell className="text-right"><div className="flex justify-end gap-1"><Button size="sm" variant="outline" onClick={() => onEdit(row)}><Pencil className="mr-2 size-4" />编辑</Button><Button size="sm" variant="outline" disabled={!row.is_enabled || row.lifecycle_status !== "production"} onClick={() => onRun(row)}><Play className="mr-2 size-4" />运行</Button><Button size="icon" variant="ghost" title="删除" onClick={() => onDelete(row)}><Trash2 className="size-4 text-red-500" /></Button></div></TableCell></TableRow>) : <MessageRow text="暂无报送配置" />}</TableBody></Table></div></section>;
 }
 
 function TestCenter({ configs, selectedConfig, onConfig, sourceRun, onSourceRun, rawRuns, convertedRuns, running, onRun }: { configs: ReportConfig[]; selectedConfig: string; onConfig: (id: string) => void; sourceRun: string; onSourceRun: (id: string) => void; rawRuns: ReportRun[]; convertedRuns: ReportRun[]; running: boolean; onRun: (mode: RunMode, danger?: boolean, source?: "raw" | "converted") => void }) {
   return <div className="space-y-4"><section className="rounded-xl border bg-white p-4"><div className="flex items-center gap-2"><Beaker className="size-5 text-[#0f6b5d]" /><div><h2 className="font-semibold">分阶段测试中心</h2><p className="text-xs text-slate-500">测试任务也进入统一队列，全局一次只运行一个任务。</p></div></div><div className="mt-4 grid gap-4 md:grid-cols-2"><Field label="报送配置"><NativeSelect value={selectedConfig} onChange={onConfig} options={configs.map((item) => ({ value: item.id, label: item.name }))} placeholder="请选择配置" /></Field><Field label="来源任务（转换/上传测试时选择）"><NativeSelect value={sourceRun} onChange={onSourceRun} options={[...new Map([...rawRuns, ...convertedRuns].map((run) => [run.id, run])).values()].map((run) => ({ value: run.id, label: `${run.config_name} · ${modeLabel(run.run_mode)} · ${formatTime(run.created_at)}` }))} placeholder="请选择来源任务" /></Field></div></section><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">{testCases.map((test) => { const candidates = test.needsSource === "raw" ? rawRuns : convertedRuns; const sourceValid = !test.needsSource || candidates.some((run) => run.id === sourceRun); return <section key={test.mode} className={`rounded-xl border bg-white p-4 ${test.danger ? "border-amber-300" : ""}`}><div className="flex items-center justify-between"><span className={`flex size-9 items-center justify-center rounded-lg ${test.danger ? "bg-amber-100 text-amber-700" : "bg-emerald-50 text-[#0f6b5d]"}`}>{test.danger ? <AlertTriangle className="size-4" /> : <Beaker className="size-4" />}</span>{test.danger && <Badge variant="outline" className="border-amber-300 text-amber-700">真实外部操作</Badge>}</div><h3 className="mt-3 font-semibold">{test.title}</h3><p className="mt-1 min-h-10 text-xs leading-5 text-slate-500">{test.description}</p><Button className={`mt-4 w-full ${test.danger ? "bg-amber-600 hover:bg-amber-700" : "bg-[#0f6b5d] hover:bg-[#0b5148]"}`} size="sm" disabled={running || !selectedConfig || !sourceValid} onClick={() => onRun(test.mode, test.danger, test.needsSource)}>{running ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Play className="mr-2 size-4" />}开始测试</Button></section>; })}</div></div>;
 }
 
+function RunsPanel({ rows, result, loading, keyword, onKeyword, onSearch, onClear, status, onStatus, page, onPage, pageSize, onPageSize, onDetail, onCancel, onRetry }: { rows: ReportRun[]; result?: Awaited<ReturnType<typeof reportService.runs>>; loading: boolean; keyword: string; onKeyword: (value: string) => void; onSearch: () => void; onClear: () => void; status: string; onStatus: (value: string) => void; page: number; onPage: (page: number) => void; pageSize: number; onPageSize: (value: number) => void; onDetail: (id: string) => void; onCancel: (run: ReportRun) => void; onRetry: (run: ReportRun) => void }) {
+  const total = result?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  return <div className="space-y-4"><form className="flex flex-wrap gap-2 rounded-xl border bg-white p-4" onSubmit={(event) => { event.preventDefault(); onSearch(); }}><Input className="min-w-64 max-w-md flex-1" value={keyword} onChange={(event) => onKeyword(event.target.value)} placeholder="搜索项目名称、配置名称或失败原因" /><select className="h-10 rounded-md border bg-background px-3 text-sm" value={status} onChange={(event) => onStatus(event.target.value)}><option value="">全部状态</option><option value="pending">等待</option><option value="running">运行中</option><option value="cancelling">取消中</option><option value="success">成功</option><option value="failed">失败</option><option value="cancelled">已取消</option></select><Button type="submit" className="bg-[#0f6b5d]" disabled={loading}><Search className="mr-2 size-4" />搜索</Button>{keyword && <Button type="button" variant="outline" onClick={onClear}>清空</Button>}</form><RunsTable rows={rows} loading={loading} onDetail={onDetail} onCancel={onCancel} onRetry={onRetry} /><ResultPagination total={total} page={page} pageCount={pageCount} pageSize={pageSize} loading={loading} onPage={onPage} onPageSize={onPageSize} /></div>;
+}
+
 function RunsTable({ rows, loading, onDetail, onCancel, onRetry }: { rows: ReportRun[]; loading: boolean; onDetail: (id: string) => void; onCancel: (run: ReportRun) => void; onRetry: (run: ReportRun) => void }) {
-  return <section className="overflow-hidden rounded-xl border bg-white"><Table><TableHeader><TableRow><TableHead>配置/类型</TableHead><TableHead>状态</TableHead><TableHead className="min-w-64">阶段 / 失败原因</TableHead><TableHead>项目</TableHead><TableHead>人员</TableHead><TableHead>成功/失败</TableHead><TableHead>开始时间</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader><TableBody>{loading ? <MessageRow text="任务加载中" /> : rows.length ? rows.map((run) => { const failed = ["failed", "partial_success"].includes(run.status); const retryable = failed || run.status === "cancelled"; return <TableRow key={run.id}><TableCell><button className="text-left font-medium hover:underline" onClick={() => onDetail(run.id)}>{run.config_name}</button><div className="text-xs text-slate-500">{modeLabel(run.run_mode)}</div></TableCell><TableCell><StatusBadge status={run.status} /></TableCell><TableCell><div>{stageLabel(run.failure_stage || run.current_stage)}</div>{failed && <div className="mt-1 max-w-md whitespace-normal text-xs leading-5 text-red-600" title={run.failure_reason || undefined}>{run.failure_reason || "暂无详细失败原因，请进入详情查看运行日志"}</div>}</TableCell><TableCell>{run.discovered_count}</TableCell><TableCell>{run.item_count}</TableCell><TableCell>{run.success_count}/{run.failure_count}</TableCell><TableCell>{formatTime(run.started_at || run.created_at)}</TableCell><TableCell className="text-right"><div className="flex justify-end gap-1"><Button size="sm" variant="outline" onClick={() => onDetail(run.id)}>详情</Button>{["pending", "running"].includes(run.status) && <Button size="icon" variant="ghost" title="取消" onClick={() => onCancel(run)}><Square className="size-4" /></Button>}{retryable && <Button size="icon" variant="ghost" title="重试" onClick={() => onRetry(run)}><RefreshCw className="size-4" /></Button>}</div></TableCell></TableRow>; }) : <MessageRow text="暂无运行任务" />}</TableBody></Table></section>;
+  return <section className="overflow-hidden rounded-xl border bg-white"><Table><TableHeader><TableRow><TableHead>配置/类型</TableHead><TableHead>状态</TableHead><TableHead className="min-w-56">进度 / 系统失败原因</TableHead><TableHead>项目</TableHead><TableHead>人员</TableHead><TableHead className="min-w-72">报送结果</TableHead><TableHead>开始时间</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader><TableBody>{loading ? <MessageRow text="任务加载中" /> : rows.length ? rows.map((run) => { const failed = run.status === "failed"; const retryable = failed || run.status === "cancelled"; return <TableRow key={run.id}><TableCell><button className="text-left font-medium hover:underline" onClick={() => onDetail(run.id)}>{run.config_name}</button><div className="text-xs text-slate-500">{modeLabel(run.run_mode)}</div></TableCell><TableCell><RunStatusBadge status={run.status} /></TableCell><TableCell><div>{stageLabel(run.failure_stage || run.current_stage)}</div>{failed && <div className="mt-1 max-w-md whitespace-normal text-xs leading-5 text-red-600" title={run.failure_reason || undefined}>{run.failure_reason || "系统执行失败，请进入详情查看运行日志"}</div>}</TableCell><TableCell>{run.discovered_count}</TableCell><TableCell>{run.item_count}</TableCell><TableCell><RunResultSummary run={run} /></TableCell><TableCell>{formatTime(run.started_at || run.created_at)}</TableCell><TableCell className="text-right"><div className="flex justify-end gap-1"><Button size="sm" variant="outline" onClick={() => onDetail(run.id)}>详情</Button>{["pending", "running"].includes(run.status) && <Button size="icon" variant="ghost" title="取消" onClick={() => onCancel(run)}><Square className="size-4" /></Button>}{retryable && <Button size="icon" variant="ghost" title="重试" onClick={() => onRetry(run)}><RefreshCw className="size-4" /></Button>}</div></TableCell></TableRow>; }) : <MessageRow text="暂无运行任务" />}</TableBody></Table></section>;
+}
+
+function RunResultSummary({ run }: { run: ReportRun }) {
+  const success = run.reported_success_count ?? run.success_count;
+  const skipped = run.skipped_count ?? run.failure_count;
+  return <div className="space-y-1 text-sm"><div><span className="font-medium text-emerald-700">成功 {success} 条</span><span className="ml-3 font-medium text-amber-700">跳过 {skipped} 条</span></div>{skipped > 0 && <div className="text-xs leading-5 text-slate-500">已上报/已存在 {run.already_reported_count ?? 0} 条 · 备案/进场时间不符 {run.record_time_skipped_count ?? 0} 条 · 其他 {run.other_skipped_count ?? skipped} 条</div>}</div>;
 }
 
 function DataPanel({ runs, runId, onRun, result, loading, page, onPage, outcome, onOutcome, onExport }: { runs: ReportRun[]; runId: string; onRun: (id: string) => void; result?: Awaited<ReturnType<typeof reportService.items>>; loading: boolean; page: number; onPage: (page: number) => void; outcome: ResultOutcome; onOutcome: (value: ResultOutcome) => void; onExport: () => void }) {
@@ -325,15 +295,19 @@ function OutcomeTabs({ value, counts, onChange }: { value: ResultOutcome; counts
   const options: Array<{ value: ResultOutcome; label: string; count: number }> = [
     { value: "all", label: "全部", count: counts?.all ?? 0 },
     { value: "success", label: "已成功", count: counts?.success ?? 0 },
-    { value: "failed", label: "已失败", count: counts?.failed ?? 0 },
-    { value: "unknown", label: "无法对应", count: counts?.unknown ?? 0 },
+    { value: "failed", label: "已跳过", count: counts?.failed ?? 0 },
+    { value: "unknown", label: "待核对", count: counts?.unknown ?? 0 },
   ];
   return <div className="flex flex-wrap gap-1">{options.map((option) => <Button key={option.value} size="sm" variant={value === option.value ? "default" : "outline"} className={value === option.value ? "bg-[#0f6b5d]" : ""} onClick={() => onChange(option.value)}>{option.label}<Badge variant="secondary" className="ml-2 min-w-6 justify-center">{option.count}</Badge></Button>)}</div>;
 }
 
-function ResultPagination({ total, page, pageCount, loading, onPage }: { total: number; page: number; pageCount: number; loading: boolean; onPage: (page: number) => void }) {
+function PageSizeSelect({ value, onChange }: { value: number; onChange: (value: number) => void }) {
+  return <select className="h-10 rounded-md border bg-background px-3 text-sm" value={value} onChange={(event) => onChange(Number(event.target.value))}><option value={10}>每页 10 条</option><option value={20}>每页 20 条</option><option value={50}>每页 50 条</option></select>;
+}
+
+function ResultPagination({ total, page, pageCount, pageSize = 50, loading, onPage, onPageSize }: { total: number; page: number; pageCount: number; pageSize?: number; loading: boolean; onPage: (page: number) => void; onPageSize?: (value: number) => void }) {
   if (!total) return null;
-  return <div className="flex flex-wrap items-center justify-between gap-2 border-t px-4 py-3 text-sm"><span className="text-slate-500">共 {total} 条，每页 50 条，第 {page}/{pageCount} 页</span><div className="flex gap-2"><Button size="sm" variant="outline" disabled={page <= 1 || loading} onClick={() => onPage(page - 1)}>上一页</Button><Button size="sm" variant="outline" disabled={page >= pageCount || loading} onClick={() => onPage(page + 1)}>下一页</Button></div></div>;
+  return <div className="flex flex-wrap items-center justify-between gap-2 border-t px-4 py-3 text-sm"><span className="text-slate-500">共 {total} 条，第 {page}/{pageCount} 页</span><div className="flex items-center gap-2">{onPageSize && <PageSizeSelect value={pageSize} onChange={onPageSize} />}<Button size="sm" variant="outline" disabled={page <= 1 || loading} onClick={() => onPage(page - 1)}>上一页</Button><Button size="sm" variant="outline" disabled={page >= pageCount || loading} onClick={() => onPage(page + 1)}>下一页</Button></div></div>;
 }
 
 function ConfigDialog({ open, onOpen, editing, form, setForm, submit, saving }: { open: boolean; onOpen: (open: boolean) => void; editing: ReportConfig | null; form: ConfigForm; setForm: Dispatch<SetStateAction<ConfigForm>>; submit: (event: FormEvent) => void; saving: boolean }) {
@@ -372,6 +346,7 @@ function RunDetail({
     1,
     Math.ceil((itemResult?.total ?? 0) / (itemResult?.page_size ?? 50)),
   );
+  const finalResultArtifacts = latestFinalResultArtifacts(run?.artifacts ?? []);
   return (
     <Dialog open={open} onOpenChange={onOpen}>
       <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-6xl">
@@ -392,24 +367,20 @@ function RunDetail({
             <div className="grid gap-3 sm:grid-cols-4">
               <MiniStat
                 label="状态"
-                value={<StatusBadge status={run.status} />}
+                value={<RunStatusBadge status={run.status} />}
               />
               <MiniStat
                 label="当前阶段"
                 value={stageLabel(run.current_stage)}
               />
               <MiniStat label="人员条数" value={run.item_count} />
-              <MiniStat
-                label="政府汇总 成功/失败"
-                value={`${run.success_count}/${run.failure_count}`}
-              />
+              <MiniStat label="报送结果" value={<RunResultSummary run={run} />} />
             </div>
             {run.error_summary && (
               <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
                 {run.error_summary}
               </div>
             )}
-            <DiagnosticEvidence artifacts={run.artifacts ?? []} />
             <section>
               <h3 className="mb-2 font-semibold">项目结果</h3>
               <div className="space-y-2">
@@ -424,15 +395,12 @@ function RunDetail({
                           <div className="font-medium">
                             {project.external_project_name}
                           </div>
-                          <div className="text-xs text-red-600">
+                          <div className="text-xs text-amber-700">
                             {project.last_error}
                           </div>
                         </div>
-                        <StatusBadge status={project.status} />
-                        <span>
-                          {project.upload_success_count}/
-                          {project.upload_failure_count}
-                        </span>
+                        {run.status === "failed" ? <StatusBadge status="failed" /> : <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">流程完成</Badge>}
+                        <span>成功 {project.upload_success_count} / 跳过 {project.upload_failure_count}</span>
                       </div>
                       <ProjectResultNote project={project} />
                     </div>
@@ -518,10 +486,10 @@ function RunDetail({
               </div>
             </section>
             <section>
-              <h3 className="mb-2 font-semibold">留存文件</h3>
+              <h3 className="mb-2 font-semibold">对方平台最终失败结果</h3>
               <div className="flex flex-wrap gap-2">
-                {run.artifacts?.length ? (
-                  run.artifacts.map((artifact) => (
+                {finalResultArtifacts.length ? (
+                  finalResultArtifacts.map((artifact) => (
                     <Button
                       key={artifact.id}
                       size="sm"
@@ -535,7 +503,7 @@ function RunDetail({
                     </Button>
                   ))
                 ) : (
-                  <span className="text-sm text-slate-500">暂无文件</span>
+                  <span className="text-sm text-slate-500">对方平台未返回失败结果文件</span>
                 )}
               </div>
             </section>
@@ -572,24 +540,14 @@ function RunDetail({
   );
 }
 
-function DiagnosticEvidence({ artifacts }: { artifacts: RunArtifact[] }) {
-  const diagnostics = artifacts.filter((artifact) => artifact.artifact_type.startsWith("diagnostic_"));
-  if (!diagnostics.length) return null;
-  return <section><h3 className="mb-2 font-semibold">失败现场</h3><div className="space-y-3">{diagnostics.map((artifact) => <DiagnosticArtifact key={artifact.id} artifact={artifact} />)}</div></section>;
-}
-
-function DiagnosticArtifact({ artifact }: { artifact: RunArtifact }) {
-  const [expanded, setExpanded] = useState(false);
-  const isScreenshot = artifact.artifact_type === "diagnostic_screenshot";
-  const content = useQuery({ queryKey: ["report-artifact-preview", artifact.id], queryFn: () => reportService.artifactBlob(artifact.id), staleTime: Infinity, enabled: isScreenshot || expanded });
-  const url = useMemo(() => content.data ? URL.createObjectURL(content.data) : null, [content.data]);
-  useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
-  if (isScreenshot && content.isLoading) return <div className="rounded-lg border p-4 text-sm text-slate-500">现场证据加载中...</div>;
-  if (isScreenshot && !url) return <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">现场证据加载失败</div>;
-  if (isScreenshot) {
-    return <figure className="overflow-hidden rounded-lg border bg-slate-50"><figcaption className="border-b px-3 py-2 text-xs text-slate-600">{artifact.original_filename} · {formatTime(artifact.created_at)}</figcaption><a href={url ?? undefined} target="_blank" rel="noreferrer"><img src={url ?? undefined} alt={artifact.original_filename} className="max-h-[70vh] w-full object-contain" /></a></figure>;
-  }
-  return <details className="overflow-hidden rounded-lg border" onToggle={(event) => setExpanded(event.currentTarget.open)}><summary className="cursor-pointer px-3 py-2 text-sm font-medium">查看页面 HTML · {artifact.original_filename}</summary>{content.isLoading ? <div className="border-t p-4 text-sm text-slate-500">页面 HTML 加载中...</div> : url ? <iframe title={artifact.original_filename} src={url} sandbox="" className="h-[60vh] w-full border-t bg-white" /> : expanded ? <div className="border-t p-4 text-sm text-red-700">页面 HTML 加载失败</div> : null}</details>;
+function latestFinalResultArtifacts(artifacts: RunArtifact[]) {
+  const latestByProject = new Map<string, RunArtifact>();
+  artifacts.filter((artifact) => artifact.artifact_type === "error_detail").forEach((artifact) => {
+    const key = artifact.run_project_id || "run";
+    const current = latestByProject.get(key);
+    if (!current || new Date(artifact.created_at).getTime() > new Date(current.created_at).getTime()) latestByProject.set(key, artifact);
+  });
+  return Array.from(latestByProject.values()).sort((left, right) => right.created_at.localeCompare(left.created_at));
 }
 
 function ProjectResultNote({ project }: { project: RunProject }) {
@@ -603,7 +561,7 @@ function ProjectResultNote({ project }: { project: RunProject }) {
     return null;
   return (
     <div className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-amber-800">
-      政府平台确认成功 {project.upload_success_count} 条、失败{" "}
+      政府平台确认成功 {project.upload_success_count} 条、跳过{" "}
       {project.upload_failure_count}{" "}
       条，但错误明细未返回完整人员名单，无法可靠定位具体姓名。
     </div>
@@ -616,12 +574,12 @@ function PersonResult({ item }: { item: ReportItem }) {
       <div>
         <Badge
           variant="outline"
-          className="border-emerald-200 bg-emerald-50 text-emerald-700"
+          className="border-amber-200 bg-amber-50 text-amber-700"
         >
           政府平台已存在
         </Badge>
         <div className="mt-1 text-xs text-slate-500">
-          按成功处理，未重复提交
+          已跳过，未重复提交
         </div>
       </div>
     );
@@ -641,6 +599,7 @@ function PersonResult({ item }: { item: ReportItem }) {
     );
   if (item.status === "submitted") return <StatusBadge status="submitted" />;
   if (item.status === "validated") return <StatusBadge status="validated" />;
+  if (["failed", "submitted_with_errors", "validated_with_errors"].includes(item.status)) return <div><Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">已跳过</Badge>{item.last_error && <div className="mt-1 max-w-72 text-xs text-amber-700">{item.last_error}</div>}</div>;
   return (
     <div>
       <StatusBadge status={item.status} />
@@ -651,6 +610,10 @@ function PersonResult({ item }: { item: ReportItem }) {
       )}
     </div>
   );
+}
+
+function RunStatusBadge({ status }: { status: string }) {
+  return <StatusBadge status={status === "partial_success" ? "success" : status} />;
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -728,7 +691,7 @@ function Empty({ text }: { text: string }) { return <div className="rounded-lg b
 function MessageRow({ text }: { text: string }) { return <TableRow><TableCell colSpan={10} className="h-28 text-center text-slate-500">{text}</TableCell></TableRow>; }
 function lines(value: string) { return Array.from(new Set(value.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean))); }
 function formatTime(value?: string | null) { return value ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "-"; }
-function tabLabel(tab: Tab) { return { dashboard: "工作台", configs: "报送配置", tests: "测试中心", runs: "运行任务", data: "报送数据" }[tab]; }
+function tabLabel(tab: Tab) { return { dashboard: "调试-工作台", configs: "报送配置", tests: "调试-测试中心", runs: "运行任务", data: "调试-报送数据" }[tab]; }
 function modeLabel(mode: RunMode) { return { production: "正式运行", test_source_login: "源站登录测试", test_project_list: "项目读取测试", test_download: "下载测试", test_transform: "转换测试", test_target_login: "目标站登录测试", test_upload_validate: "上传校验", test_submit: "真实提交测试", test_full: "全流程测试" }[mode]; }
 function stageLabel(stage: string) { return ({ queued: "排队", starting: "启动", source_login: "源站登录", project_list: "读取项目", download: "下载", prepare_source: "读取源文件", transform: "转换", prepare_upload: "准备上传", target_login: "目标站登录", target_upload: "目标站上报", finalizing: "汇总", success: "完成", failed: "失败", cancelled: "取消" } as Record<string, string>)[stage] ?? stage; }
 function statusLabel(status: string) { return ({ pending: "等待", running: "运行中", cancelling: "取消中", cancelled: "已取消", success: "成功", partial_success: "部分成功", failed: "失败", submitted: "已提交", submitted_with_errors: "提交有错误", validated: "校验通过", validated_with_errors: "校验有错误", result_unknown: "未对应到个人", idle: "空闲", busy: "忙碌", offline: "离线", converted: "已转换", downloaded: "已下载" } as Record<string, string>)[status] ?? status; }

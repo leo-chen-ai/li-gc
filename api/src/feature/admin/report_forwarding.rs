@@ -133,7 +133,8 @@ pub async fn list_configs(State(state): State<AppState>, uri: Uri) -> ApiResult<
         SELECT COUNT(*)::bigint
         FROM report_forward_configs c
         WHERE c.is_deleted = FALSE
-          AND ($1 = '%%' OR c.name ILIKE $1 OR c.source_username ILIKE $1 OR c.target_username ILIKE $1)
+          AND ($1 = '%%' OR c.name ILIKE $1 OR c.source_username ILIKE $1 OR c.target_username ILIKE $1
+               OR array_to_string(c.include_projects, ' ') ILIKE $1)
           AND ($2::text IS NULL OR c.lifecycle_status = $2)
         "#,
     )
@@ -164,7 +165,8 @@ pub async fn list_configs(State(state): State<AppState>, uri: Uri) -> ApiResult<
                 c.updated_at
             FROM report_forward_configs c
             WHERE c.is_deleted = FALSE
-              AND ($1 = '%%' OR c.name ILIKE $1 OR c.source_username ILIKE $1 OR c.target_username ILIKE $1)
+              AND ($1 = '%%' OR c.name ILIKE $1 OR c.source_username ILIKE $1 OR c.target_username ILIKE $1
+                   OR array_to_string(c.include_projects, ' ') ILIKE $1)
               AND ($2::text IS NULL OR c.lifecycle_status = $2)
             ORDER BY c.updated_at DESC
             LIMIT $3 OFFSET $4
@@ -415,7 +417,8 @@ pub async fn list_runs(State(state): State<AppState>, uri: Uri) -> ApiResult<Val
     let keyword = format!("%{}%", params.keyword);
     let total = sqlx::query_scalar::<_, i64>(
         r#"SELECT COUNT(*)::bigint FROM report_forward_runs r
-           WHERE ($1 = '%%' OR r.config_name ILIKE $1 OR r.error_summary ILIKE $1)
+           WHERE ($1 = '%%' OR r.config_name ILIKE $1 OR r.error_summary ILIKE $1
+                  OR EXISTS (SELECT 1 FROM report_forward_run_projects p WHERE p.run_id=r.id AND p.external_project_name ILIKE $1))
              AND ($2::text IS NULL OR r.status = $2)
              AND ($3::uuid IS NULL OR r.config_id = $3)"#,
     )
@@ -430,6 +433,18 @@ pub async fn list_runs(State(state): State<AppState>, uri: Uri) -> ApiResult<Val
         SELECT COALESCE(jsonb_agg(to_jsonb(rows) ORDER BY rows.created_at DESC), '[]'::jsonb)
         FROM (
             SELECT r.*,
+                   GREATEST(r.success_count - LEAST(r.success_count, result_counts.already_reported_count), 0)::int AS reported_success_count,
+                   (r.failure_count + LEAST(r.success_count, result_counts.already_reported_count))::int AS skipped_count,
+                   result_counts.already_reported_count::int AS already_reported_count,
+                   LEAST(
+                       result_counts.record_time_count,
+                       GREATEST(r.failure_count + LEAST(r.success_count, result_counts.already_reported_count) - result_counts.already_reported_count, 0)
+                   )::int AS record_time_skipped_count,
+                   GREATEST(
+                       r.failure_count + LEAST(r.success_count, result_counts.already_reported_count)
+                       - result_counts.already_reported_count - result_counts.record_time_count,
+                       0
+                   )::int AS other_skipped_count,
                    (SELECT COUNT(*)::int FROM report_forward_events e WHERE e.run_id=r.id) AS event_count,
                    (SELECT COUNT(*)::int FROM report_forward_artifacts a WHERE a.run_id=r.id) AS artifact_count,
                    COALESCE(failure_event.stage, failure_project.current_stage,
@@ -444,6 +459,21 @@ pub async fn list_runs(State(state): State<AppState>, uri: Uri) -> ApiResult<Val
                        failure_item.any_error
                    ) AS failure_reason
             FROM report_forward_runs r
+            LEFT JOIN LATERAL (
+                SELECT
+                    COUNT(*) FILTER (
+                        WHERE COALESCE(i.target_result->>'already_exists', 'false') = 'true'
+                           OR COALESCE(i.last_error, '') ~ '(已存在|已经存在|已备案|重复参保|重复申报|已报送|已上报|已经上报)'
+                    )::int AS already_reported_count,
+                    COUNT(*) FILTER (
+                        WHERE NOT (
+                            COALESCE(i.target_result->>'already_exists', 'false') = 'true'
+                            OR COALESCE(i.last_error, '') ~ '(已存在|已经存在|已备案|重复参保|重复申报|已报送|已上报|已经上报)'
+                        )
+                        AND CONCAT_WS('；', i.last_error, i.target_result->>'error') ~ '(备案|进场).*(日期|时间)|(日期|时间).*(备案|进场)'
+                    )::int AS record_time_count
+                FROM report_forward_items i WHERE i.run_id=r.id
+            ) result_counts ON TRUE
             LEFT JOIN LATERAL (
                 SELECT e.stage, e.message
                 FROM report_forward_events e
@@ -466,7 +496,8 @@ pub async fn list_runs(State(state): State<AppState>, uri: Uri) -> ApiResult<Val
                        MAX(NULLIF(BTRIM(i.last_error), '')) AS any_error
                 FROM report_forward_items i WHERE i.run_id=r.id
             ) failure_item ON TRUE
-            WHERE ($1 = '%%' OR r.config_name ILIKE $1 OR r.error_summary ILIKE $1)
+            WHERE ($1 = '%%' OR r.config_name ILIKE $1 OR r.error_summary ILIKE $1
+                   OR EXISTS (SELECT 1 FROM report_forward_run_projects p WHERE p.run_id=r.id AND p.external_project_name ILIKE $1))
               AND ($2::text IS NULL OR r.status = $2)
               AND ($3::uuid IS NULL OR r.config_id = $3)
             ORDER BY r.created_at DESC LIMIT $4 OFFSET $5
@@ -585,8 +616,9 @@ pub async fn list_items(State(state): State<AppState>, uri: Uri) -> ApiResult<Va
            WHERE run_id=$1 AND ($2='%%' OR person_name ILIKE $2)
              AND ($3::text IS NULL OR status=$3)
              AND ($4::text IS NULL OR CASE
+                    WHEN COALESCE(target_result->>'already_exists', 'false') = 'true'
+                      OR status IN ('failed','submitted_with_errors','validated_with_errors') THEN 'failed'
                     WHEN status IN ('submitted','validated') THEN 'success'
-                    WHEN status='failed' THEN 'failed'
                     ELSE 'unknown' END=$4)"#,
     )
     .bind(run_id)
@@ -599,9 +631,9 @@ pub async fn list_items(State(state): State<AppState>, uri: Uri) -> ApiResult<Va
     let counts = sqlx::query_scalar::<_, Value>(
         r#"SELECT jsonb_build_object(
               'all', COUNT(*)::int,
-              'success', COUNT(*) FILTER (WHERE status IN ('submitted','validated'))::int,
-              'failed', COUNT(*) FILTER (WHERE status='failed')::int,
-              'unknown', COUNT(*) FILTER (WHERE status NOT IN ('submitted','validated','failed'))::int)
+              'success', COUNT(*) FILTER (WHERE status IN ('submitted','validated') AND COALESCE(target_result->>'already_exists', 'false') <> 'true')::int,
+              'failed', COUNT(*) FILTER (WHERE COALESCE(target_result->>'already_exists', 'false') = 'true' OR status IN ('failed','submitted_with_errors','validated_with_errors'))::int,
+              'unknown', COUNT(*) FILTER (WHERE status NOT IN ('submitted','validated','failed','submitted_with_errors','validated_with_errors'))::int)
            FROM report_forward_items WHERE run_id=$1"#,
     )
     .bind(run_id).fetch_one(state.db.pool()).await.map_err(db_error)?;
@@ -627,8 +659,9 @@ pub async fn list_items(State(state): State<AppState>, uri: Uri) -> ApiResult<Va
             ) sensitive ON TRUE
             WHERE i.run_id=$1 AND ($2='%%' OR i.person_name ILIKE $2) AND ($3::text IS NULL OR i.status=$3)
               AND ($5::text IS NULL OR CASE
+                     WHEN COALESCE(i.target_result->>'already_exists', 'false') = 'true'
+                       OR i.status IN ('failed','submitted_with_errors','validated_with_errors') THEN 'failed'
                      WHEN i.status IN ('submitted','validated') THEN 'success'
-                     WHEN i.status='failed' THEN 'failed'
                      ELSE 'unknown' END=$5)
             ORDER BY i.created_at, i.source_row_no LIMIT $6 OFFSET $7
         ) rows
@@ -673,8 +706,9 @@ pub async fn export_items(
         WHERE i.run_id=$1 AND ($2='%%' OR i.person_name ILIKE $2)
           AND ($3::text IS NULL OR i.status=$3)
           AND ($4::text IS NULL OR CASE
+                 WHEN COALESCE(i.target_result->>'already_exists', 'false') = 'true'
+                   OR i.status IN ('failed','submitted_with_errors','validated_with_errors') THEN 'failed'
                  WHEN i.status IN ('submitted','validated') THEN 'success'
-                 WHEN i.status='failed' THEN 'failed'
                  ELSE 'unknown' END=$4)
         ORDER BY p.created_at, i.created_at, i.source_row_no
         "#,
@@ -969,11 +1003,39 @@ async fn fetch_run(pool: &sqlx::PgPool, id: Uuid) -> Result<Value, ApiError> {
         r#"
         SELECT to_jsonb(r)
             || jsonb_build_object(
+                'reported_success_count', GREATEST(r.success_count - LEAST(r.success_count, result_counts.already_reported_count), 0),
+                'skipped_count', r.failure_count + LEAST(r.success_count, result_counts.already_reported_count),
+                'already_reported_count', result_counts.already_reported_count,
+                'record_time_skipped_count', LEAST(
+                    result_counts.record_time_count,
+                    GREATEST(r.failure_count + LEAST(r.success_count, result_counts.already_reported_count) - result_counts.already_reported_count, 0)
+                ),
+                'other_skipped_count', GREATEST(
+                    r.failure_count + LEAST(r.success_count, result_counts.already_reported_count)
+                    - result_counts.already_reported_count - result_counts.record_time_count,
+                    0
+                ),
                 'projects', COALESCE((SELECT jsonb_agg(to_jsonb(p) ORDER BY p.created_at) FROM report_forward_run_projects p WHERE p.run_id=r.id), '[]'::jsonb),
                 'artifacts', COALESCE((SELECT jsonb_agg(to_jsonb(a) ORDER BY a.created_at) FROM report_forward_artifacts a WHERE a.run_id=r.id), '[]'::jsonb),
                 'events', COALESCE((SELECT jsonb_agg(to_jsonb(e) ORDER BY e.id) FROM (SELECT * FROM report_forward_events WHERE run_id=r.id ORDER BY id DESC LIMIT 300) e), '[]'::jsonb)
             )
-        FROM report_forward_runs r WHERE r.id=$1
+        FROM report_forward_runs r
+        LEFT JOIN LATERAL (
+            SELECT
+                COUNT(*) FILTER (
+                    WHERE COALESCE(i.target_result->>'already_exists', 'false') = 'true'
+                       OR COALESCE(i.last_error, '') ~ '(已存在|已经存在|已备案|重复参保|重复申报|已报送|已上报|已经上报)'
+                )::int AS already_reported_count,
+                COUNT(*) FILTER (
+                    WHERE NOT (
+                        COALESCE(i.target_result->>'already_exists', 'false') = 'true'
+                        OR COALESCE(i.last_error, '') ~ '(已存在|已经存在|已备案|重复参保|重复申报|已报送|已上报|已经上报)'
+                    )
+                    AND CONCAT_WS('；', i.last_error, i.target_result->>'error') ~ '(备案|进场).*(日期|时间)|(日期|时间).*(备案|进场)'
+                )::int AS record_time_count
+            FROM report_forward_items i WHERE i.run_id=r.id
+        ) result_counts ON TRUE
+        WHERE r.id=$1
         "#,
     ).bind(id).fetch_one(pool).await.map_err(db_error)
 }

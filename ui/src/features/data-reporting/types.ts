@@ -101,6 +101,7 @@ export interface RunEvent {
 
 export interface RunArtifact {
   id: string;
+  run_project_id?: string | null;
   artifact_type: string;
   original_filename: string;
   byte_size: number;
@@ -123,6 +124,11 @@ export interface ReportRun {
   uploaded_count: number;
   success_count: number;
   failure_count: number;
+  reported_success_count?: number;
+  skipped_count?: number;
+  already_reported_count?: number;
+  record_time_skipped_count?: number;
+  other_skipped_count?: number;
   cancel_requested: boolean;
   claimed_by: string | null;
   started_at: string | null;

@@ -408,10 +408,13 @@ class Uploader:
 
         self._handle_draft_popup()
 
-        self._select_registration_type()
+        if self._is_upload_form_visible():
+            logger.info("已进入在线填表页，跳过备案类型选择和确认")
+        else:
+            self._select_registration_type()
+            self._confirm_selection()
 
-        self._confirm_selection()
-
+        self._wait_for_upload_form()
         self._wait_for_page_ready()
 
         self._click_batch_import()
@@ -692,20 +695,52 @@ class Uploader:
             raise RuntimeError("办事指南等待 60 秒仍未找到'在线办理'")
 
         original_handles = set(self.driver.window_handles)
+        original_url = self.driver.current_url
         self._click(el)
-        logger.info("已点击'在线办理'，等待新窗口...")
-        for _ in range(8):
+        logger.info("已点击'在线办理'，等待办理流程打开...")
+        deadline = time.time() + 45
+        last_log = 0
+        while time.time() < deadline:
             time.sleep(0.5)
             new_handles = set(self.driver.window_handles) - original_handles
             if new_handles:
                 self.driver.switch_to.window(new_handles.pop())
-                logger.info(f"已切换到新窗口: {self.driver.current_url}")
-                self.long_wait.until(
-                    lambda d: d.execute_script('return document.readyState') in ('complete', 'interactive')
-                )
-                time.sleep(1)
+                logger.info(f"已切换到在线办理窗口: {self.driver.current_url}")
+                try:
+                    self.long_wait.until(
+                        lambda d: d.execute_script('return document.readyState') in ('complete', 'interactive')
+                    )
+                except TimeoutException:
+                    logger.warning("在线办理窗口加载超时，继续识别页面状态")
                 return
-            logger.info("在线办理点击后无新窗口")
+
+            if self._is_upload_form_visible():
+                logger.info(f"当前窗口已直接进入在线填表页: {self.driver.current_url}")
+                return
+            if _find_first(self.driver, [
+                (By.XPATH, "//*[normalize-space(.)='同意授权']"),
+                (By.XPATH, "//*[normalize-space(.)='建筑项目人员备案登记']"),
+                (By.XPATH, "//*[contains(text(),'草稿') and (self::div or self::span)]"),
+            ]):
+                logger.info(f"当前窗口已进入办理流程: {self.driver.current_url}")
+                return
+
+            elapsed = int(45 - (deadline - time.time()))
+            if elapsed >= last_log + 10:
+                logger.info(
+                    "等待在线办理页面跳转... (%s秒，当前 URL: %s)",
+                    elapsed,
+                    self.driver.current_url,
+                )
+                last_log = elapsed
+
+        if self.driver.current_url == original_url:
+            raise RuntimeError(
+                f"点击在线办理后 45 秒仍停留在办事指南页: {self.driver.current_url}"
+            )
+        raise RuntimeError(
+            f"点击在线办理后未识别到授权页、备案类型选择或在线填表页: {self.driver.current_url}"
+        )
 
     def _log_page_state(self, label):
         try:
@@ -805,45 +840,80 @@ class Uploader:
         else:
             logger.warning("未找到'不使用'按钮")
 
+    def _is_upload_form_visible(self):
+        if _find_first(self.driver, [
+            (By.XPATH, "//input[@type='file']"),
+            (By.XPATH, "//button[.//*[normalize-space(.)='批量导入'] or normalize-space(.)='批量导入']"),
+            (By.XPATH, "//*[normalize-space(.)='建筑项目人员备案信息']"),
+        ]):
+            return True
+        unit_info = _find_first(self.driver, [
+            (By.XPATH, "//*[normalize-space(.)='单位信息']"),
+        ])
+        online_form = _find_first(self.driver, [
+            (By.XPATH, "//*[normalize-space(.)='在线填表']"),
+            (By.XPATH, "//*[contains(normalize-space(.),'备案开始时间')]"),
+        ])
+        return bool(unit_info and online_form)
+
+    def _registration_confirm_button(self):
+        return _find_first(self.driver, [
+            (By.XPATH, "//*[@role='dialog']//button[normalize-space(.)='确认' or .//*[normalize-space(.)='确认']]"),
+            (By.XPATH, "//*[contains(@class,'dialog') or contains(@class,'modal')]//button[normalize-space(.)='确认' or .//*[normalize-space(.)='确认']]"),
+            (By.XPATH, "//button[normalize-space(.)='确认' or .//*[normalize-space(.)='确认']]"),
+        ])
+
     def _select_registration_type(self):
+        if self._is_upload_form_visible():
+            logger.info("已进入在线填表页，无需选择备案类型")
+            return False
         logger.info("选择'建筑项目人员备案登记'")
+        # 先确认页面上确实存在选择弹窗的确认按钮，避免把办事指南标题
+        # “建筑项目人员工伤参保登记”误当成备案类型选项。
+        if not self._registration_confirm_button():
+            raise RuntimeError(
+                f"未出现备案类型选择弹窗，当前页面: {self.driver.current_url}"
+            )
         selectors = [
-            (By.XPATH, "//span[contains(text(),'建筑项目人员备案登记')]"),
-            (By.XPATH, "//label[contains(text(),'建筑项目人员备案登记')]"),
-            (By.XPATH, "//*[contains(text(),'备案登记')]"),
+            (By.XPATH, "//*[@role='dialog']//*[normalize-space(.)='建筑项目人员备案登记']"),
+            (By.XPATH, "//*[contains(@class,'dialog') or contains(@class,'modal')]//*[normalize-space(.)='建筑项目人员备案登记']"),
+            (By.XPATH, "//span[normalize-space(.)='建筑项目人员备案登记']"),
+            (By.XPATH, "//label[normalize-space(.)='建筑项目人员备案登记']"),
         ]
         el = _find_first(self.driver, selectors)
         if not el:
-            try:
-                el = self.long_wait.until(
-                    EC.element_to_be_clickable((By.XPATH, "//*[contains(text(),'备案登记')]"))
-                )
-            except TimeoutException:
-                raise RuntimeError("未找到'建筑项目人员备案登记'")
+            raise RuntimeError("备案类型选择弹窗中未找到'建筑项目人员备案登记'")
 
         self._click(el)
         logger.info("已选择'建筑项目人员备案登记'")
         time.sleep(1)
+        return True
 
     def _confirm_selection(self):
-        logger.info("点击确认")
-        selectors = [
-            (By.XPATH, "//button[contains(text(),'确认')]"),
-            (By.XPATH, "//span[text()='确认']/parent::button"),
-            (By.XPATH, "//button[contains(@class,'primary')]"),
-        ]
-        el = _find_first(self.driver, selectors)
+        if self._is_upload_form_visible():
+            logger.info("备案类型选择后已直接进入在线填表页，跳过确认")
+            return False
+        logger.info("点击备案类型选择弹窗的确认按钮")
+        el = self._registration_confirm_button()
         if not el:
-            try:
-                el = self.long_wait.until(
-                    EC.element_to_be_clickable((By.XPATH, "//button[contains(.,'确认')]"))
-                )
-            except TimeoutException:
-                raise RuntimeError("未找到确认按钮")
+            raise RuntimeError(
+                f"备案类型选择弹窗仍在，但未找到确认按钮: {self.driver.current_url}"
+            )
 
         self._click(el)
         logger.info("已点击确认")
-        time.sleep(3)
+        return True
+
+    def _wait_for_upload_form(self, timeout=30):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self._is_upload_form_visible():
+                logger.info("在线填表页已就绪")
+                return
+            time.sleep(0.5)
+        raise RuntimeError(
+            f"办理流程未进入在线填表页，当前页面: {self.driver.current_url}"
+        )
 
     def _ensure_zjzwfw_window(self):
         handles = self.driver.window_handles

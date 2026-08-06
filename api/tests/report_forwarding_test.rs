@@ -272,6 +272,43 @@ async fn report_forward_config_secrets_and_run_guards_work() {
         .await
         .expect("create report item");
     }
+    sqlx::query(
+        "UPDATE report_forward_runs SET success_count=2,failure_count=2,item_count=4 WHERE id=$1",
+    )
+    .bind(run_id)
+    .execute(&pool)
+    .await
+    .expect("set run result counts");
+    sqlx::query(
+        r#"INSERT INTO report_forward_items
+           (run_id,run_project_id,source_row_no,person_name,identity_fingerprint,status,target_result)
+           VALUES($1,$2,6,'已存在人员','fingerprint-already','submitted',jsonb_build_object('already_exists',TRUE))"#,
+    )
+        .bind(run_id)
+        .bind(project_id)
+        .execute(&pool)
+        .await
+        .expect("mark already reported item");
+    sqlx::query("UPDATE report_forward_items SET last_error='备案日期晚于允许的最后时间' WHERE run_id=$1 AND person_name='未知人员'")
+        .bind(run_id)
+        .execute(&pool)
+        .await
+        .expect("mark record time skip");
+
+    let (status, run_list) = request_json(
+        app.clone(),
+        "GET",
+        "/api/v1/admin/report-forward/runs?page=1&page_size=10",
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{run_list}");
+    assert_eq!(run_list["data"]["items"][0]["reported_success_count"], 1);
+    assert_eq!(run_list["data"]["items"][0]["skipped_count"], 3);
+    assert_eq!(run_list["data"]["items"][0]["already_reported_count"], 1);
+    assert_eq!(run_list["data"]["items"][0]["record_time_skipped_count"], 1);
+    assert_eq!(run_list["data"]["items"][0]["other_skipped_count"], 1);
 
     let (status, result) = request_json(
         app.clone(),
@@ -283,9 +320,9 @@ async fn report_forward_config_secrets_and_run_guards_work() {
     .await;
     assert_eq!(status, StatusCode::OK, "{result}");
     assert_eq!(result["data"]["total"], 1);
-    assert_eq!(result["data"]["counts"]["all"], 3);
+    assert_eq!(result["data"]["counts"]["all"], 4);
     assert_eq!(result["data"]["counts"]["success"], 1);
-    assert_eq!(result["data"]["counts"]["failed"], 1);
+    assert_eq!(result["data"]["counts"]["failed"], 2);
     assert_eq!(result["data"]["counts"]["unknown"], 1);
     assert_eq!(result["data"]["items"][0]["person_name"], "成功人员");
     assert_eq!(
