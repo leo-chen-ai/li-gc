@@ -585,9 +585,10 @@ class TargetLogin:
             self._click(btn)
             logger.info("已点击确认登录")
             time.sleep(3)
-            return
+            return True
 
-        logger.warning("未找到确认按钮")
+        logger.error("未找到确认登录按钮，本次登录失败")
+        return False
 
     def _click(self, element):
         try:
@@ -670,7 +671,8 @@ class TargetLogin:
         for sms_attempt in range(SMS_CODE_MAX_RETRIES):
             logger.info(f"短信验证码提交 {sms_attempt + 1}/{SMS_CODE_MAX_RETRIES}")
             self._fill_sms_code(code)
-            self._confirm_login()
+            if not self._confirm_login():
+                return False
 
             time.sleep(1)
             if not self._check_sms_code_error():

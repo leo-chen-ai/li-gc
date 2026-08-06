@@ -327,9 +327,10 @@ def test_target_login_propagates_failed_post_login_check(monkeypatch):
     for method in (
         "_init_driver", "_click_login_entry", "_switch_to_login_popup",
         "_click_legal_person_login", "_click_account_login", "_fill_credentials",
-        "_fill_sms_code", "_confirm_login",
+        "_fill_sms_code",
     ):
         monkeypatch.setattr(login, method, lambda *args, **kwargs: None)
+    monkeypatch.setattr(login, "_confirm_login", lambda: True)
     monkeypatch.setattr(login, "_solve_image_captcha", lambda: "abcd")
     monkeypatch.setattr(login, "_click_login_button", lambda: True)
     monkeypatch.setattr(login, "_check_captcha_error", lambda: False)
@@ -337,6 +338,29 @@ def test_target_login_propagates_failed_post_login_check(monkeypatch):
     monkeypatch.setattr(login, "_wait_for_sms_code", lambda **kwargs: "123456")
     monkeypatch.setattr(login, "_check_sms_code_error", lambda: False)
     monkeypatch.setattr(login, "_check_login_success", lambda: False)
+    monkeypatch.setattr(target_login.time, "sleep", lambda *_args: None)
+
+    assert login.login() is False
+
+
+def test_target_login_fails_when_confirmation_button_is_missing(monkeypatch):
+    login = target_login.TargetLogin({
+        "credentials": {"target_site": {"username": "account", "password": "secret"}},
+        "browser": {"headless": True},
+    })
+    for method in (
+        "_init_driver", "_click_login_entry", "_switch_to_login_popup",
+        "_click_legal_person_login", "_click_account_login", "_fill_credentials",
+        "_fill_sms_code",
+    ):
+        monkeypatch.setattr(login, method, lambda *args, **kwargs: None)
+    monkeypatch.setattr(login, "_solve_image_captcha", lambda: "abcd")
+    monkeypatch.setattr(login, "_click_login_button", lambda: True)
+    monkeypatch.setattr(login, "_check_captcha_error", lambda: False)
+    monkeypatch.setattr(login, "_check_sms_popup_appeared", lambda: True)
+    monkeypatch.setattr(login, "_wait_for_sms_code", lambda **kwargs: "123456")
+    monkeypatch.setattr(login, "_confirm_login", lambda: False)
+    monkeypatch.setattr(login, "_check_login_success", lambda: True)
     monkeypatch.setattr(target_login.time, "sleep", lambda *_args: None)
 
     assert login.login() is False
