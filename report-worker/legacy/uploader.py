@@ -864,9 +864,12 @@ class Uploader:
 
     def _registration_confirm_button(self):
         return _find_first(self.driver, [
-            (By.XPATH, "//*[@role='dialog']//button[normalize-space(.)='确认' or .//*[normalize-space(.)='确认']]"),
-            (By.XPATH, "//*[contains(@class,'dialog') or contains(@class,'modal')]//button[normalize-space(.)='确认' or .//*[normalize-space(.)='确认']]"),
-            (By.XPATH, "//button[normalize-space(.)='确认' or .//*[normalize-space(.)='确认']]"),
+            (By.XPATH, "//*[@role='dialog']//button[translate(normalize-space(.), ' ', '')='确认' or translate(normalize-space(.), ' ', '')='确定']"),
+            (By.XPATH, "//*[contains(@class,'dialog') or contains(@class,'modal')]//button[translate(normalize-space(.), ' ', '')='确认' or translate(normalize-space(.), ' ', '')='确定']"),
+            # 政务网新版“情形选择”是独立页而非弹窗，主按钮 DOM
+            # 文本为“确  定”。限定在建筑项目人员备案选项后查找。
+            (By.XPATH, "//*[normalize-space(.)='建筑项目人员备案登记']/following::button[contains(@class,'next-btn-primary')][1]"),
+            (By.XPATH, "//button[translate(normalize-space(.), ' ', '')='确认' or translate(normalize-space(.), ' ', '')='确定']"),
         ])
 
     def _select_registration_type(self):
@@ -874,11 +877,11 @@ class Uploader:
             logger.info("已进入在线填表页，无需选择备案类型")
             return False
         logger.info("选择'建筑项目人员备案登记'")
-        # 先确认页面上确实存在选择弹窗的确认按钮，避免把办事指南标题
+        # 先确认页面上确实存在情形选择页/弹窗的确定按钮，避免把办事指南标题
         # “建筑项目人员工伤参保登记”误当成备案类型选项。
         if not self._registration_confirm_button():
             raise RuntimeError(
-                f"未出现备案类型选择弹窗，当前页面: {self.driver.current_url}"
+                f"未出现备案类型选择页或弹窗，当前页面: {self.driver.current_url}"
             )
         selectors = [
             (By.XPATH, "//*[@role='dialog']//*[normalize-space(.)='建筑项目人员备案登记']"),
@@ -888,7 +891,7 @@ class Uploader:
         ]
         el = _find_first(self.driver, selectors)
         if not el:
-            raise RuntimeError("备案类型选择弹窗中未找到'建筑项目人员备案登记'")
+            raise RuntimeError("备案类型选择页或弹窗中未找到'建筑项目人员备案登记'")
 
         self._click(el)
         logger.info("已选择'建筑项目人员备案登记'")
@@ -903,7 +906,7 @@ class Uploader:
         el = self._registration_confirm_button()
         if not el:
             raise RuntimeError(
-                f"备案类型选择弹窗仍在，但未找到确认按钮: {self.driver.current_url}"
+                f"备案类型选择页或弹窗仍在，但未找到确定按钮: {self.driver.current_url}"
             )
 
         self._click(el)

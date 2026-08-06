@@ -970,8 +970,24 @@ def test_registration_selection_does_not_match_workguide_heading(monkeypatch):
     instance._is_upload_form_visible = lambda: False
     monkeypatch.setattr(instance, "_registration_confirm_button", lambda: None)
 
-    with pytest.raises(RuntimeError, match="未出现备案类型选择弹窗"):
+    with pytest.raises(RuntimeError, match="未出现备案类型选择页或弹窗"):
         instance._select_registration_type()
+
+
+def test_registration_confirm_accepts_scene_guide_confirm_text(monkeypatch):
+    captured = []
+    instance = uploader.Uploader.__new__(uploader.Uploader)
+    instance.driver = object()
+
+    def fake_find(_driver, selectors, **_kwargs):
+        captured.extend(value for _by, value in selectors)
+        return object()
+
+    monkeypatch.setattr(uploader, "_find_first", fake_find)
+
+    assert instance._registration_confirm_button() is not None
+    assert any("确定" in selector and "translate" in selector for selector in captured)
+    assert any("next-btn-primary" in selector for selector in captured)
 
 
 def test_wait_for_upload_form_reports_the_actual_page(monkeypatch):

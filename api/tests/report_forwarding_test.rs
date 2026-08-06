@@ -236,6 +236,22 @@ async fn report_forward_config_secrets_and_run_guards_work() {
     assert_eq!(test_run["data"]["status"], "pending");
     assert_eq!(test_run["data"]["trigger_type"], "test");
     assert_eq!(test_run["data"]["options"]["worker_target"], "k3s");
+    let data_time_from = test_run["data"]["data_time_from_beijing"]
+        .as_str()
+        .expect("Beijing data range start");
+    let data_time_to = test_run["data"]["data_time_to_beijing"]
+        .as_str()
+        .expect("Beijing data range end");
+    assert_eq!(data_time_from.len(), 10);
+    assert_eq!(data_time_to.len(), 10);
+    assert_eq!(
+        test_run["data"]["options"]["data_time_from_beijing"],
+        data_time_from
+    );
+    assert_eq!(
+        test_run["data"]["options"]["data_time_to_beijing"],
+        data_time_to
+    );
     let run_id = Uuid::parse_str(test_run["data"]["id"].as_str().unwrap()).unwrap();
     let project_id = sqlx::query_scalar::<_, Uuid>(
         "INSERT INTO report_forward_run_projects(run_id,external_project_name) VALUES($1,'测试项目') RETURNING id",
@@ -309,6 +325,14 @@ async fn report_forward_config_secrets_and_run_guards_work() {
     assert_eq!(run_list["data"]["items"][0]["already_reported_count"], 1);
     assert_eq!(run_list["data"]["items"][0]["record_time_skipped_count"], 1);
     assert_eq!(run_list["data"]["items"][0]["other_skipped_count"], 1);
+    assert_eq!(
+        run_list["data"]["items"][0]["data_time_from_beijing"],
+        data_time_from
+    );
+    assert_eq!(
+        run_list["data"]["items"][0]["data_time_to_beijing"],
+        data_time_to
+    );
 
     let (status, result) = request_json(
         app.clone(),

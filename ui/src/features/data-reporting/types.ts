@@ -136,6 +136,8 @@ export interface ReportRun {
   error_summary: string | null;
   failure_stage?: string | null;
   failure_reason?: string | null;
+  data_time_from_beijing?: string | null;
+  data_time_to_beijing?: string | null;
   created_at: string;
   projects?: RunProject[];
   items?: ReportItem[];

@@ -433,6 +433,18 @@ pub async fn list_runs(State(state): State<AppState>, uri: Uri) -> ApiResult<Val
         SELECT COALESCE(jsonb_agg(to_jsonb(rows) ORDER BY rows.created_at DESC), '[]'::jsonb)
         FROM (
             SELECT r.*,
+                   COALESCE(
+                       r.options->>'data_time_from_beijing',
+                       TO_CHAR(
+                           (r.created_at AT TIME ZONE 'Asia/Shanghai')::date
+                           - GREATEST(COALESCE(NULLIF(c.settings->>'latest_entry_days', '')::int, 1), 1),
+                           'YYYY-MM-DD'
+                       )
+                   ) AS data_time_from_beijing,
+                   COALESCE(
+                       r.options->>'data_time_to_beijing',
+                       TO_CHAR((r.created_at AT TIME ZONE 'Asia/Shanghai')::date, 'YYYY-MM-DD')
+                   ) AS data_time_to_beijing,
                    GREATEST(r.success_count - LEAST(r.success_count, result_counts.already_reported_count), 0)::int AS reported_success_count,
                    (r.failure_count + LEAST(r.success_count, result_counts.already_reported_count))::int AS skipped_count,
                    result_counts.already_reported_count::int AS already_reported_count,
@@ -459,6 +471,7 @@ pub async fn list_runs(State(state): State<AppState>, uri: Uri) -> ApiResult<Val
                        failure_item.any_error
                    ) AS failure_reason
             FROM report_forward_runs r
+            LEFT JOIN report_forward_configs c ON c.id=r.config_id
             LEFT JOIN LATERAL (
                 SELECT
                     COUNT(*) FILTER (
@@ -1003,6 +1016,18 @@ async fn fetch_run(pool: &sqlx::PgPool, id: Uuid) -> Result<Value, ApiError> {
         r#"
         SELECT to_jsonb(r)
             || jsonb_build_object(
+                'data_time_from_beijing', COALESCE(
+                    r.options->>'data_time_from_beijing',
+                    TO_CHAR(
+                        (r.created_at AT TIME ZONE 'Asia/Shanghai')::date
+                        - GREATEST(COALESCE(NULLIF(c.settings->>'latest_entry_days', '')::int, 1), 1),
+                        'YYYY-MM-DD'
+                    )
+                ),
+                'data_time_to_beijing', COALESCE(
+                    r.options->>'data_time_to_beijing',
+                    TO_CHAR((r.created_at AT TIME ZONE 'Asia/Shanghai')::date, 'YYYY-MM-DD')
+                ),
                 'reported_success_count', GREATEST(r.success_count - LEAST(r.success_count, result_counts.already_reported_count), 0),
                 'skipped_count', r.failure_count + LEAST(r.success_count, result_counts.already_reported_count),
                 'already_reported_count', result_counts.already_reported_count,
@@ -1020,6 +1045,7 @@ async fn fetch_run(pool: &sqlx::PgPool, id: Uuid) -> Result<Value, ApiError> {
                 'events', COALESCE((SELECT jsonb_agg(to_jsonb(e) ORDER BY e.id) FROM (SELECT * FROM report_forward_events WHERE run_id=r.id ORDER BY id DESC LIMIT 300) e), '[]'::jsonb)
             )
         FROM report_forward_runs r
+        LEFT JOIN report_forward_configs c ON c.id=r.config_id
         LEFT JOIN LATERAL (
             SELECT
                 COUNT(*) FILTER (
@@ -1055,7 +1081,21 @@ async fn insert_run(
     sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO report_forward_runs
            (config_id, config_name, trigger_type, run_mode, priority, options, requested_by_user_id, parent_run_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id"#,
+           SELECT $1,$2,$3,$4,$5,
+                  $6 || jsonb_build_object(
+                      'data_time_from_beijing', TO_CHAR(
+                          (NOW() AT TIME ZONE 'Asia/Shanghai')::date
+                          - GREATEST(COALESCE(NULLIF(c.settings->>'latest_entry_days', '')::int, 1), 1),
+                          'YYYY-MM-DD'
+                      ),
+                      'data_time_to_beijing', TO_CHAR(
+                          (NOW() AT TIME ZONE 'Asia/Shanghai')::date,
+                          'YYYY-MM-DD'
+                      )
+                  ),
+                  $7,$8
+           FROM report_forward_configs c WHERE c.id=$1
+           RETURNING id"#,
     )
     .bind(config_id).bind(config_name).bind(trigger_type).bind(run_mode).bind(priority)
     .bind(options).bind(requested_by).bind(parent_run_id)
