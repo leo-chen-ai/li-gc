@@ -723,7 +723,9 @@ class Uploader:
             if self._is_upload_form_visible():
                 logger.info(f"当前窗口已直接进入在线填表页: {self.driver.current_url}")
                 return
-            if _find_first(self.driver, [
+            # 办事指南本身也可能渲染备案类型文案或残留弹窗元素。
+            # 只有当前窗口 URL 已发生跳转时，才能以这些元素判定已进入办理流程。
+            if self.driver.current_url != original_url and _find_first(self.driver, [
                 (By.XPATH, "//*[normalize-space(.)='同意授权']"),
                 (By.XPATH, "//*[normalize-space(.)='建筑项目人员备案登记']"),
                 (By.XPATH, "//*[contains(text(),'草稿') and (self::div or self::span)]"),

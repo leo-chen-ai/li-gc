@@ -953,6 +953,39 @@ def test_online_handle_accepts_same_window_form_navigation(monkeypatch):
     assert button.clicked is True
 
 
+def test_online_handle_does_not_treat_workguide_text_as_navigation(monkeypatch):
+    class FakeElement:
+        def click(self):
+            pass
+
+    class FakeDriver:
+        current_url = "https://www.zjzwfw.gov.cn/zjservice-fe/#/workguide"
+        window_handles = ["guide"]
+
+    instance = uploader.Uploader.__new__(uploader.Uploader)
+    instance.driver = FakeDriver()
+    instance.long_wait = object()
+    instance._is_upload_form_visible = lambda: False
+
+    def fake_find(_driver, selectors, **_kwargs):
+        if any("在线办理" in selector for _by, selector in selectors):
+            return FakeElement()
+        return FakeElement()  # 模拟办事指南页也有备案类型文案
+
+    clock = {"value": 0}
+
+    def fake_time():
+        clock["value"] += 20
+        return clock["value"]
+
+    monkeypatch.setattr(uploader, "_find_first", fake_find)
+    monkeypatch.setattr(uploader.time, "time", fake_time)
+    monkeypatch.setattr(uploader.time, "sleep", lambda _seconds: None)
+
+    with pytest.raises(RuntimeError, match="仍停留在办事指南页"):
+        instance._click_online_handle()
+
+
 def test_confirmation_is_skipped_when_form_is_already_visible():
     instance = uploader.Uploader.__new__(uploader.Uploader)
     instance._is_upload_form_visible = lambda: True
