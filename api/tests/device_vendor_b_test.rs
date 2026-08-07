@@ -95,7 +95,7 @@ async fn b_vendor_workers_support_registered_device_full_and_incremental_downloa
     let (app, pool, _container) = build_test_app_with_pool().await;
 
     let project_id = sqlx::query_scalar::<_, Uuid>(
-        "INSERT INTO construction_projects (name, status) VALUES ('B厂家测试项目', 1) RETURNING id",
+        "INSERT INTO construction_projects (name, status) VALUES ('弹厂家测试项目', 1) RETURNING id",
     )
     .fetch_one(&pool)
     .await
@@ -119,7 +119,7 @@ async fn b_vendor_workers_support_registered_device_full_and_incremental_downloa
     sqlx::query(
         r#"
         INSERT INTO construction_attendance_devices (project_id, device_type, serial_number)
-        VALUES ($1, 'B厂家', 'B-DEVICE-001'), ($1, 'A厂家', 'A-DEVICE-001')
+        VALUES ($1, '弹厂家', 'B-DEVICE-001'), ($1, '海厂家', 'A-DEVICE-001')
         "#,
     )
     .bind(project_id)
@@ -233,7 +233,7 @@ async fn b_vendor_workers_support_registered_device_full_and_incremental_downloa
     assert_eq!(pull_report.0, "success");
     assert_eq!(pull_report.1, "update");
     assert_eq!(pull_report.2, "B-DEVICE-001");
-    assert_eq!(pull_report.3, "B厂家设备主动拉取人员");
+    assert_eq!(pull_report.3, "弹厂家设备主动拉取人员");
 
     let device_presence = sqlx::query_as::<
         _,
@@ -256,15 +256,15 @@ async fn b_vendor_workers_support_registered_device_full_and_incremental_downloa
     assert_eq!(device_presence.0, "online");
     assert!(
         device_presence.1.is_some(),
-        "/workers应更新B厂家最后通信时间"
+        "/workers应更新弹厂家最后通信时间"
     );
     assert!(
         device_presence.2.is_some(),
-        "/workers应更新B厂家最后在线时间"
+        "/workers应更新弹厂家最后在线时间"
     );
     assert!(
         device_presence.3.is_none(),
-        "B厂家不应写入A厂家的MQTT心跳时间"
+        "弹厂家不应写入海厂家的MQTT心跳时间"
     );
 
     sqlx::query("UPDATE construction_workers SET name = '在场人员已修改' WHERE id = $1")
@@ -306,7 +306,7 @@ async fn b_vendor_quality_feedback_is_visible_as_idempotent_issue_reports() {
     let (app, pool, _container) = build_test_app_with_pool().await;
 
     let project_id = sqlx::query_scalar::<_, Uuid>(
-        "INSERT INTO construction_projects (name, status) VALUES ('B厂家照片质量项目', 1) RETURNING id",
+        "INSERT INTO construction_projects (name, status) VALUES ('弹厂家照片质量项目', 1) RETURNING id",
     )
     .fetch_one(&pool)
     .await
@@ -330,7 +330,7 @@ async fn b_vendor_quality_feedback_is_visible_as_idempotent_issue_reports() {
         r#"
         INSERT INTO construction_attendance_devices (
             project_id, device_type, serial_number, device_name, direction
-        ) VALUES ($1, 'B厂家', 'B-QUALITY-001', 'B厂家质量测试机', 0)
+        ) VALUES ($1, '弹厂家', 'B-QUALITY-001', '弹厂家质量测试机', 0)
         RETURNING id
         "#,
     )
@@ -416,7 +416,7 @@ async fn b_vendor_quality_feedback_is_visible_as_idempotent_issue_reports() {
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(mqtt_message_count, 0, "B厂家下发记录不应产生MQTT消息");
+    assert_eq!(mqtt_message_count, 0, "弹厂家下发记录不应产生MQTT消息");
 
     let failed_payload = serde_json::json!({
         "productId": "1",
@@ -465,7 +465,7 @@ async fn b_vendor_quality_feedback_is_visible_as_idempotent_issue_reports() {
     assert_eq!(report.0, default_report_id);
     assert_eq!(report.1, worker_id);
     assert_eq!(report.2, device_record_id);
-    assert_eq!(report.3, "B厂家");
+    assert_eq!(report.3, "弹厂家");
     assert_eq!(report.4, "update");
     assert_eq!(report.5, "failed");
     assert!(report.6.is_some());
@@ -484,7 +484,7 @@ async fn b_vendor_quality_feedback_is_visible_as_idempotent_issue_reports() {
         )
         SELECT project_id, worker_id, attendance_device_id,
                worker_name, device_name, serial_number, device_type,
-               'update', status, NOW(), message, 'B厂家设备拉取人员后的照片质量反馈',
+               'update', status, NOW(), message, '弹厂家设备拉取人员后的照片质量反馈',
                request_payload, response_payload, NOW()
         FROM construction_attendance_device_issue_reports
         WHERE id = $1
@@ -569,7 +569,7 @@ async fn b_vendor_photo_upload_persists_business_attendance_and_is_idempotent() 
     let app = app_routes(state);
 
     let project_id = sqlx::query_scalar::<_, Uuid>(
-        "INSERT INTO construction_projects (name, status) VALUES ('B厂家考勤项目', 1) RETURNING id",
+        "INSERT INTO construction_projects (name, status) VALUES ('弹厂家考勤项目', 1) RETURNING id",
     )
     .fetch_one(&pool)
     .await
@@ -593,7 +593,7 @@ async fn b_vendor_photo_upload_persists_business_attendance_and_is_idempotent() 
         r#"
         INSERT INTO construction_attendance_devices (
             project_id, device_type, serial_number, direction
-        ) VALUES ($1, 'B厂家', '123', 0)
+        ) VALUES ($1, '弹厂家', '123', 0)
         RETURNING id
         "#,
     )

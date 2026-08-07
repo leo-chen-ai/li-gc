@@ -7,8 +7,8 @@ const yesNoOptions = [
 ];
 
 const deviceTypeOptions = [
-  { label: "A厂家", value: "A厂家" },
-  { label: "B厂家", value: "B厂家" },
+  { label: "海厂家", value: "海厂家" },
+  { label: "弹厂家", value: "弹厂家" },
 ];
 
 const companyTypeOptions = [
@@ -236,7 +236,7 @@ const attendanceFields = [
 ];
 
 const deviceFields = [
-  { key: "device_type", label: "厂家类型", valueType: "string", control: "select", required: true, defaultValue: "A厂家", section: "基础信息", options: deviceTypeOptions },
+  { key: "device_type", label: "厂家类型", valueType: "string", control: "select", required: true, defaultValue: "海厂家", section: "基础信息", options: deviceTypeOptions },
   { key: "serial_number", label: "设备序列号", valueType: "string", required: true, section: "基础信息" },
   { key: "device_name", label: "设备名称", valueType: "string", required: true, section: "基础信息" },
   { key: "direction", label: "进出方向", valueType: "number", control: "select", defaultValue: "0", section: "基础信息", options: deviceDirectionOptions },

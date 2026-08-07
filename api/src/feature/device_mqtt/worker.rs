@@ -798,7 +798,7 @@ mod tests {
             .expect("run migrations");
 
         let project_id = sqlx::query_scalar::<_, Uuid>(
-            "INSERT INTO construction_projects (name, status) VALUES ('A厂家RecordID复用测试项目', 1) RETURNING id",
+            "INSERT INTO construction_projects (name, status) VALUES ('海厂家RecordID复用测试项目', 1) RETURNING id",
         )
         .fetch_one(&pool)
         .await

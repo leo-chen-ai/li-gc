@@ -24,7 +24,7 @@ const resourceByModule = {
 
 const HEARTBEAT_ONLINE_WINDOW_MS = 3 * 60 * 1000;
 const B_VENDOR_ONLINE_WINDOW_MS = 15 * 60 * 1000;
-const B_VENDOR_DEVICE_TYPE = "B厂家";
+const B_VENDOR_DEVICE_TYPE = "弹厂家";
 const LIST_PAGE_SIZE = 10;
 
 const moduleConfigs = {
@@ -572,14 +572,14 @@ function buildRecordView(moduleKey, record, lookups = {}) {
   const activityAt = isBVendor ? record.last_seen_at : record.last_heartbeat_at;
   return {
     _title: record.device_name || "未命名设备",
-    _subtitle: `${record.device_type || "A厂家"} / ${record.serial_number || "未填序列号"}`,
+    _subtitle: `${record.device_type || "海厂家"} / ${record.serial_number || "未填序列号"}`,
     _status: status,
     _statusTone: toneFromStatus(status),
     _details: details([
       ["当前状态", status],
       [isBVendor ? "最近通信" : "最近心跳", formatDateTime(activityAt)],
       ["进出方向", optionLabel(fieldSets.devices, "direction", record.direction)],
-      ["厂家类型", record.device_type || "A厂家"],
+      ["厂家类型", record.device_type || "海厂家"],
       ["序列号", record.serial_number],
       ["设备名称", record.device_name],
     ]),

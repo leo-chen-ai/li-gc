@@ -10,7 +10,7 @@ use super::publisher::publish_json;
 
 // 厂家协议 personType: 0=白名单, 1=黑名单。本项目不使用黑名单。
 const FACE_PERSON_TYPE_WHITELIST: i32 = 0;
-const B_VENDOR_DEVICE_TYPE: &str = "B厂家";
+const B_VENDOR_DEVICE_TYPE: &str = "弹厂家";
 const MISSING_FACE_PHOTO_MESSAGE: &str = "工人未上传人脸照片，无法下发";
 const FETCH_PROJECT_WORKERS_SQL: &str = r#"
         SELECT worker.id, worker.name, worker.id_card, worker.phone, worker.avatar,
@@ -82,7 +82,7 @@ pub async fn issue_single_worker_via_broker(
     let worker = fetch_issue_worker(pool, project_id, worker_id).await?;
     let device = fetch_issue_device(pool, project_id, attendance_device_id).await?;
     if is_b_vendor_device(&device) {
-        return Err("B厂家设备由设备主动调用/workers拉取人员，不支持服务端下发".to_string());
+        return Err("弹厂家设备由设备主动调用/workers拉取人员，不支持服务端下发".to_string());
     }
     if let Some(error) = issue_preflight_error(action, &worker) {
         insert_failed_issue_report(pool, project_id, &worker, &device, action, error, remark)
@@ -114,7 +114,7 @@ pub async fn issue_device_workers_via_broker(
 ) -> Result<IssueWorkersSummary, String> {
     let device = fetch_issue_device(pool, project_id, attendance_device_id).await?;
     if is_b_vendor_device(&device) {
-        return Err("B厂家设备由设备主动调用/workers拉取人员，不支持服务端下发".to_string());
+        return Err("弹厂家设备由设备主动调用/workers拉取人员，不支持服务端下发".to_string());
     }
     if require_online && !is_device_online(&device) {
         return Err("设备未在线，暂不能下发人员".to_string());
@@ -999,7 +999,7 @@ mod tests {
             project_id,
             device_name: Some("南门考勤机".to_string()),
             serial_number: "1306612".to_string(),
-            device_type: Some("A厂家".to_string()),
+            device_type: Some("海厂家".to_string()),
             online_status: "online".to_string(),
             last_heartbeat_at: Some(Utc::now()),
         };
@@ -1034,7 +1034,7 @@ mod tests {
             project_id,
             device_name: Some("南门考勤机".to_string()),
             serial_number: "1306612".to_string(),
-            device_type: Some("A厂家".to_string()),
+            device_type: Some("海厂家".to_string()),
             online_status: "online".to_string(),
             last_heartbeat_at: Some(Utc::now()),
         };
@@ -1070,7 +1070,7 @@ mod tests {
             project_id,
             device_name: Some("南门考勤机".to_string()),
             serial_number: "1306612".to_string(),
-            device_type: Some("A厂家".to_string()),
+            device_type: Some("海厂家".to_string()),
             online_status: "online".to_string(),
             last_heartbeat_at: Some(Utc::now()),
         };
@@ -1126,7 +1126,7 @@ mod tests {
             project_id,
             device_name: Some("测试考勤机".to_string()),
             serial_number: "1306612".to_string(),
-            device_type: Some("A厂家".to_string()),
+            device_type: Some("海厂家".to_string()),
             online_status: "online".to_string(),
             last_heartbeat_at: Some(Utc::now()),
         };

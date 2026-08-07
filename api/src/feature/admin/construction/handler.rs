@@ -6599,7 +6599,7 @@ async fn list_project_attendance_device_ids(
           AND project_id = $1
           AND serial_number IS NOT NULL
           AND BTRIM(serial_number) <> ''
-          AND COALESCE(device_type, '') <> 'B厂家'
+          AND COALESCE(device_type, '') <> '弹厂家'
         ORDER BY created_at ASC
         "#,
     )

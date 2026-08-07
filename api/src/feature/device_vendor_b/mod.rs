@@ -21,7 +21,7 @@ use uuid::Uuid;
 
 use crate::state::AppState;
 
-const B_VENDOR_DEVICE_TYPE: &str = "B厂家";
+const B_VENDOR_DEVICE_TYPE: &str = "弹厂家";
 const WORKERS_EVENT: &str = "workers";
 const PHOTO_EVENT: &str = "photo";
 const QUALITY_EVENT: &str = "quality";
@@ -29,9 +29,9 @@ const ATTENDANCE_JOBS_EVENT: &str = "attendanceJobs";
 const ATTENDANCE_RESULTS_EVENT: &str = "attendanceResults";
 const PHOTO_SOURCE: &str = "device_vendor_b_photo";
 const QUALITY_SOURCE: &str = "device_vendor_b_quality";
-const QUALITY_REMARK: &str = "B厂家设备拉取人员后的照片质量反馈";
-const WORKERS_PULL_REMARK: &str = "B厂家设备主动拉取人员";
-const WORKERS_PULL_MESSAGE: &str = "B厂家设备已通过/workers拉取人员";
+const QUALITY_REMARK: &str = "弹厂家设备拉取人员后的照片质量反馈";
+const WORKERS_PULL_REMARK: &str = "弹厂家设备主动拉取人员";
+const WORKERS_PULL_MESSAGE: &str = "弹厂家设备已通过/workers拉取人员";
 const PHOTO_JSON_LIMIT_BYTES: usize = 30 * 1024 * 1024;
 const MAX_PHOTO_PIXELS: u64 = 100_000_000;
 
@@ -1509,9 +1509,9 @@ fn photo_quality_message(code: &str, plat: &str, msg: &str) -> String {
         format!("：{msg}")
     };
     if code == "0" {
-        format!("B厂家照片质量反馈成功（平台：{plat}）{suffix}")
+        format!("弹厂家照片质量反馈成功（平台：{plat}）{suffix}")
     } else {
-        format!("B厂家照片质量反馈失败（错误码{code}，{detail}，平台：{plat}）{suffix}")
+        format!("弹厂家照片质量反馈失败（错误码{code}，{detail}，平台：{plat}）{suffix}")
     }
 }
 
@@ -1847,7 +1847,7 @@ async fn fetch_b_vendor_device(
     .map_err(|error| VendorError::internal(error.to_string()))?;
 
     match devices.as_slice() {
-        [] => Err(VendorError::not_found("deviceId对应的B厂家设备不存在")),
+        [] => Err(VendorError::not_found("deviceId对应的弹厂家设备不存在")),
         [(id, project_id, direction, device_name, serial_number)] => Ok(DeviceBinding {
             id: *id,
             project_id: *project_id,
@@ -1856,7 +1856,7 @@ async fn fetch_b_vendor_device(
             serial_number: serial_number.clone(),
         }),
         _ => Err(VendorError::conflict(
-            "deviceId存在重复配置，请检查B厂家设备绑定",
+            "deviceId存在重复配置，请检查弹厂家设备绑定",
         )),
     }
 }
@@ -1952,7 +1952,7 @@ impl VendorError {
     }
 
     fn internal(details: impl std::fmt::Display) -> Self {
-        tracing::error!(target: "device_vendor_b", error = %details, "B厂家设备接口失败");
+        tracing::error!(target: "device_vendor_b", error = %details, "弹厂家设备接口失败");
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             code: 500,

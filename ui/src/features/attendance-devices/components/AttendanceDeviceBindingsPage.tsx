@@ -58,12 +58,12 @@ const directionOptions = [
 ] as const;
 
 const deviceTypeOptions = [
-  { label: "A厂家", value: "A厂家" },
-  { label: "B厂家", value: "B厂家" },
+  { label: "海厂家", value: "海厂家" },
+  { label: "弹厂家", value: "弹厂家" },
 ] as const;
 const HEARTBEAT_ONLINE_WINDOW_MS = 3 * 60 * 1000;
 const B_VENDOR_ONLINE_WINDOW_MS = 15 * 60 * 1000;
-const B_VENDOR_DEVICE_TYPE = "B厂家";
+const B_VENDOR_DEVICE_TYPE = "弹厂家";
 
 type DeviceFormState = {
   project_id: string;
@@ -76,7 +76,7 @@ type DeviceFormState = {
 
 const defaultFormState: DeviceFormState = {
   project_id: "",
-  device_type: "A厂家",
+  device_type: "海厂家",
   serial_number: "",
   device_name: "",
   direction: "0",
@@ -146,7 +146,7 @@ export function AttendanceDeviceBindingsPage() {
     setEditingDevice(device);
     setForm({
       project_id: device.project_id,
-      device_type: device.device_type || "A厂家",
+      device_type: device.device_type || "海厂家",
       serial_number: device.serial_number ?? "",
       device_name: device.device_name ?? "",
       direction: device.direction === 2 ? "2" : device.direction === 1 ? "1" : "0",
@@ -171,7 +171,7 @@ export function AttendanceDeviceBindingsPage() {
     }
 
     const payload: ConstructionAttendanceDevicePayload = {
-      device_type: form.device_type.trim() || "A厂家",
+      device_type: form.device_type.trim() || "海厂家",
       serial_number: form.serial_number.trim(),
       device_name: form.device_name.trim(),
       direction: Number(form.direction),
@@ -383,7 +383,7 @@ export function AttendanceDeviceBindingsPage() {
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline" className="rounded-md border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300">
-                      {device.device_type || "A厂家"}
+                      {device.device_type || "海厂家"}
                     </Badge>
                   </TableCell>
                   <TableCell>

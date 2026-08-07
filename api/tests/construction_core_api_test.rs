@@ -1955,7 +1955,7 @@ async fn admin_can_manage_project_attendance_device_bindings() {
     assert_eq!(status, StatusCode::CREATED, "{body}");
     let device_id = body["data"]["id"].as_str().expect("device id");
     assert_eq!(body["data"]["project_id"], project_id);
-    assert_eq!(body["data"]["device_type"], "A厂家");
+    assert_eq!(body["data"]["device_type"], "海厂家");
     assert_eq!(body["data"]["serial_number"], "A-DEVICE-001");
     assert_eq!(body["data"]["direction"], 0);
 
@@ -1965,7 +1965,7 @@ async fn admin_can_manage_project_attendance_device_bindings() {
         &format!("/api/v1/admin/projects/{project_id}/attendance-devices/{device_id}"),
         &token,
         json!({
-            "device_type": "B厂家",
+            "device_type": "弹厂家",
             "device_name": "南门通用考勤机",
             "direction": 2,
             "remark": "调整为通用设备"
@@ -1973,7 +1973,7 @@ async fn admin_can_manage_project_attendance_device_bindings() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["data"]["device_type"], "B厂家");
+    assert_eq!(body["data"]["device_type"], "弹厂家");
     assert_eq!(body["data"]["device_name"], "南门通用考勤机");
     assert_eq!(body["data"]["direction"], 2);
 
@@ -2060,7 +2060,7 @@ async fn admin_can_search_and_paginate_project_attendance_devices_on_backend() {
             &format!("/api/v1/admin/projects/{project_id}/attendance-devices"),
             &token,
             json!({
-                "device_type": if index == 11 { "分页厂家" } else { "A厂家" },
+                "device_type": if index == 11 { "分页厂家" } else { "海厂家" },
                 "serial_number": format!("SN-PAGE-{index:02}"),
                 "device_name": format!("分页设备{:02}", index),
                 "direction": if index == 11 { 1 } else { 0 },
