@@ -87,7 +87,7 @@ impl YongxinCredentials {
             .map(|value| value.to_ascii_lowercase())
             .filter(|value| matches!(value.as_str(), "production" | "prod" | "live"))
             .map(|_| RuntimeMode::Production)
-            .unwrap_or(RuntimeMode::DryRun);
+            .unwrap_or(RuntimeMode::Production);
 
         Ok(Self {
             base_url,
@@ -319,7 +319,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_defaults_to_dry_run() {
+    fn runtime_defaults_to_production() {
         let credentials = YongxinCredentials::from_config(&serde_json::json!({
             "base_url": "https://example.com/open/",
             "project_code": "project",
@@ -327,6 +327,6 @@ mod tests {
             "app_secret": "1234567890abcdef"
         }))
         .unwrap();
-        assert!(credentials.is_dry_run());
+        assert!(!credentials.is_dry_run());
     }
 }

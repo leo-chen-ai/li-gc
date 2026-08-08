@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type Dispatch, type FormEvent, type React
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity, AlertTriangle, Beaker, CheckCircle2, Clock3, Download,
-  Loader2, Pencil, Play, Plus, RefreshCw, Send,
+  Loader2, Pencil, Play, Plus, RefreshCw,
   Search, Settings2, Square, Trash2, Users,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -212,15 +212,9 @@ export function DataReportingPage() {
 
   return (
     <div className="space-y-4">
-      <header className="rounded-2xl border bg-gradient-to-br from-emerald-950 via-[#0f6b5d] to-emerald-700 p-5 text-white shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex items-center gap-2 text-xs font-medium text-emerald-100"><Send className="size-4" />数据报送中心</div>
-          <div className="flex gap-2"><Button variant="secondary" size="sm" onClick={() => void invalidate()}><RefreshCw className="mr-2 size-4" />刷新</Button>{isAdmin && <Button size="sm" className="bg-white text-emerald-900 hover:bg-emerald-50" onClick={openCreate}><Plus className="mr-2 size-4" />新增配置</Button>}</div>
-        </div>
-      </header>
-
-      <nav className="flex flex-wrap gap-1 rounded-xl border bg-white p-1.5">
-        {visibleTabs.map((key) => <Button key={key} size="sm" variant={activeTab === key ? "default" : "ghost"} className={activeTab === key ? "bg-[#0f6b5d]" : ""} onClick={() => setTab(key)}>{tabLabel(key)}</Button>)}
+      <nav className="flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-white p-1.5">
+        <div className="flex flex-wrap gap-1">{visibleTabs.map((key) => <Button key={key} size="sm" variant={activeTab === key ? "default" : "ghost"} className={activeTab === key ? "bg-[#0f6b5d]" : ""} onClick={() => setTab(key)}>{tabLabel(key)}</Button>)}</div>
+        <div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => void invalidate()}><RefreshCw className="mr-2 size-4" />刷新</Button>{isAdmin && <Button size="sm" className="bg-[#0f6b5d]" onClick={openCreate}><Plus className="mr-2 size-4" />新增配置</Button>}</div>
       </nav>
 
       {activeTab === "dashboard" && isAdmin && <Dashboard summary={summary.data} runs={runRows.slice(0, 6)} onRun={setDetailRunId} />}
@@ -280,7 +274,8 @@ function RunsTable({ rows, loading, onDetail, onCancel, onRetry }: { rows: Repor
 function RunResultSummary({ run }: { run: ReportRun }) {
   const success = run.reported_success_count ?? run.success_count;
   const skipped = run.skipped_count ?? run.failure_count;
-  return <div className="space-y-1 text-sm"><div><span className="font-medium text-emerald-700">成功 {success} 条</span><span className="ml-3 font-medium text-amber-700">跳过 {skipped} 条</span></div>{skipped > 0 && <div className="text-xs leading-5 text-slate-500">已上报/已存在 {run.already_reported_count ?? 0} 条 · 备案/进场时间不符 {run.record_time_skipped_count ?? 0} 条 · 其他 {run.other_skipped_count ?? skipped} 条</div>}</div>;
+  const alreadyReported = run.already_reported_count ?? 0;
+  return <div className="space-y-1 text-sm"><div><span className="font-medium text-emerald-700">成功 {success} 条</span><span className="ml-3 font-medium text-amber-700">跳过 {skipped} 条</span></div>{(alreadyReported > 0 || skipped > 0) && <div className="text-xs leading-5 text-slate-500">成功中已上报/已存在 {alreadyReported} 条 · 跳过中备案/进场时间不符 {run.record_time_skipped_count ?? 0} 条 · 其他 {run.other_skipped_count ?? skipped} 条</div>}</div>;
 }
 
 function DataPanel({ runs, runId, onRun, result, loading, page, onPage, outcome, onOutcome, onExport }: { runs: ReportRun[]; runId: string; onRun: (id: string) => void; result?: Awaited<ReturnType<typeof reportService.items>>; loading: boolean; page: number; onPage: (page: number) => void; outcome: ResultOutcome; onOutcome: (value: ResultOutcome) => void; onExport: () => void }) {

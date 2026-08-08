@@ -72,18 +72,6 @@ export function SessionsSettings() {
 
     return (
         <div className="space-y-10 animate-fade-in pb-10">
-            <div>
-                <h2 className="text-2xl font-bold tracking-tight mb-2">登录设备</h2>
-                <p className="text-[15px] text-muted-foreground">
-                    这里展示当前账号已登录的设备，可以单独退出某台设备，也可以退出其他所有设备。
-                </p>
-                <p className="text-[15px] text-muted-foreground mt-3 lg:max-w-2xl">
-                    如果发现陌生设备，请立即退出该设备并修改账号密码。
-                </p>
-            </div>
-
-            <Separator className="bg-border/40" />
-
             {loadingSessions ? (
                 <div className="flex justify-center py-12">
                     <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-primary" />

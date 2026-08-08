@@ -133,8 +133,7 @@ export function RolesManagement() {
   if (isError) {
     return (
       <div className="rounded-md border bg-background p-6">
-        <h1 className="text-2xl font-semibold">角色管理</h1>
-        <p className="mt-2 text-sm text-muted-foreground">角色数据加载失败，请稍后重试。</p>
+        <p className="text-sm text-muted-foreground">角色数据加载失败，请稍后重试。</p>
       </div>
     );
   }
@@ -142,8 +141,7 @@ export function RolesManagement() {
   if (!selectedRole) {
     return (
       <div className="rounded-md border bg-background p-6">
-        <h1 className="text-2xl font-semibold">角色管理</h1>
-        <Button className="mt-4 bg-[#0f6b5d] hover:bg-[#0b5a4f]" onClick={() => setIsCreateOpen(true)}>
+        <Button className="bg-[#0f6b5d] hover:bg-[#0b5a4f]" onClick={() => setIsCreateOpen(true)}>
           <Plus className="mr-2 h-4 w-4" />
           新增角色
         </Button>
@@ -161,11 +159,7 @@ export function RolesManagement() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">角色管理</h1>
-          <p className="text-muted-foreground">维护角色、菜单范围和绑定用户数量</p>
-        </div>
+      <div className="flex justify-end rounded-xl border bg-white px-4 py-2 shadow-sm">
         <div className="flex items-center gap-2">
           <Button onClick={() => setIsCreateOpen(true)} className="bg-[#0f6b5d] hover:bg-[#0b5a4f]">
             <Plus className="mr-2 h-4 w-4" />

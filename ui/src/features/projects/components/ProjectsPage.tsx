@@ -2,7 +2,6 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import {
   CalendarDays,
   ChevronRight,
-  ClipboardList,
   Pencil,
   MapPin,
   Plus,
@@ -184,15 +183,7 @@ export function ProjectsPage() {
   return (
     <div className="space-y-4 text-slate-950 dark:text-foreground">
       <section className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-border dark:bg-card">
-        <div className="grid gap-3 border-b border-slate-100 px-4 py-3 dark:border-border lg:grid-cols-[minmax(220px,0.7fr)_minmax(520px,1.3fr)_auto] lg:items-center">
-          <div className="min-w-0">
-            <div className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
-              <ClipboardList className="size-3.5" />
-              项目台账
-            </div>
-            <h1 className="mt-1 text-xl font-semibold tracking-normal">项目列表</h1>
-          </div>
-
+        <div className="grid gap-3 border-b border-slate-100 px-4 py-3 dark:border-border lg:grid-cols-[minmax(520px,1fr)_auto] lg:items-center">
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
             <CompactStat label="项目总数" value={projectTotal} helper={`${buildingProjects} 个在建（当前页）`} />
             <CompactStat label="在册工人" value={totalWorkers} helper="当前页合计" accent="teal" />

@@ -134,36 +134,26 @@ test("新增配置时必须先选择平台", () => {
   assert.equal(validateNingboHousingConfig(form), "请选择对接平台");
 });
 
-test("甬薪配置默认测试模式且模块可以独立开关", () => {
+test("甬薪配置只保存接口地址和三项凭证", () => {
   const form = {
     ...createYongxinV2ConfigForm(),
     project_id: "local-project",
-    base_url: "https://yongxin.example/open/",
+    base_url: "https://apigx.91jtg.com/openapi/",
     project_code: "project-code",
     app_key: "app-key",
     app_secret: "1234567890abcdef",
-    sync_attendance: false,
-    attendance_backfill_from: "2026-07-01",
   };
 
   assert.equal(validateYongxinV2Config(form), null);
   assert.deepEqual(buildYongxinV2Config(form), {
-    base_url: "https://yongxin.example/open",
+    base_url: "https://apigx.91jtg.com/openapi",
     project_code: "project-code",
     app_key: "app-key",
     app_secret: "1234567890abcdef",
-    mode: "test",
-    modules: {
-      sync_units: true,
-      sync_teams: true,
-      sync_workers: true,
-      sync_attendance: false,
-    },
-    attendance_backfill_from: "2026-07-01T00:00:00+08:00",
   });
 });
 
-test("甬薪配置编辑时保留每个平台自己的运行模式", () => {
+test("甬薪旧配置编辑时兼容历史字段", () => {
   const form = parseYongxinV2Config({
     id: "config-yongxin",
     project_id: "local-project",
@@ -188,7 +178,7 @@ test("甬薪配置编辑时保留每个平台自己的运行模式", () => {
     deleted_at: null,
   });
 
-  assert.equal(form.mode, "production");
+  assert.equal(form.base_url, "https://example.test");
   assert.equal(form.sync_units, false);
   assert.equal(form.sync_teams, true);
   assert.equal(form.sync_attendance, true);

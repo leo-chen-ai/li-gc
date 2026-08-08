@@ -2,7 +2,7 @@ import hashlib
 import json
 import sys
 from contextlib import contextmanager, nullcontext
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import report_worker.executor as executor_module
 import converter
 import downloader
+import feishu_listener
 import target_login
 import uploader
 import browser_runtime
@@ -364,6 +365,54 @@ def test_target_login_fails_when_confirmation_button_is_missing(monkeypatch):
     monkeypatch.setattr(target_login.time, "sleep", lambda *_args: None)
 
     assert login.login() is False
+
+
+def test_sms_code_must_arrive_after_current_login_request(tmp_path):
+    csv_path = tmp_path / "verification_codes.csv"
+    csv_path.write_text(
+        "code,sms_time,raw_message,received_at\n"
+        "111111,,,2026-08-07 10:00:00\n",
+        encoding="utf-8",
+    )
+    requested_at = datetime(2026, 8, 7, 10, 0, 10)
+
+    assert feishu_listener.get_latest_valid_code(
+        str(csv_path), max_age_minutes=10_000, received_after=requested_at
+    ) is None
+
+    with csv_path.open("a", encoding="utf-8") as output:
+        output.write("222222,,,2026-08-07 10:00:11\n")
+    assert feishu_listener.get_latest_valid_code(
+        str(csv_path), max_age_minutes=10_000, received_after=requested_at
+    ) == "222222"
+
+
+def test_target_login_resends_after_rejected_sms_code(monkeypatch):
+    login = target_login.TargetLogin({
+        "credentials": {"target_site": {"username": "account", "password": "secret"}},
+        "browser": {"headless": True},
+    })
+    for method in (
+        "_init_driver", "_click_login_entry", "_switch_to_login_popup",
+        "_click_legal_person_login", "_click_account_login", "_fill_credentials",
+        "_fill_sms_code", "_clear_sms_inputs",
+    ):
+        monkeypatch.setattr(login, method, lambda *args, **kwargs: None)
+    monkeypatch.setattr(login, "_solve_image_captcha", lambda: "abcd")
+    monkeypatch.setattr(login, "_click_login_button", lambda: True)
+    monkeypatch.setattr(login, "_check_captcha_error", lambda: False)
+    monkeypatch.setattr(login, "_check_sms_popup_appeared", lambda: True)
+    codes = iter(("111111", "222222"))
+    monkeypatch.setattr(login, "_wait_for_sms_code", lambda **_kwargs: next(codes))
+    errors = iter((True, False))
+    monkeypatch.setattr(login, "_check_sms_code_error", lambda: next(errors))
+    monkeypatch.setattr(login, "_confirm_login", lambda: True)
+    resend_at = datetime(2026, 8, 7, 10, 0, 10)
+    monkeypatch.setattr(login, "_resend_sms_code", lambda: resend_at)
+    monkeypatch.setattr(login, "_check_login_success", lambda: True)
+    monkeypatch.setattr(target_login.time, "sleep", lambda *_args: None)
+
+    assert login.login() is True
 
 
 def test_oss_storage_refuses_incomplete_credentials(monkeypatch):
@@ -875,6 +924,40 @@ def test_repository_only_schedules_three_retries():
     repo, connection = repository_for(4)
     assert repo.schedule_retry("run-id", "last error", 3) is False
     assert not any("status='pending'" in sql for sql, _params in connection.calls)
+
+
+def test_repository_claim_enforces_ten_minute_production_cooldown():
+    class FakeResult:
+        def fetchone(self):
+            return None
+
+    class FakeConnection:
+        def __init__(self):
+            self.calls = []
+
+        def transaction(self):
+            return nullcontext()
+
+        def execute(self, sql, params=None):
+            self.calls.append((sql, params))
+            return FakeResult()
+
+    repo = Repository.__new__(Repository)
+    repo.worker_target = "k3s"
+    repo.production_cooldown_seconds = 600
+    connection = FakeConnection()
+
+    @contextmanager
+    def open_connection():
+        yield connection
+
+    repo.connection = open_connection
+    assert repo.claim_run("worker-id") is None
+    claim_sql, params = connection.calls[-1]
+    assert "recent.completed_at > NOW() - cd.duration" in claim_sql
+    assert "retry_event.stage = 'retry_wait'" in claim_sql
+    assert "r.run_mode <> 'production'" in claim_sql
+    assert params == (600, "k3s", "worker-id")
 
 
 def test_optional_authorization_page_is_checked_and_accepted(tmp_path):

@@ -1,7 +1,5 @@
-import { Link } from "@tanstack/react-router";
 import {
   Activity,
-  CalendarCog,
   CheckCircle2,
   Clock3,
   RefreshCw,
@@ -56,7 +54,7 @@ const emptySummary: SupplementalAttendanceSummary = {
   device_failed: 0,
 };
 
-export function SupplementalAttendancePage() {
+export function SupplementalAttendancePage({ embedded = false }: { embedded?: boolean }) {
   const [projectId, setProjectId] = useState("");
   const [month, setMonth] = useState(currentMonth());
   const [keyword, setKeyword] = useState("");
@@ -99,11 +97,20 @@ export function SupplementalAttendancePage() {
 
   return (
     <div className="space-y-4 text-slate-950 dark:text-foreground">
-      <PageHeader
-        updatedAt={recordsQuery.dataUpdatedAt}
-        refreshing={recordsQuery.isFetching}
-        onRefresh={() => void recordsQuery.refetch()}
-      />
+      {!embedded ? (
+        <PageHeader
+          updatedAt={recordsQuery.dataUpdatedAt}
+          refreshing={recordsQuery.isFetching}
+          onRefresh={() => void recordsQuery.refetch()}
+        />
+      ) : (
+        <div className="flex justify-end">
+          <Button variant="outline" size="sm" onClick={() => void recordsQuery.refetch()} disabled={recordsQuery.isFetching}>
+            <RefreshCw className={cn("mr-2 size-4", recordsQuery.isFetching && "animate-spin")} />
+            刷新下发状态
+          </Button>
+        </div>
+      )}
       <SummaryCards summary={summary} />
       <FilterPanel
         projectId={projectId}
@@ -167,22 +174,8 @@ function PageHeader({
   onRefresh: () => void;
 }) {
   return (
-    <section className="overflow-hidden rounded-xl border bg-[#103c36] text-white shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-5 px-5 py-5 md:px-6">
-        <div>
-          <div className="inline-flex items-center gap-2 rounded-full border border-emerald-300/30 bg-white/10 px-3 py-1 text-xs text-emerald-100">
-            <Activity className="size-3.5" />
-            15 秒自动刷新
-          </div>
-          <h1 className="mt-3 text-2xl font-semibold tracking-tight">
-            补考勤全链路
-          </h1>
-          <p className="mt-1 max-w-2xl text-sm text-emerald-50/75">
-            从平台任务发送到考勤机最终回执分段展示，便于定位未分配、发送失败和设备处理失败。
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-emerald-50/70">
+    <section className="flex flex-wrap items-center justify-end gap-2 rounded-xl border bg-white px-4 py-2 shadow-sm">
+          <span className="text-xs text-muted-foreground">
             最近刷新：{updatedAt ? formatDateTime(updatedAt) : "尚未刷新"}
           </span>
           <Button
@@ -196,19 +189,6 @@ function PageHeader({
             />
             立即刷新
           </Button>
-          <Button
-            asChild
-            variant="outline"
-            size="sm"
-            className="border-white/30 bg-transparent text-white hover:bg-white/10 hover:text-white"
-          >
-            <Link to="/app/admin/managed-attendance">
-              <CalendarCog className="mr-2 size-4" />
-              托管配置
-            </Link>
-          </Button>
-        </div>
-      </div>
     </section>
   );
 }

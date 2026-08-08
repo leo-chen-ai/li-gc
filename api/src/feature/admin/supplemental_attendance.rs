@@ -82,12 +82,11 @@ async fn fetch_items(
             FROM construction_managed_attendance_records r
             JOIN construction_projects p ON p.id = r.project_id AND p.is_deleted = FALSE
             JOIN construction_managed_attendance_configs c ON c.id = r.config_id
-            LEFT JOIN construction_attendance_devices d
-              ON d.id = c.attendance_device_id AND d.is_deleted = FALSE
             LEFT JOIN device_dispatch_jobs j
               ON j.managed_attendance_record_id = r.id
-             AND j.attendance_device_id = d.id
              AND j.job_type = 'supplemental_attendance'
+            LEFT JOIN construction_attendance_devices d
+              ON d.id = j.attendance_device_id AND d.is_deleted = FALSE
             WHERE r.is_deleted = FALSE
         "#,
     );
@@ -139,12 +138,11 @@ async fn fetch_summary(
         FROM construction_managed_attendance_records r
         JOIN construction_projects p ON p.id = r.project_id AND p.is_deleted = FALSE
         JOIN construction_managed_attendance_configs c ON c.id = r.config_id
-        LEFT JOIN construction_attendance_devices d
-          ON d.id = c.attendance_device_id AND d.is_deleted = FALSE
         LEFT JOIN device_dispatch_jobs j
           ON j.managed_attendance_record_id = r.id
-         AND j.attendance_device_id = d.id
          AND j.job_type = 'supplemental_attendance'
+        LEFT JOIN construction_attendance_devices d
+          ON d.id = j.attendance_device_id AND d.is_deleted = FALSE
         WHERE r.is_deleted = FALSE
         "#,
     );
@@ -163,12 +161,11 @@ fn base_count_query() -> QueryBuilder<'static, Postgres> {
         FROM construction_managed_attendance_records r
         JOIN construction_projects p ON p.id = r.project_id AND p.is_deleted = FALSE
         JOIN construction_managed_attendance_configs c ON c.id = r.config_id
-        LEFT JOIN construction_attendance_devices d
-          ON d.id = c.attendance_device_id AND d.is_deleted = FALSE
         LEFT JOIN device_dispatch_jobs j
           ON j.managed_attendance_record_id = r.id
-         AND j.attendance_device_id = d.id
          AND j.job_type = 'supplemental_attendance'
+        LEFT JOIN construction_attendance_devices d
+          ON d.id = j.attendance_device_id AND d.is_deleted = FALSE
         WHERE r.is_deleted = FALSE
         "#,
     )
