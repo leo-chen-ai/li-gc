@@ -320,8 +320,8 @@ async fn report_forward_config_secrets_and_run_guards_work() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{run_list}");
-    assert_eq!(run_list["data"]["items"][0]["reported_success_count"], 2);
-    assert_eq!(run_list["data"]["items"][0]["skipped_count"], 2);
+    assert_eq!(run_list["data"]["items"][0]["reported_success_count"], 1);
+    assert_eq!(run_list["data"]["items"][0]["skipped_count"], 3);
     assert_eq!(run_list["data"]["items"][0]["already_reported_count"], 1);
     assert_eq!(run_list["data"]["items"][0]["record_time_skipped_count"], 1);
     assert_eq!(run_list["data"]["items"][0]["other_skipped_count"], 1);
@@ -343,10 +343,10 @@ async fn report_forward_config_secrets_and_run_guards_work() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{result}");
-    assert_eq!(result["data"]["total"], 2);
+    assert_eq!(result["data"]["total"], 1);
     assert_eq!(result["data"]["counts"]["all"], 4);
-    assert_eq!(result["data"]["counts"]["success"], 2);
-    assert_eq!(result["data"]["counts"]["failed"], 1);
+    assert_eq!(result["data"]["counts"]["success"], 1);
+    assert_eq!(result["data"]["counts"]["failed"], 2);
     assert_eq!(result["data"]["counts"]["unknown"], 1);
     assert_eq!(result["data"]["items"][0]["person_name"], "成功人员");
     assert_eq!(

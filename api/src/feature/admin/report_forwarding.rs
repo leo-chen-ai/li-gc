@@ -445,15 +445,15 @@ pub async fn list_runs(State(state): State<AppState>, uri: Uri) -> ApiResult<Val
                        r.options->>'data_time_to_beijing',
                        TO_CHAR((r.created_at AT TIME ZONE 'Asia/Shanghai')::date, 'YYYY-MM-DD')
                    ) AS data_time_to_beijing,
-                   (r.success_count + LEAST(r.failure_count, result_counts.already_skipped_count))::int AS reported_success_count,
-                   GREATEST(r.failure_count - result_counts.already_skipped_count, 0)::int AS skipped_count,
+                   r.success_count::int AS reported_success_count,
+                   r.failure_count::int AS skipped_count,
                    result_counts.already_reported_count::int AS already_reported_count,
                    LEAST(
                        result_counts.record_time_count,
-                       GREATEST(r.failure_count - result_counts.already_skipped_count, 0)
+                       r.failure_count
                    )::int AS record_time_skipped_count,
                    GREATEST(
-                       r.failure_count - result_counts.already_skipped_count - result_counts.record_time_count,
+                       r.failure_count - result_counts.already_reported_count - result_counts.record_time_count,
                        0
                    )::int AS other_skipped_count,
                    (SELECT COUNT(*)::int FROM report_forward_events e WHERE e.run_id=r.id) AS event_count,
@@ -477,13 +477,6 @@ pub async fn list_runs(State(state): State<AppState>, uri: Uri) -> ApiResult<Val
                         WHERE COALESCE(i.target_result->>'already_exists', 'false') = 'true'
                            OR COALESCE(i.last_error, '') ~ '(已存在|已经存在|已备案|重复参保|重复申报|已报送|已上报|已经上报)'
                     )::int AS already_reported_count,
-                    COUNT(*) FILTER (
-                        WHERE i.status NOT IN ('submitted', 'validated')
-                          AND (
-                              COALESCE(i.target_result->>'already_exists', 'false') = 'true'
-                              OR COALESCE(i.last_error, '') ~ '(已存在|已经存在|已备案|重复参保|重复申报|已报送|已上报|已经上报)'
-                          )
-                    )::int AS already_skipped_count,
                     COUNT(*) FILTER (
                         WHERE NOT (
                             COALESCE(i.target_result->>'already_exists', 'false') = 'true'
@@ -635,10 +628,10 @@ pub async fn list_items(State(state): State<AppState>, uri: Uri) -> ApiResult<Va
            WHERE run_id=$1 AND ($2='%%' OR person_name ILIKE $2)
              AND ($3::text IS NULL OR status=$3)
              AND ($4::text IS NULL OR CASE
-                    WHEN status IN ('submitted','validated')
-                      OR COALESCE(target_result->>'already_exists', 'false') = 'true'
-                      OR COALESCE(last_error, '') ~ '(已存在|已经存在|已备案|重复参保|重复申报|已报送|已上报|已经上报)' THEN 'success'
-                    WHEN status IN ('failed','submitted_with_errors','validated_with_errors') THEN 'failed'
+                    WHEN COALESCE(target_result->>'already_exists', 'false') = 'true'
+                      OR COALESCE(last_error, '') ~ '(已存在|已经存在|已备案|重复参保|重复申报|已报送|已上报|已经上报)'
+                      OR status IN ('failed','submitted_with_errors','validated_with_errors') THEN 'failed'
+                    WHEN status IN ('submitted','validated') THEN 'success'
                     ELSE 'unknown' END=$4)"#,
     )
     .bind(run_id)
@@ -652,14 +645,12 @@ pub async fn list_items(State(state): State<AppState>, uri: Uri) -> ApiResult<Va
         r#"SELECT jsonb_build_object(
               'all', COUNT(*)::int,
               'success', COUNT(*) FILTER (WHERE status IN ('submitted','validated')
-                  OR COALESCE(target_result->>'already_exists', 'false') = 'true'
-                  OR COALESCE(last_error, '') ~ '(已存在|已经存在|已备案|重复参保|重复申报|已报送|已上报|已经上报)')::int,
-              'failed', COUNT(*) FILTER (WHERE status IN ('failed','submitted_with_errors','validated_with_errors')
                   AND COALESCE(target_result->>'already_exists', 'false') <> 'true'
                   AND COALESCE(last_error, '') !~ '(已存在|已经存在|已备案|重复参保|重复申报|已报送|已上报|已经上报)')::int,
-              'unknown', COUNT(*) FILTER (WHERE status NOT IN ('submitted','validated','failed','submitted_with_errors','validated_with_errors')
-                  AND COALESCE(target_result->>'already_exists', 'false') <> 'true'
-                  AND COALESCE(last_error, '') !~ '(已存在|已经存在|已备案|重复参保|重复申报|已报送|已上报|已经上报)')::int)
+              'failed', COUNT(*) FILTER (WHERE COALESCE(target_result->>'already_exists', 'false') = 'true'
+                  OR COALESCE(last_error, '') ~ '(已存在|已经存在|已备案|重复参保|重复申报|已报送|已上报|已经上报)'
+                  OR status IN ('failed','submitted_with_errors','validated_with_errors'))::int,
+              'unknown', COUNT(*) FILTER (WHERE status NOT IN ('submitted','validated','failed','submitted_with_errors','validated_with_errors'))::int)
            FROM report_forward_items WHERE run_id=$1"#,
     )
     .bind(run_id).fetch_one(state.db.pool()).await.map_err(db_error)?;
@@ -685,10 +676,10 @@ pub async fn list_items(State(state): State<AppState>, uri: Uri) -> ApiResult<Va
             ) sensitive ON TRUE
             WHERE i.run_id=$1 AND ($2='%%' OR i.person_name ILIKE $2) AND ($3::text IS NULL OR i.status=$3)
               AND ($5::text IS NULL OR CASE
-                     WHEN i.status IN ('submitted','validated')
-                       OR COALESCE(i.target_result->>'already_exists', 'false') = 'true'
-                       OR COALESCE(i.last_error, '') ~ '(已存在|已经存在|已备案|重复参保|重复申报|已报送|已上报|已经上报)' THEN 'success'
-                     WHEN i.status IN ('failed','submitted_with_errors','validated_with_errors') THEN 'failed'
+                     WHEN COALESCE(i.target_result->>'already_exists', 'false') = 'true'
+                       OR COALESCE(i.last_error, '') ~ '(已存在|已经存在|已备案|重复参保|重复申报|已报送|已上报|已经上报)'
+                       OR i.status IN ('failed','submitted_with_errors','validated_with_errors') THEN 'failed'
+                     WHEN i.status IN ('submitted','validated') THEN 'success'
                      ELSE 'unknown' END=$5)
             ORDER BY i.created_at, i.source_row_no LIMIT $6 OFFSET $7
         ) rows
@@ -733,10 +724,10 @@ pub async fn export_items(
         WHERE i.run_id=$1 AND ($2='%%' OR i.person_name ILIKE $2)
           AND ($3::text IS NULL OR i.status=$3)
           AND ($4::text IS NULL OR CASE
-                 WHEN i.status IN ('submitted','validated')
-                   OR COALESCE(i.target_result->>'already_exists', 'false') = 'true'
-                   OR COALESCE(i.last_error, '') ~ '(已存在|已经存在|已备案|重复参保|重复申报|已报送|已上报|已经上报)' THEN 'success'
-                 WHEN i.status IN ('failed','submitted_with_errors','validated_with_errors') THEN 'failed'
+                 WHEN COALESCE(i.target_result->>'already_exists', 'false') = 'true'
+                   OR COALESCE(i.last_error, '') ~ '(已存在|已经存在|已备案|重复参保|重复申报|已报送|已上报|已经上报)'
+                   OR i.status IN ('failed','submitted_with_errors','validated_with_errors') THEN 'failed'
+                 WHEN i.status IN ('submitted','validated') THEN 'success'
                  ELSE 'unknown' END=$4)
         ORDER BY p.created_at, i.created_at, i.source_row_no
         "#,
@@ -1043,15 +1034,15 @@ async fn fetch_run(pool: &sqlx::PgPool, id: Uuid) -> Result<Value, ApiError> {
                     r.options->>'data_time_to_beijing',
                     TO_CHAR((r.created_at AT TIME ZONE 'Asia/Shanghai')::date, 'YYYY-MM-DD')
                 ),
-                'reported_success_count', r.success_count + LEAST(r.failure_count, result_counts.already_skipped_count),
-                'skipped_count', GREATEST(r.failure_count - result_counts.already_skipped_count, 0),
+                'reported_success_count', r.success_count,
+                'skipped_count', r.failure_count,
                 'already_reported_count', result_counts.already_reported_count,
                 'record_time_skipped_count', LEAST(
                     result_counts.record_time_count,
-                    GREATEST(r.failure_count - result_counts.already_skipped_count, 0)
+                    r.failure_count
                 ),
                 'other_skipped_count', GREATEST(
-                    r.failure_count - result_counts.already_skipped_count - result_counts.record_time_count,
+                    r.failure_count - result_counts.already_reported_count - result_counts.record_time_count,
                     0
                 ),
                 'projects', COALESCE((SELECT jsonb_agg(to_jsonb(p) ORDER BY p.created_at) FROM report_forward_run_projects p WHERE p.run_id=r.id), '[]'::jsonb),
@@ -1066,13 +1057,6 @@ async fn fetch_run(pool: &sqlx::PgPool, id: Uuid) -> Result<Value, ApiError> {
                     WHERE COALESCE(i.target_result->>'already_exists', 'false') = 'true'
                        OR COALESCE(i.last_error, '') ~ '(已存在|已经存在|已备案|重复参保|重复申报|已报送|已上报|已经上报)'
                 )::int AS already_reported_count,
-                COUNT(*) FILTER (
-                    WHERE i.status NOT IN ('submitted', 'validated')
-                      AND (
-                          COALESCE(i.target_result->>'already_exists', 'false') = 'true'
-                          OR COALESCE(i.last_error, '') ~ '(已存在|已经存在|已备案|重复参保|重复申报|已报送|已上报|已经上报)'
-                      )
-                )::int AS already_skipped_count,
                 COUNT(*) FILTER (
                     WHERE NOT (
                         COALESCE(i.target_result->>'already_exists', 'false') = 'true'

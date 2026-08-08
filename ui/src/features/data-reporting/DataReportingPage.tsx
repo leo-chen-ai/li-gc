@@ -274,8 +274,7 @@ function RunsTable({ rows, loading, onDetail, onCancel, onRetry }: { rows: Repor
 function RunResultSummary({ run }: { run: ReportRun }) {
   const success = run.reported_success_count ?? run.success_count;
   const skipped = run.skipped_count ?? run.failure_count;
-  const alreadyReported = run.already_reported_count ?? 0;
-  return <div className="space-y-1 text-sm"><div><span className="font-medium text-emerald-700">成功 {success} 条</span><span className="ml-3 font-medium text-amber-700">跳过 {skipped} 条</span></div>{(alreadyReported > 0 || skipped > 0) && <div className="text-xs leading-5 text-slate-500">成功中已上报/已存在 {alreadyReported} 条 · 跳过中备案/进场时间不符 {run.record_time_skipped_count ?? 0} 条 · 其他 {run.other_skipped_count ?? skipped} 条</div>}</div>;
+  return <div className="space-y-1 text-sm"><div><span className="font-medium text-emerald-700">成功 {success} 条</span><span className="ml-3 font-medium text-amber-700">跳过 {skipped} 条</span></div>{skipped > 0 && <div className="text-xs leading-5 text-slate-500">已上报/已存在 {run.already_reported_count ?? 0} 条 · 备案/进场时间不符 {run.record_time_skipped_count ?? 0} 条 · 其他 {run.other_skipped_count ?? skipped} 条</div>}</div>;
 }
 
 function DataPanel({ runs, runId, onRun, result, loading, page, onPage, outcome, onOutcome, onExport }: { runs: ReportRun[]; runId: string; onRun: (id: string) => void; result?: Awaited<ReturnType<typeof reportService.items>>; loading: boolean; page: number; onPage: (page: number) => void; outcome: ResultOutcome; onOutcome: (value: ResultOutcome) => void; onExport: () => void }) {
