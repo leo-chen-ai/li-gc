@@ -119,6 +119,9 @@ export function useUpdateManagedAttendanceConfigMutation() {
       queryClient.invalidateQueries({
         queryKey: managedAttendanceKeys.recordsRoot(),
       });
+      queryClient.invalidateQueries({
+        queryKey: ["supplemental-attendance"],
+      });
     },
   });
 }

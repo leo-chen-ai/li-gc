@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { ManagedAttendancePage } from "@/features/managed-attendance/components/ManagedAttendancePage";
+import { AttendanceHostingPage } from "@/features/attendance-hosting/components/AttendanceHostingPage";
 
 export const Route = createFileRoute("/app/admin/managed-attendance")({
-  component: ManagedAttendancePage,
+  component: () => <AttendanceHostingPage initialView="settings" />,
 });

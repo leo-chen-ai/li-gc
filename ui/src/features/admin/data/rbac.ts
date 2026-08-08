@@ -164,17 +164,17 @@ export const menuPermissions: MenuPermission[] = [
   },
   {
     key: "managed_attendance",
-    name: "自动托管",
+    name: "考勤托管（配置）",
     group: "劳务管理",
     path: "/app/admin/managed-attendance",
     description: "维护托管配置、照片组和月度托管数据",
   },
   {
     key: "supplemental_attendance",
-    name: "补考勤",
+    name: "考勤托管",
     group: "劳务管理",
     path: "/app/admin/supplemental-attendance",
-    description: "查看补考勤从平台发送到考勤机返回的全链路状态",
+    description: "查看托管考勤从生成、发送到考勤机回执的全链路状态",
   },
   {
     key: "environment_monitoring",

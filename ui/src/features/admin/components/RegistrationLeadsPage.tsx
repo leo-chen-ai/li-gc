@@ -17,18 +17,11 @@ export function RegistrationLeadsPage() {
 
   return (
     <div className="space-y-3">
-      <section className="rounded-xl border bg-white px-4 py-3 shadow-sm dark:bg-card">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <div className="text-xs font-medium text-[#0f6b5d]">系统 / 注册列表</div>
-            <h1 className="mt-1 text-xl font-semibold tracking-normal">注册列表</h1>
-            <p className="mt-1 text-sm text-muted-foreground">查看登录页提交的用户名、姓名和手机号。</p>
-          </div>
+      <section className="flex justify-end rounded-xl border bg-white p-2 shadow-sm dark:bg-card">
           <Button variant="outline" size="sm" onClick={() => void leads.refetch()} disabled={leads.isFetching}>
             <RefreshCw className={`mr-2 size-4 ${leads.isFetching ? "animate-spin" : ""}`} />
             刷新
           </Button>
-        </div>
       </section>
 
       <Card className="rounded-xl shadow-sm">

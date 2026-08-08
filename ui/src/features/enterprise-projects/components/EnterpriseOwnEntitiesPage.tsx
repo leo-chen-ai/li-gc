@@ -181,10 +181,7 @@ export function EnterpriseOwnEntitiesPage() {
     <div className="space-y-4 text-slate-950">
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div className="text-xs font-medium text-[#0f6b5d]">企业经营模块</div>
-            <h1 className="mt-1 text-xl font-semibold tracking-normal">我方主体管理</h1>
-          </div>
+          <div />
           <div className="flex gap-2">
             <Button variant="outline" disabled={exporting} onClick={exportEntities}>
               <Download className="mr-2 size-4" />

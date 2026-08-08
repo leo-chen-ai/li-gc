@@ -593,7 +593,7 @@ async fn b_vendor_photo_upload_persists_business_attendance_and_is_idempotent() 
         r#"
         INSERT INTO construction_attendance_devices (
             project_id, device_type, serial_number, direction
-        ) VALUES ($1, '弹厂家', '123', 0)
+        ) VALUES ($1, '弹厂家', '123', 1)
         RETURNING id
         "#,
     )
@@ -652,7 +652,8 @@ async fn b_vendor_photo_upload_persists_business_attendance_and_is_idempotent() 
     .unwrap();
     assert_eq!(record.0, worker_id);
     assert_eq!(record.1, project_id);
-    assert_eq!(record.2, 0);
+    // The platform binding is authoritative even when the vendor payload says `in`.
+    assert_eq!(record.2, 1);
     assert_eq!(record.3, format!("b-photo:{time_millis}"));
     assert_eq!(record.4.as_deref(), Some(path));
 

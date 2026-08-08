@@ -69,12 +69,7 @@ export function ApiKeysManagement() {
   return (
     <TooltipProvider>
       <div className="space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">API Keys</h1>
-            <p className="text-muted-foreground">Manage API access keys for external integrations</p>
-          </div>
+        <div className="flex items-center justify-end rounded-xl border bg-white px-4 py-2 shadow-sm">
           <div className="flex items-center gap-2">
             <Button variant="outline" asChild>
               <Link to="/app/admin/projects">返回项目列表</Link>

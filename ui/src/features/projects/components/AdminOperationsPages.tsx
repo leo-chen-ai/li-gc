@@ -2,7 +2,6 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import {
   Activity,
   AlertTriangle,
-  BarChart3,
   BriefcaseBusiness,
   Building2,
   CalendarDays,
@@ -88,6 +87,7 @@ import {
   XINLEDA_PLATFORM_TYPE,
   YONGXIN_V2_PLATFORM_NAME,
   YONGXIN_V2_PLATFORM_TYPE,
+  YONGXIN_V2_DEFAULT_BASE_URL,
   buildNingboHousingConfig,
   buildXinledaConfig,
   buildYongxinV2Config,
@@ -161,25 +161,13 @@ export function AdminOverviewPage() {
   return (
     <div className="space-y-3">
       <section className="rounded-xl border bg-white px-4 py-3 shadow-sm">
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-          <div className="min-w-0">
-            <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">
-              <BarChart3 className="size-3.5" />
-              首页总览 / 经营数据
-            </div>
-            <div className="mt-2 flex flex-wrap items-end gap-x-4 gap-y-1">
-              <h1 className="text-xl font-semibold tracking-normal text-slate-950">经营数据总览</h1>
-              <p className="text-sm text-slate-500">按项目、劳务、工资、考勤和平台对接汇总经营健康度。</p>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+        <div className="flex flex-wrap items-center justify-end gap-2 text-xs text-slate-500">
             <span className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-2.5 py-1"><CalendarDays className="size-3.5" />7 日考勤 {metrics.attendance.sevenDayCount} 次</span>
             <span className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-2.5 py-1"><TrendingUp className="size-3.5" />工资发放率 {formatOverviewPercent(metrics.wage.paidRate)}</span>
             <Button variant="outline" size="sm" onClick={() => void overview.refetch()} disabled={overview.isFetching}>
               <RefreshCw className={`mr-2 size-4 ${overview.isFetching ? "animate-spin" : ""}`} />
               刷新
             </Button>
-          </div>
         </div>
       </section>
 
@@ -670,6 +658,8 @@ function PlatformConfigPanel({ filters, setFilters, tabControls }: { filters: Co
       platform_type,
       base_url: platform_type === NINGBO_HOUSING_PLATFORM_TYPE
         ? NINGBO_HOUSING_DEFAULT_BASE_URL
+        : platform_type === YONGXIN_V2_PLATFORM_TYPE
+          ? YONGXIN_V2_DEFAULT_BASE_URL
         : platform_type === XINLEDA_PLATFORM_TYPE
           ? XINLEDA_DEFAULT_BASE_URL
           : "",
@@ -801,34 +791,13 @@ function PlatformConfigPanel({ filters, setFilters, tabControls }: { filters: Co
                 <section className="rounded-lg border p-4">
                   <div className="mb-4">
                     <div className="text-sm font-semibold text-slate-900">接口凭证</div>
-                    <div className="mt-1 text-xs text-slate-500">凭证由甬薪精管平台提供。测试模式只生成异步任务和日志，不发起真实请求。</div>
+                    <div className="mt-1 text-xs text-slate-500">填写甬薪提供的项目对接码、AppKey 和 AppSecret，保存启用后自动同步全部业务数据。</div>
                   </div>
                   <div className="grid gap-4 md:grid-cols-2">
-                    <PlatformCredentialField className="md:col-span-2" label="接口地址" value={form.base_url} onChange={(base_url) => setForm((current) => ({ ...current, base_url }))} placeholder="https://平台提供的接口地址/" />
+                    <PlatformCredentialField className="md:col-span-2" label="接口地址" value={form.base_url} onChange={(base_url) => setForm((current) => ({ ...current, base_url }))} placeholder={YONGXIN_V2_DEFAULT_BASE_URL} />
                     <PlatformCredentialField label="项目对接码" value={form.project_code} onChange={(project_code) => setForm((current) => ({ ...current, project_code }))} autoComplete="off" />
-                    <div className="space-y-2">
-                      <Label>运行模式</Label>
-                      <select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={form.mode} onChange={(event) => setForm((current) => ({ ...current, mode: event.target.value as "test" | "production" }))}>
-                        <option value="test">测试模式（不发真实请求）</option>
-                        <option value="production">正式模式（自动推送）</option>
-                      </select>
-                    </div>
                     <PlatformCredentialField label="AppKey" value={form.app_key} onChange={(app_key) => setForm((current) => ({ ...current, app_key }))} autoComplete="off" />
                     <PlatformCredentialField label="AppSecret" value={form.app_secret} onChange={(app_secret) => setForm((current) => ({ ...current, app_secret }))} type="password" autoComplete="new-password" />
-                  </div>
-                </section>
-
-                <section className="rounded-lg border p-4">
-                  <div className="mb-4">
-                    <div className="text-sm font-semibold text-slate-900">异步同步范围</div>
-                    <div className="mt-1 text-xs text-slate-500">每个平台单独排队、限流、重试和记录日志；一个平台失败不会影响本地业务或其他平台。</div>
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <CheckboxField label="同步参建单位" checked={form.sync_units} onChange={(sync_units) => setForm((current) => ({ ...current, sync_units }))} />
-                    <CheckboxField label="同步班组" checked={form.sync_teams} onChange={(sync_teams) => setForm((current) => ({ ...current, sync_teams }))} />
-                    <CheckboxField label="同步人员与进退场" checked={form.sync_workers} onChange={(sync_workers) => setForm((current) => ({ ...current, sync_workers }))} />
-                    <CheckboxField label="考勤机数据自动推送" checked={form.sync_attendance} onChange={(sync_attendance) => setForm((current) => ({ ...current, sync_attendance }))} />
-                    <PlatformCredentialField className="md:col-span-2" label="历史考勤补传起始日期（留空则从启用时开始）" value={form.attendance_backfill_from} onChange={(attendance_backfill_from) => setForm((current) => ({ ...current, attendance_backfill_from }))} type="date" required={false} />
                   </div>
                 </section>
               </> : null}
@@ -1086,7 +1055,8 @@ function EmptyOverviewState({ icon: Icon, label, helper }: { icon: LucideIcon; l
 }
 
 function PageHeader({ icon, label, title, description, action }: { icon: ReactNode; label: string; title: string; description: string; action?: ReactNode }) {
-  return <section className="rounded-xl border bg-white p-5 shadow-sm"><div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between"><div><div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">{icon}{label}</div><h1 className="mt-3 text-2xl font-semibold tracking-normal">{title}</h1><p className="mt-1 text-sm text-muted-foreground">{description}</p></div>{action}</div></section>;
+  void icon; void label; void title; void description;
+  return action ? <div className="flex justify-end rounded-xl border bg-white p-3 shadow-sm">{action}</div> : null;
 }
 
 function MetricCell({ label, value, helper }: { label: string; value: number | string; helper: string }) {

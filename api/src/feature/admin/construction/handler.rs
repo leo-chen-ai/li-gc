@@ -7449,9 +7449,12 @@ pub async fn delete_attendance_device(
         SET dispatch_status = 'skipped',
             dispatch_message = '目标考勤设备已删除',
             updated_at = NOW()
-        FROM construction_managed_attendance_configs c
-        WHERE r.config_id = c.id
-          AND c.attendance_device_id = $1
+        WHERE EXISTS (
+              SELECT 1 FROM device_dispatch_jobs target_job
+              WHERE target_job.managed_attendance_record_id = r.id
+                AND target_job.attendance_device_id = $1
+                AND target_job.job_type = 'supplemental_attendance'
+          )
           AND r.dispatch_status <> 'success'
           AND EXISTS (
               SELECT 1
@@ -7699,8 +7702,11 @@ pub async fn delete_managed_attendance_photo_group(
 
 pub async fn create_managed_attendance_config(
     State(state): State<AppState>,
-    TrimmedJson(body): TrimmedJson<Value>,
+    TrimmedJson(mut body): TrimmedJson<Value>,
 ) -> ApiResult<Value> {
+    if let Some(object) = body.as_object_mut() {
+        object.remove("attendance_device_id");
+    }
     validate_managed_attendance_config_body(state.db.pool(), &body).await?;
     let created = create_row(
         state.db.pool(),
@@ -7744,8 +7750,11 @@ pub async fn get_managed_attendance_config(
 pub async fn update_managed_attendance_config(
     State(state): State<AppState>,
     Path(config_id): Path<Uuid>,
-    TrimmedJson(body): TrimmedJson<Value>,
+    TrimmedJson(mut body): TrimmedJson<Value>,
 ) -> ApiResult<Value> {
+    if let Some(object) = body.as_object_mut() {
+        object.remove("attendance_device_id");
+    }
     validate_managed_attendance_config_patch(state.db.pool(), config_id, &body).await?;
     update_row(
         state.db.pool(),
@@ -7758,7 +7767,7 @@ pub async fn update_managed_attendance_config(
     retire_ineligible_managed_dispatch_jobs(
         state.db.pool(),
         config_id,
-        "托管配置已停用或改用其他目标设备",
+        "托管配置已停用",
     )
     .await?;
     let row = fetch_managed_attendance_config(state.db.pool(), config_id).await?;
@@ -7769,13 +7778,56 @@ pub async fn delete_managed_attendance_config(
     State(state): State<AppState>,
     Path(config_id): Path<Uuid>,
 ) -> ApiResult<()> {
-    soft_delete_row(
-        state.db.pool(),
-        "construction_managed_attendance_configs",
-        &[("id", config_id)],
+    let mut tx = state.db.pool().begin().await.map_err(db_error)?;
+    let deleted = sqlx::query(
+        r#"
+        UPDATE construction_managed_attendance_configs
+        SET is_deleted = TRUE, is_enabled = FALSE, deleted_at = NOW(), updated_at = NOW()
+        WHERE id = $1 AND is_deleted = FALSE
+        "#,
     )
-    .await?;
-    retire_ineligible_managed_dispatch_jobs(state.db.pool(), config_id, "托管配置已删除").await?;
+    .bind(config_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(db_error)?;
+    if deleted.rows_affected() == 0 {
+        return Err(not_found());
+    }
+    sqlx::query(
+        r#"
+        UPDATE device_dispatch_jobs j
+        SET status = 'skipped',
+            last_error = '托管配置已删除',
+            locked_by = NULL,
+            locked_until = NULL,
+            updated_at = NOW()
+        FROM construction_managed_attendance_records r
+        WHERE r.id = j.managed_attendance_record_id
+          AND r.config_id = $1
+          AND j.job_type = 'supplemental_attendance'
+          AND j.status IN ('pending', 'processing')
+        "#,
+    )
+    .bind(config_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(db_error)?;
+    sqlx::query(
+        r#"
+        UPDATE construction_managed_attendance_records
+        SET is_deleted = TRUE,
+            deleted_at = NOW(),
+            dispatch_status = CASE WHEN dispatch_status = 'success' THEN dispatch_status ELSE 'skipped' END,
+            dispatch_message = CASE WHEN dispatch_status = 'success' THEN dispatch_message ELSE '托管配置已删除' END,
+            updated_at = NOW()
+        WHERE config_id = $1 AND is_deleted = FALSE
+        "#,
+    )
+    .bind(config_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(db_error)?;
+    tx.commit().await.map_err(db_error)?;
     Ok(ApiSuccess::default())
 }
 
@@ -7800,11 +7852,7 @@ async fn retire_ineligible_managed_dispatch_jobs(
           AND j.job_type = 'supplemental_attendance'
           AND j.device_result_status <> 'success'
           AND j.status = 'pending'
-          AND (
-              c.is_deleted = TRUE
-              OR c.is_enabled = FALSE
-              OR c.attendance_device_id IS DISTINCT FROM j.attendance_device_id
-          )
+          AND (c.is_deleted = TRUE OR c.is_enabled = FALSE)
         "#,
     )
     .bind(config_id)
@@ -7829,18 +7877,7 @@ async fn retire_ineligible_managed_dispatch_jobs(
                 AND j.job_type = 'supplemental_attendance'
                 AND j.status = 'skipped'
           )
-          AND (
-              c.is_deleted = TRUE
-              OR c.is_enabled = FALSE
-              OR EXISTS (
-                  SELECT 1
-                  FROM device_dispatch_jobs j
-                  WHERE j.managed_attendance_record_id = r.id
-                    AND j.job_type = 'supplemental_attendance'
-                    AND j.attendance_device_id IS DISTINCT FROM c.attendance_device_id
-                    AND j.status = 'skipped'
-              )
-          )
+          AND (c.is_deleted = TRUE OR c.is_enabled = FALSE)
         "#,
     )
     .bind(config_id)
@@ -11167,9 +11204,6 @@ pub(crate) async fn generate_managed_records_for_month(
             c.check_in_time,
             c.check_out_time,
             c.is_enabled,
-            d.id AS target_device_id,
-            d.device_type AS target_device_type,
-            d.serial_number AS target_device_serial_number,
             w.name AS worker_name,
             w.id_card AS worker_id_card,
             g.in_photos,
@@ -11178,10 +11212,6 @@ pub(crate) async fn generate_managed_records_for_month(
         JOIN construction_workers w ON w.id = c.worker_id AND w.is_deleted = FALSE
         LEFT JOIN construction_managed_attendance_photo_groups g
             ON g.id = c.photo_group_id AND g.is_deleted = FALSE
-        LEFT JOIN construction_attendance_devices d
-            ON d.id = c.attendance_device_id
-           AND d.project_id = c.project_id
-           AND d.is_deleted = FALSE
         WHERE c.id = $1 AND c.is_deleted = FALSE
         "#,
     )
@@ -11207,10 +11237,6 @@ pub(crate) async fn generate_managed_records_for_month(
     let worker_id_card: Option<String> = row.try_get("worker_id_card").ok();
     let in_photos: Option<Value> = row.try_get("in_photos").ok();
     let out_photos: Option<Value> = row.try_get("out_photos").ok();
-    let target_device_id: Option<Uuid> = row.try_get("target_device_id").ok();
-    let target_device_type: Option<String> = row.try_get("target_device_type").ok();
-    let target_device_serial_number: Option<String> =
-        row.try_get("target_device_serial_number").ok();
     let worker_id_card_mask = worker_id_card.as_deref().map(mask_id_card);
     let in_time = parse_managed_time("check_in_time", &check_in_time)?;
     let out_time = parse_managed_time("check_out_time", &check_out_time)?;
@@ -11369,20 +11395,64 @@ pub(crate) async fn generate_managed_records_for_month(
             .await
             .map_err(db_error)?;
 
-            synchronize_managed_dispatch_job(
-                &mut tx,
-                managed_attendance_record_id,
-                project_id,
-                worker_id,
-                worker_name.as_deref().unwrap_or_default(),
-                direction,
-                planned_at,
-                photo_url.as_deref(),
-                target_device_id,
-                target_device_type.as_deref(),
-                target_device_serial_number.as_deref(),
+            let targets = sqlx::query_as::<_, (Uuid, String, Option<String>)>(
+                r#"
+                SELECT id, device_type, serial_number
+                FROM construction_attendance_devices
+                WHERE project_id = $1
+                  AND is_deleted = FALSE
+                  AND direction = CASE
+                      WHEN EXISTS (
+                          SELECT 1 FROM construction_attendance_devices exact
+                          WHERE exact.project_id = $1 AND exact.is_deleted = FALSE
+                            AND exact.direction = $2
+                      ) THEN $2
+                      ELSE 2
+                  END
+                ORDER BY device_name NULLS LAST, created_at, id
+                "#,
             )
-            .await?;
+            .bind(project_id)
+            .bind(direction)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(db_error)?;
+            let target_ids = targets.iter().map(|(id, _, _)| *id).collect::<Vec<_>>();
+            sqlx::query(
+                r#"
+                UPDATE device_dispatch_jobs
+                SET status = 'skipped',
+                    last_error = '设备方向不再匹配当前考勤记录',
+                    locked_by = NULL,
+                    locked_until = NULL,
+                    updated_at = NOW()
+                WHERE managed_attendance_record_id = $1
+                  AND job_type = 'supplemental_attendance'
+                  AND status = 'pending'
+                  AND NOT (attendance_device_id = ANY($2))
+                "#,
+            )
+            .bind(managed_attendance_record_id)
+            .bind(&target_ids)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_error)?;
+            if targets.is_empty() {
+                synchronize_managed_dispatch_job(
+                    &mut tx, managed_attendance_record_id, project_id, worker_id,
+                    worker_name.as_deref().unwrap_or_default(), direction, planned_at,
+                    photo_url.as_deref(), None, None, None,
+                ).await?;
+            } else {
+                for (device_id, device_type, serial_number) in targets {
+                    synchronize_managed_dispatch_job(
+                        &mut tx, managed_attendance_record_id, project_id, worker_id,
+                        worker_name.as_deref().unwrap_or_default(), direction, planned_at,
+                        photo_url.as_deref(), Some(device_id), Some(device_type.as_str()),
+                        serial_number.as_deref(),
+                    ).await?;
+                }
+            }
             generated_count += 1;
         }
     }
@@ -11415,7 +11485,7 @@ async fn synchronize_managed_dispatch_job(
             r#"
             UPDATE device_dispatch_jobs
             SET status = 'skipped',
-                last_error = '托管配置未分配目标设备',
+                last_error = '项目未配置匹配方向的考勤设备',
                 locked_by = NULL,
                 locked_until = NULL,
                 updated_at = NOW()
@@ -11433,7 +11503,7 @@ async fn synchronize_managed_dispatch_job(
             UPDATE construction_managed_attendance_records
             SET dispatch_status = 'skipped',
                 dispatched_at = NULL,
-                dispatch_message = '未配置目标考勤设备，未创建下发任务',
+                dispatch_message = '项目未配置匹配方向的考勤设备，未创建下发任务',
                 updated_at = NOW()
             WHERE id = $1
             "#,
@@ -11444,26 +11514,6 @@ async fn synchronize_managed_dispatch_job(
         .map_err(db_error)?;
         return Ok(());
     };
-
-    sqlx::query(
-        r#"
-        UPDATE device_dispatch_jobs
-        SET status = 'skipped',
-            last_error = '托管配置已改用其他目标设备',
-            locked_by = NULL,
-            locked_until = NULL,
-            updated_at = NOW()
-        WHERE managed_attendance_record_id = $1
-          AND attendance_device_id <> $2
-          AND job_type = 'supplemental_attendance'
-          AND status IN ('pending', 'processing')
-        "#,
-    )
-    .bind(managed_attendance_record_id)
-    .bind(attendance_device_id)
-    .execute(&mut **tx)
-    .await
-    .map_err(db_error)?;
 
     let device_type = target_device_type.unwrap_or("unknown");
     let supported = device_type == "B厂家";

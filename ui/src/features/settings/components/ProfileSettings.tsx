@@ -3,7 +3,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Separator } from "@/components/ui/separator";
 import { ImageUploadModal } from "./ImageUploadModal";
 import {
     AlertDialog,
@@ -168,15 +167,6 @@ export function ProfileSettings() {
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
-
-            <div>
-                <h2 className="text-2xl font-bold tracking-tight mb-2">个人资料</h2>
-                <p className="text-[15px] text-muted-foreground">
-                    这里的信息会用于后台账号展示和系统通知。
-                </p>
-            </div>
-
-            <Separator className="bg-border/40" />
 
             <form onSubmit={handleProfileSubmit} className="space-y-8 max-w-2xl">
                 {/* Avatar Section */}

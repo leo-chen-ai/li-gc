@@ -65,7 +65,7 @@ export type ManagedAttendanceConfig = ManagedAttendanceConfigLike & {
 export type ManagedAttendanceConfigPayload = {
   project_id: string;
   worker_id: string;
-  attendance_device_id: string | null;
+  attendance_device_id?: string | null;
   photo_group_id?: string | null;
   monthly_attendance_days: number;
   shift: ManagedAttendanceShift;

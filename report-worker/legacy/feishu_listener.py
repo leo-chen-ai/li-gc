@@ -90,7 +90,7 @@ def write_csv(code: str, sms_time: str | None, raw_message: str):
         writer.writerow([code, sms_time or '', raw_message, now_str])
 
 
-def get_latest_valid_code(csv_path=None, max_age_minutes=5):
+def get_latest_valid_code(csv_path=None, max_age_minutes=5, received_after=None):
     if csv_path is None:
         csv_path = CSV_PATH
 
@@ -118,6 +118,16 @@ def get_latest_valid_code(csv_path=None, max_age_minutes=5):
 
         received_at = datetime.strptime(received_at_str, '%Y-%m-%d %H:%M:%S')
         now = datetime.now()
+
+        # CSV timestamps have second precision. Allow one second of rounding,
+        # but never consume a delayed code that belongs to an earlier login.
+        if received_after and received_at.timestamp() < received_after.timestamp() - 1:
+            logger.debug(
+                "忽略本次短信请求之前的验证码 (接收时间: %s, 请求时间: %s)",
+                received_at_str,
+                received_after.strftime('%Y-%m-%d %H:%M:%S'),
+            )
+            return None
 
         age_seconds = abs((now - received_at).total_seconds())
         if age_seconds > max_age_minutes * 60:

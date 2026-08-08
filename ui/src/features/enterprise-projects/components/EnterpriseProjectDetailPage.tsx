@@ -120,15 +120,7 @@ export function EnterpriseProjectDetailPage({
 
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-xs font-medium text-[#0f6b5d]">企业经营模块</div>
-            <h1 className="mt-1 truncate text-xl font-semibold tracking-normal">
-              {projectQuery.data?.name ?? "往来单位关联项目详情"}
-            </h1>
-            <p className="mt-1 truncate text-sm text-slate-500">
-              {projectQuery.data?.customer_name || "未填写往来单位"} · 合同额 {formatCents(projectQuery.data?.contract_amount_cents)}
-            </p>
-          </div>
+          <div />
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             <Badge className={statusTone(projectQuery.data?.status)}>
               {statusLabel(projectQuery.data?.status)}

@@ -21,11 +21,6 @@ const videoPoints = [
 export function EnvironmentMonitoringPage() {
   return (
     <div className="space-y-3">
-      <section className="rounded-xl border bg-white px-4 py-3 shadow-sm dark:bg-card">
-        <div className="text-xs font-medium text-[#0f6b5d]">劳务管理 / 环境检测</div>
-        <h1 className="mt-1 text-xl font-semibold tracking-normal">环境检测</h1>
-        <p className="mt-1 text-sm text-muted-foreground">温湿度、风向、风速、颗粒物和噪声数据预览。</p>
-      </section>
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {environmentMetrics.map((item) => (
           <div key={item.label} className="rounded-xl border bg-white p-4 shadow-sm dark:bg-card">
@@ -49,11 +44,6 @@ export function EnvironmentMonitoringPage() {
 export function VideoMonitoringPage() {
   return (
     <div className="space-y-3">
-      <section className="rounded-xl border bg-white px-4 py-3 shadow-sm dark:bg-card">
-        <div className="text-xs font-medium text-[#0f6b5d]">劳务管理 / 视频监控</div>
-        <h1 className="mt-1 text-xl font-semibold tracking-normal">视频监控</h1>
-        <p className="mt-1 text-sm text-muted-foreground">施工现场监控点位预览，后续接入真实视频流。</p>
-      </section>
       <section className="grid gap-3 md:grid-cols-2">
         {videoPoints.map((point) => (
           <div key={point.name} className="overflow-hidden rounded-xl border bg-white shadow-sm dark:bg-card">

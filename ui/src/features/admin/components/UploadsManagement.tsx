@@ -57,19 +57,14 @@ export function UploadsManagement() {
   if (isError) {
     return (
       <div className="rounded-md border bg-background p-6">
-        <h1 className="text-2xl font-semibold">文件管理</h1>
-        <p className="mt-2 text-sm text-muted-foreground">上传记录加载失败，请稍后重试。</p>
+        <p className="text-sm text-muted-foreground">上传记录加载失败，请稍后重试。</p>
       </div>
     );
   }
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">文件管理</h1>
-          <p className="text-muted-foreground">查看项目、单位、班组、工人和考勤上传记录</p>
-        </div>
+      <div className="flex justify-end rounded-xl border bg-white px-4 py-2 shadow-sm">
         <Button variant="outline" onClick={() => void refetch()} disabled={isFetching}>
           <RefreshCw className={`mr-2 h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
           刷新

@@ -337,10 +337,9 @@ async fn download_attendance_jobs(
               ON r.id = j.managed_attendance_record_id
              AND r.is_deleted = FALSE
             JOIN construction_managed_attendance_configs c
-              ON c.id = r.config_id
+             ON c.id = r.config_id
              AND c.is_deleted = FALSE
              AND c.is_enabled = TRUE
-             AND c.attendance_device_id = j.attendance_device_id
             WHERE j.job_type = 'supplemental_attendance'
               AND j.adapter_code = 'vendor_b'
               AND j.transport = 'http_pull'
@@ -1519,14 +1518,17 @@ fn parse_attendance_direction(
     value: Option<&str>,
     device_direction: i16,
 ) -> Result<i16, VendorError> {
+    // Fixed device bindings are the platform's source of truth. Some vendor B
+    // devices always upload `in`, including devices configured as exits.
+    if matches!(device_direction, 0 | 1) {
+        return Ok(device_direction);
+    }
+
     let value = value.map(str::trim).filter(|value| !value.is_empty());
     match value.map(str::to_ascii_lowercase).as_deref() {
         Some("in" | "0") => Ok(0),
         Some("out" | "1") => Ok(1),
-        None => Ok(match device_direction {
-            1 => 1,
-            _ => 0,
-        }),
+        None => Ok(0),
         Some(_) => Err(photo_bad_request("direction只支持in或out")),
     }
 }
@@ -2082,6 +2084,18 @@ mod tests {
         assert_eq!(value["workerCode"], "ningbo-1");
         assert!(value.get("jhWorkerCode").is_some());
         assert_eq!(value["del"], "0");
+    }
+
+    #[test]
+    fn fixed_device_binding_overrides_vendor_attendance_direction() {
+        assert_eq!(parse_attendance_direction(Some("out"), 0).unwrap(), 0);
+        assert_eq!(parse_attendance_direction(Some("in"), 1).unwrap(), 1);
+    }
+
+    #[test]
+    fn generic_device_uses_vendor_attendance_direction() {
+        assert_eq!(parse_attendance_direction(Some("in"), 2).unwrap(), 0);
+        assert_eq!(parse_attendance_direction(Some("out"), 2).unwrap(), 1);
     }
 
     #[test]

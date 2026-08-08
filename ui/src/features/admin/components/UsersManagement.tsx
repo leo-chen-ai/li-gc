@@ -298,12 +298,7 @@ export function UsersManagement() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">用户管理</h1>
-          <p className="text-muted-foreground">维护后台账号、角色身份和登录权限</p>
-        </div>
+      <div className="flex items-center justify-end rounded-xl border bg-white px-4 py-2 shadow-sm">
         <div className="flex items-center gap-2">
           <Button onClick={() => setIsCreateOpen(true)} className="bg-[#0f6b5d] hover:bg-[#0b5a4f]">
             <Plus className="mr-2 h-4 w-4" />

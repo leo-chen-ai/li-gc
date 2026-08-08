@@ -27,6 +27,7 @@ LOGIN_URL = "http://tg.91jtg.com/#/login"
 MAX_CAPTCHA_RETRIES = 5
 PAGE_LOAD_TIMEOUT = 30
 DOWNLOAD_WAIT_TIMEOUT = 120
+LOGIN_RETRY_DELAYS = (2, 5, 10, 10, 10)
 
 
 def _normalized_project_name(value):
@@ -59,6 +60,43 @@ class Downloader:
         self.driver.implicitly_wait(5)
         self.wait = WebDriverWait(self.driver, 15)
         logger.info("Chromium 浏览器已启动")
+
+    def _wait_for_loading_mask(self, timeout=15):
+        try:
+            WebDriverWait(self.driver, timeout).until(
+                lambda driver: not any(
+                    element.is_displayed()
+                    for element in driver.find_elements(By.CSS_SELECTOR, ".el-loading-mask")
+                )
+            )
+            return True
+        except TimeoutException:
+            logger.warning("页面 loading 遮罩未在 %s 秒内消失", timeout)
+            return False
+
+    def _open_login_page(self):
+        try:
+            self.driver.get(LOGIN_URL)
+        except TimeoutException:
+            logger.warning("登录页加载超时，停止加载后刷新")
+            try:
+                self.driver.execute_script("window.stop();")
+            except Exception:
+                pass
+            try:
+                self.driver.refresh()
+            except TimeoutException:
+                try:
+                    self.driver.execute_script("window.stop();")
+                except Exception:
+                    pass
+        self._wait_for_loading_mask()
+
+    def _recover_login_page(self, attempt):
+        delay = LOGIN_RETRY_DELAYS[min(attempt, len(LOGIN_RETRY_DELAYS) - 1)]
+        logger.info("%s 秒后刷新登录页重试", delay)
+        time.sleep(delay)
+        self._open_login_page()
 
     def discover_projects(self):
         """Log in and read every source project without downloading files."""
@@ -122,13 +160,19 @@ class Downloader:
         if self._reuse_existing_session():
             return True
         logger.info(f"正在打开登录页面: {LOGIN_URL}")
-        self.driver.get(LOGIN_URL)
+        self._open_login_page()
         time.sleep(3)
 
         for attempt in range(MAX_CAPTCHA_RETRIES):
             try:
                 logger.info(f"登录尝试 {attempt + 1}/{MAX_CAPTCHA_RETRIES}")
 
+                if not self._wait_for_loading_mask():
+                    self._recover_login_page(attempt)
+                    continue
+
+                # Every retry resolves a fresh set of elements. The previous
+                # captcha/login DOM is often replaced after a failed request.
                 username_input = self.wait.until(
                     EC.presence_of_element_located((By.XPATH, "//input[@placeholder='请输入用户名']"))
                 )
@@ -153,7 +197,19 @@ class Downloader:
                 captcha_input.send_keys(answer)
                 time.sleep(0.5)
 
-                login_btn.click()
+                try:
+                    login_btn.click()
+                except ElementClickInterceptedException:
+                    logger.warning("登录按钮被 loading 遮罩拦截，等待后重新查找按钮")
+                    if not self._wait_for_loading_mask():
+                        self._recover_login_page(attempt)
+                        continue
+                    login_btn = self.wait.until(
+                        EC.element_to_be_clickable(
+                            (By.XPATH, "//button[contains(@class,'login-submit')]")
+                        )
+                    )
+                    login_btn.click()
                 logger.info("已点击登录按钮")
                 # Element UI 的错误提示默认只显示几秒。先在提示消失前记录
                 # 服务端给出的具体原因，再等待页面跳转完成，避免把账号、
@@ -177,15 +233,16 @@ class Downloader:
                         captcha_img.click()
                     except Exception:
                         pass
-                    time.sleep(1)
+                    time.sleep(LOGIN_RETRY_DELAYS[min(attempt, len(LOGIN_RETRY_DELAYS) - 1)])
                     continue
 
             except TimeoutException:
-                logger.error("页面加载超时")
-                break
+                logger.error("登录页面元素等待超时，本轮刷新页面重试")
+                self._recover_login_page(attempt)
+                continue
             except Exception as e:
                 logger.error(f"登录异常: {e}")
-                time.sleep(1)
+                self._recover_login_page(attempt)
 
         logger.error(f"登录失败，已重试 {MAX_CAPTCHA_RETRIES} 次")
         return False

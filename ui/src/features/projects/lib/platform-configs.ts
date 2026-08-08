@@ -5,6 +5,7 @@ export const NINGBO_HOUSING_PLATFORM_TYPE = "ningbo_housing";
 export const NINGBO_HOUSING_DEFAULT_BASE_URL = "http://183.136.157.18:7334";
 export const YONGXIN_V2_PLATFORM_NAME = "甬薪";
 export const YONGXIN_V2_PLATFORM_TYPE = "yongxin_v2";
+export const YONGXIN_V2_DEFAULT_BASE_URL = "https://apigx.91jtg.com/openapi";
 export const XINLEDA_PLATFORM_NAME = "薪乐达";
 export const XINLEDA_PLATFORM_TYPE = "xinleda";
 export const XINLEDA_DEFAULT_BASE_URL = "https://openapi.hwxld.com";
@@ -93,7 +94,8 @@ export function createYongxinV2ConfigForm(): NingboHousingConfigForm {
   return {
     ...createNingboHousingConfigForm(),
     platform_type: YONGXIN_V2_PLATFORM_TYPE,
-    mode: "test",
+    base_url: YONGXIN_V2_DEFAULT_BASE_URL,
+    mode: "production",
   };
 }
 
@@ -112,7 +114,7 @@ export function parseYongxinV2Config(config: ConstructionPlatformConfig): Ningbo
   return {
     ...createYongxinV2ConfigForm(),
     project_id: config.project_id,
-    base_url: readString(value, "base_url", "url", "endpoint"),
+    base_url: readString(value, "base_url", "url", "endpoint") || YONGXIN_V2_DEFAULT_BASE_URL,
     app_key: readString(value, "app_key", "appKey", "AppKey"),
     app_secret: readString(value, "app_secret", "appSecret", "AppSecret"),
     project_code: readString(value, "project_code", "projectCode", "ProjectCode"),
@@ -133,16 +135,6 @@ export function buildYongxinV2Config(form: NingboHousingConfigForm): JsonValue {
     project_code: form.project_code.trim(),
     app_key: form.app_key.trim(),
     app_secret: form.app_secret.trim(),
-    mode: form.mode,
-    modules: {
-      sync_units: form.sync_units,
-      sync_teams: form.sync_teams,
-      sync_workers: form.sync_workers,
-      sync_attendance: form.sync_attendance,
-    },
-    attendance_backfill_from: form.attendance_backfill_from
-      ? `${form.attendance_backfill_from}T00:00:00+08:00`
-      : null,
   };
 }
 
@@ -224,9 +216,6 @@ export function validateYongxinV2Config(form: NingboHousingConfigForm): string |
   if (!/^[\x20-\x7E]+$/.test(form.app_secret.trim()) || ![16, 24, 32].includes(new TextEncoder().encode(form.app_secret.trim()).length)) {
     return "AppSecret 必须是 16、24 或 32 个 ASCII 字节，才能按接口文档进行 AES-CBC 加密";
   }
-  if (!form.sync_units && !form.sync_teams && !form.sync_workers && !form.sync_attendance) {
-    return "请至少启用一个同步模块";
-  }
   return null;
 }
 
@@ -283,7 +272,7 @@ export function summarizePlatformConfig(config: ConstructionPlatformConfig) {
   }
   if (isYongxinV2Config(config)) {
     const form = parseYongxinV2Config(config);
-    return `${form.mode === "production" ? "正式" : "测试（不发起真实请求）"} · 项目码 ${form.project_code || "未填写"}`;
+    return `项目对接码 ${form.project_code || "未填写"}`;
   }
   if (!isNingboHousingConfig(config)) return "已保存自定义配置";
   const form = parseNingboHousingConfig(config);

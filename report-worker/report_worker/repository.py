@@ -12,6 +12,11 @@ class Repository:
         self.database_url = os.environ["DATABASE_URL"]
         self.credential_key = os.environ["REPORT_FORWARD_CREDENTIAL_KEY"]
         self.worker_target = os.environ.get("REPORT_FORWARD_WORKER_TARGET", "k3s")
+        try:
+            cooldown = int(os.environ.get("REPORT_FORWARD_PRODUCTION_COOLDOWN_SECONDS", "600"))
+        except ValueError:
+            cooldown = 600
+        self.production_cooldown_seconds = max(cooldown, 0)
 
     @contextmanager
     def connection(self):
@@ -56,15 +61,42 @@ class Repository:
             conn.execute("SELECT pg_advisory_xact_lock(731047002)")
             return conn.execute(
                 """
-                WITH candidate AS (
+                WITH cooldown AS (
+                    SELECT make_interval(secs => %s) AS duration
+                ), candidate AS (
                     SELECT r.id
                     FROM report_forward_runs r
+                    CROSS JOIN cooldown cd
                     WHERE (
                         r.status='pending'
                         OR (r.status IN ('running','cancelling') AND r.lease_expires_at < NOW())
                     )
                     AND NOT r.cancel_requested
                     AND COALESCE(r.options->>'worker_target', 'k3s') = %s
+                    AND (
+                        r.run_mode <> 'production'
+                        OR (
+                            NOT EXISTS (
+                                SELECT 1
+                                FROM report_forward_runs recent
+                                WHERE recent.id <> r.id
+                                  AND recent.run_mode = 'production'
+                                  AND recent.completed_at > NOW() - cd.duration
+                            )
+                            AND NOT EXISTS (
+                                SELECT 1
+                                FROM report_forward_events retry_event
+                                JOIN report_forward_runs retry_run ON retry_run.id = retry_event.run_id
+                                WHERE retry_run.run_mode = 'production'
+                                  AND retry_event.stage = 'retry_wait'
+                                  AND retry_event.created_at > NOW() - cd.duration
+                            )
+                            AND (
+                                r.current_stage <> 'retry_wait'
+                                OR r.updated_at <= NOW() - cd.duration
+                            )
+                        )
+                    )
                     AND (SELECT COUNT(*) FROM report_forward_runs live
                          WHERE live.status IN ('running','cancelling')
                            AND live.lease_expires_at > NOW()) < 1
@@ -85,7 +117,7 @@ class Repository:
                 FROM candidate WHERE r.id=candidate.id
                 RETURNING r.*
                 """,
-                (self.worker_target, worker_id),
+                (self.production_cooldown_seconds, self.worker_target, worker_id),
             ).fetchone()
 
     def runtime_config(self, config_id):

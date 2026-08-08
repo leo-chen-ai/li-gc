@@ -27,6 +27,7 @@ CSV_POLL_INTERVAL = 2
 LISTENER_STARTUP_WAIT = 5
 MAX_CAPTCHA_RETRIES = 3
 SMS_POPUP_WAIT = 10
+SMS_RESEND_BUTTON_WAIT = 75
 
 
 def attach_to_browser(debug_port=9222):
@@ -64,6 +65,7 @@ class TargetLogin:
         self.driver = None
         self.long_wait = None
         self.short_wait = None
+        self.sms_requested_at = None
 
     def _start_feishu_listener(self):
         listener_script = os.path.join(self.script_dir, 'feishu_listener.py')
@@ -428,6 +430,7 @@ class TargetLogin:
             btn = _find_first(self.driver, selectors, check_displayed=False)
             try:
                 if btn and btn.is_enabled():
+                    self.sms_requested_at = datetime.now()
                     self._click(btn)
                     logger.info("已点击登录")
                     time.sleep(2)
@@ -442,6 +445,7 @@ class TargetLogin:
                 (By.XPATH, "//input[@type='password']"),
             ])
             if password_input:
+                self.sms_requested_at = datetime.now()
                 password_input.send_keys('\n')
                 time.sleep(2)
                 return True
@@ -462,7 +466,7 @@ class TargetLogin:
             time.sleep(0.5)
         return False
 
-    def _wait_for_sms_code(self, timeout=SMS_CODE_WAIT_TIMEOUT, exclude_code=None):
+    def _wait_for_sms_code(self, timeout=SMS_CODE_WAIT_TIMEOUT, exclude_code=None, requested_at=None):
         logger.info(f"等待短信验证码（超时 {timeout} 秒）")
 
         csv_path = os.environ.get('REPORT_FORWARD_CODES_CSV', os.path.join(self.script_dir, 'verification_codes.csv'))
@@ -471,7 +475,11 @@ class TargetLogin:
         while time.time() - start < timeout:
             try:
                 from feishu_listener import get_latest_valid_code
-                code = get_latest_valid_code(csv_path, max_age_minutes=SMS_CODE_VALID_MINUTES)
+                code = get_latest_valid_code(
+                    csv_path,
+                    max_age_minutes=SMS_CODE_VALID_MINUTES,
+                    received_after=requested_at or self.sms_requested_at,
+                )
                 if code:
                     if exclude_code and code == exclude_code:
                         elapsed = int(time.time() - start)
@@ -491,6 +499,30 @@ class TargetLogin:
             time.sleep(CSV_POLL_INTERVAL)
 
         logger.error(f"等待验证码超时 ({timeout}秒)")
+        return None
+
+    def _resend_sms_code(self):
+        logger.info("等待并点击重新发送短信验证码")
+        selectors = [
+            (By.XPATH, "//button[contains(text(),'重新发送') or contains(text(),'重新获取') or contains(text(),'发送验证码') or contains(text(),'获取验证码')]"),
+            (By.XPATH, "//*[self::span or self::a][contains(text(),'重新发送') or contains(text(),'重新获取') or contains(text(),'发送验证码') or contains(text(),'获取验证码')]"),
+        ]
+        deadline = time.time() + SMS_RESEND_BUTTON_WAIT
+        while time.time() < deadline:
+            element = _find_first(self.driver, selectors, check_displayed=True)
+            if element is not None:
+                try:
+                    disabled = element.get_attribute("disabled") is not None
+                    class_name = element.get_attribute("class") or ""
+                    if not disabled and "disabled" not in class_name:
+                        self._click(element)
+                        self.sms_requested_at = datetime.now()
+                        logger.info("已重新发送短信验证码")
+                        return self.sms_requested_at
+                except StaleElementReferenceException:
+                    pass
+            time.sleep(1)
+        logger.error("等待重新发送短信验证码按钮超时")
         return None
 
     def _fill_sms_code(self, code):
@@ -663,7 +695,7 @@ class TargetLogin:
             logger.error(f"验证码重试 {MAX_CAPTCHA_RETRIES} 次后仍未进入短信弹窗")
             return False
 
-        code = self._wait_for_sms_code()
+        code = self._wait_for_sms_code(requested_at=self.sms_requested_at)
         if not code:
             logger.error("未能获取短信验证码")
             return False
@@ -680,7 +712,10 @@ class TargetLogin:
 
             logger.warning("短信验证码有误，清空输入，等待新验证码...")
             self._clear_sms_inputs()
-            new_code = self._wait_for_sms_code(exclude_code=code)
+            requested_at = self._resend_sms_code()
+            if not requested_at:
+                return False
+            new_code = self._wait_for_sms_code(exclude_code=code, requested_at=requested_at)
             if not new_code:
                 logger.error("未能获取新的短信验证码")
                 return False

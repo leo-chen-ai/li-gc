@@ -148,13 +148,7 @@ export function EnterpriseCustomerDetailPage({ customerId }: { customerId: strin
 
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-xs font-medium text-[#0f6b5d]">往来单位经营视图</div>
-            <h1 className="mt-1 truncate text-xl font-semibold tracking-normal">{customer?.name ?? "往来单位详情"}</h1>
-            <p className="mt-1 truncate text-sm text-slate-500">
-              {customer?.contact_name || "未填写联系人"} · {customer?.contact_phone || "未填写电话"} · {customer?.credit_code || "未填写税号"}
-            </p>
-          </div>
+          <div />
           <div className="flex flex-wrap items-center gap-2">
             <Badge className={statusTone(customer?.status)}>{statusLabel(customer?.status)}</Badge>
             <FormulaDialogButton

@@ -146,6 +146,8 @@ spec:
               value: "30"
             - name: REPORT_FORWARD_WORKER_TARGET
               value: k3s
+            - name: REPORT_FORWARD_PRODUCTION_COOLDOWN_SECONDS
+              value: "600"
             - name: CHROMIUM_BINARY
               value: /usr/bin/chromium
             - name: CHROMEDRIVER_BINARY

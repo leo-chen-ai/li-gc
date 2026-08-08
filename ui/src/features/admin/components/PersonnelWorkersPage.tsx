@@ -117,18 +117,11 @@ export function PersonnelWorkersPage() {
 
   return (
     <div className="space-y-3">
-      <section className="rounded-xl border bg-white px-4 py-3 shadow-sm dark:bg-card">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <div className="text-xs font-medium text-[#0f6b5d]">人员管理 / 人员信息列表</div>
-            <h1 className="mt-1 text-xl font-semibold tracking-normal">人员信息列表</h1>
-            <p className="mt-1 text-sm text-muted-foreground">汇总现有所有项目的人员数据。</p>
-          </div>
+      <section className="flex justify-end rounded-xl border bg-white p-2 shadow-sm dark:bg-card">
           <Button variant="outline" size="sm" onClick={() => void workers.refetch()} disabled={workers.isFetching}>
             <RefreshCw className={`mr-2 size-4 ${workers.isFetching ? "animate-spin" : ""}`} />
             刷新
           </Button>
-        </div>
       </section>
       <form
         className="grid gap-3 rounded-xl border bg-[#f8faf9] p-3 shadow-sm dark:bg-card md:grid-cols-[minmax(240px,1fr)_minmax(220px,1fr)_auto_auto]"
