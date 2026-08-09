@@ -716,6 +716,7 @@ struct ResourceListParams {
     project_id: Option<Uuid>,
     unit_id: Option<Uuid>,
     team_id: Option<Uuid>,
+    worker_id: Option<Uuid>,
     company_type: Option<i32>,
     salary_calc_type: Option<i16>,
     work_type: Option<i32>,
@@ -832,6 +833,7 @@ fn resource_list_params(uri: &Uri) -> Result<ResourceListParams, ApiError> {
     let mut project_id = None;
     let mut unit_id = None;
     let mut team_id = None;
+    let mut worker_id = None;
     let mut company_type = None;
     let mut salary_calc_type = None;
     let mut work_type = None;
@@ -882,6 +884,12 @@ fn resource_list_params(uri: &Uri) -> Result<ResourceListParams, ApiError> {
                     team_id = Some(
                         Uuid::parse_str(trimmed)
                             .map_err(|_| invalid_column_value("team_id", "uuid"))?,
+                    );
+                }
+                "worker_id" if !trimmed.is_empty() => {
+                    worker_id = Some(
+                        Uuid::parse_str(trimmed)
+                            .map_err(|_| invalid_column_value("worker_id", "uuid"))?,
                     );
                 }
                 "company_type" if !trimmed.is_empty() => {
@@ -951,6 +959,7 @@ fn resource_list_params(uri: &Uri) -> Result<ResourceListParams, ApiError> {
         project_id,
         unit_id,
         team_id,
+        worker_id,
         company_type,
         salary_calc_type,
         work_type,
@@ -12822,6 +12831,9 @@ fn push_resource_filters(
                     .push(" OR t.name ILIKE ")
                     .push_bind(pattern)
                     .push(")))");
+            }
+            if let Some(worker_id) = params.worker_id {
+                query.push(" AND r.worker_id = ").push_bind(worker_id);
             }
             if let Some(team_id) = params.team_id {
                 query
