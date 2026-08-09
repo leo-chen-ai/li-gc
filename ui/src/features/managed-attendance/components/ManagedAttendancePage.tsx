@@ -221,11 +221,11 @@ export function ManagedAttendancePage(_props: { embedded?: boolean }) {
   };
 
   const handleResendDay = async (config: ManagedAttendanceConfig, attendanceDate: string) => {
-    const confirmed = window.confirm(`确认补发 ${attendanceDate} 的进场、出场考勤？\n\n即使此前已经发送成功，也会重新推送一次。`);
+    const confirmed = window.confirm(`确认补发 ${attendanceDate} 已到计划时间的考勤？\n\n已到时间的记录会立即重新发送；尚未到时间的记录不会提前发送。`);
     if (!confirmed) return;
     try {
       const result = await resendDay.mutateAsync({ configId: config.id, attendanceDate });
-      toast.success(`已补发 ${result.record_count} 条考勤记录，共 ${result.job_count} 个设备任务`);
+      toast.success(`已立即补发 ${result.record_count} 条到期考勤记录，共 ${result.job_count} 个设备任务`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "手动补发失败");
     }

@@ -7927,6 +7927,7 @@ pub async fn resend_managed_attendance_day(
         WHERE r.config_id = $1
           AND r.attendance_date = $2
           AND r.is_deleted = FALSE
+          AND r.planned_at <= NOW()
         "#,
     )
     .bind(config_id)
@@ -7936,7 +7937,7 @@ pub async fn resend_managed_attendance_day(
     .map_err(db_error)?;
     if record_count == 0 {
         return Err(invalid_input(
-            "该日期没有可补发的托管考勤记录，或托管配置已停用",
+            "该日期暂时没有已到计划时间的可补发记录，或托管配置已停用",
         ));
     }
 
@@ -7948,6 +7949,7 @@ pub async fn resend_managed_attendance_day(
           ON r.id = j.managed_attendance_record_id AND r.is_deleted = FALSE
         WHERE r.config_id = $1
           AND r.attendance_date = $2
+          AND r.planned_at <= NOW()
           AND j.job_type = 'supplemental_attendance'
         FOR UPDATE OF j
         "#,
@@ -7988,6 +7990,7 @@ pub async fn resend_managed_attendance_day(
           AND r.config_id = $1
           AND r.attendance_date = $2
           AND r.is_deleted = FALSE
+          AND r.planned_at <= NOW()
           AND j.job_type = 'supplemental_attendance'
           AND j.adapter_code = 'vendor_b'
           AND j.transport = 'http_push'
@@ -8015,6 +8018,7 @@ pub async fn resend_managed_attendance_day(
         WHERE config_id = $1
           AND attendance_date = $2
           AND is_deleted = FALSE
+          AND planned_at <= NOW()
         "#,
     )
     .bind(config_id)
