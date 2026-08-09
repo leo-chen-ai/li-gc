@@ -7,10 +7,13 @@ import {
   Moon,
   Pencil,
   Plus,
+  RefreshCw,
   Search,
   Sparkles,
   Sun,
   Trash2,
+  Upload,
+  X,
   Users,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -44,6 +47,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ProjectSearchSelect } from "@/features/projects/components/ProjectSearchSelect";
+import { constructionProjectService } from "@/features/projects/services/construction-project-service";
 import {
   useProjectAllTeamsQuery,
   useProjectAllUnitsQuery,
@@ -52,22 +56,24 @@ import {
 import { cn } from "@/lib/utils";
 import {
   useCreateManagedAttendanceConfigMutation,
+  useCreateManagedAttendancePhotoGroupMutation,
   useDeleteManagedAttendanceConfigMutation,
   useGenerateManagedAttendanceMutation,
   useManagedAttendanceConfigsQuery,
   useManagedAttendanceRecordsQuery,
+  useResendManagedAttendanceDayMutation,
   useUpdateManagedAttendanceConfigMutation,
+  useUpdateManagedAttendancePhotoGroupMutation,
 } from "../hooks";
 import {
   isManagedPhotoGroupReady,
-  managedAttendanceShiftLabel,
   summarizeManagedAttendanceConfig,
 } from "../lib";
+import { managedAttendanceService } from "../services";
 import type {
   ManagedAttendanceConfig,
   ManagedAttendanceConfigPayload,
   ManagedAttendanceRecord,
-  ManagedAttendanceShift,
 } from "../types";
 
 type PageTab = "people" | "calendar";
@@ -80,19 +86,24 @@ type PhotoGroupForm = {
 type ConfigForm = {
   workerId: string;
   monthlyAttendanceDays: string;
-  shift: ManagedAttendanceShift;
   checkInTime: string;
+  checkInEndTime: string;
   checkOutTime: string;
+  checkOutEndTime: string;
   remark: string;
+  photoPairs: PhotoPair[];
 };
+type PhotoPair = { inPhoto: string; outPhoto: string };
 
 const defaultConfigForm: ConfigForm = {
   workerId: "",
   monthlyAttendanceDays: "22",
-  shift: "day",
   checkInTime: "08:00",
-  checkOutTime: "18:00",
+  checkInEndTime: "08:30",
+  checkOutTime: "17:30",
+  checkOutEndTime: "18:00",
   remark: "",
+  photoPairs: [{ inPhoto: "", outPhoto: "" }],
 };
 
 export function ManagedAttendancePage(_props: { embedded?: boolean }) {
@@ -134,9 +145,12 @@ export function ManagedAttendancePage(_props: { embedded?: boolean }) {
   const unitsQuery = useProjectAllUnitsQuery(selectedProjectId);
   const teamsQuery = useProjectAllTeamsQuery(selectedProjectId);
   const createConfig = useCreateManagedAttendanceConfigMutation();
+  const createPhotoGroup = useCreateManagedAttendancePhotoGroupMutation();
   const deleteConfig = useDeleteManagedAttendanceConfigMutation();
   const updateConfig = useUpdateManagedAttendanceConfigMutation();
+  const updatePhotoGroup = useUpdateManagedAttendancePhotoGroupMutation();
   const generateRecords = useGenerateManagedAttendanceMutation();
+  const resendDay = useResendManagedAttendanceDayMutation();
 
   const configs = configsQuery.data?.items ?? [];
   const records = recordsQuery.data?.items ?? [];
@@ -168,10 +182,18 @@ export function ManagedAttendancePage(_props: { embedded?: boolean }) {
     setConfigForm({
       workerId: config.worker_id,
       monthlyAttendanceDays: String(config.monthly_attendance_days),
-      shift: config.shift as ManagedAttendanceShift,
       checkInTime: config.check_in_time,
+      checkInEndTime: config.check_in_end_time || config.check_in_time,
       checkOutTime: config.check_out_time,
+      checkOutEndTime: config.check_out_end_time || config.check_out_time,
       remark: config.remark || "",
+      photoPairs: Array.from(
+        { length: Math.max(config.in_photos?.length || 0, config.out_photos?.length || 0, 1) },
+        (_, index) => ({
+          inPhoto: config.in_photos?.[index] || "",
+          outPhoto: config.out_photos?.[index] || "",
+        }),
+      ),
     });
     setConfigDialogOpen(true);
   };
@@ -198,6 +220,17 @@ export function ManagedAttendancePage(_props: { embedded?: boolean }) {
     }
   };
 
+  const handleResendDay = async (config: ManagedAttendanceConfig, attendanceDate: string) => {
+    const confirmed = window.confirm(`确认补发 ${attendanceDate} 的进场、出场考勤？\n\n即使此前已经发送成功，也会重新推送一次。`);
+    if (!confirmed) return;
+    try {
+      const result = await resendDay.mutateAsync({ configId: config.id, attendanceDate });
+      toast.success(`已补发 ${result.record_count} 条考勤记录，共 ${result.job_count} 个设备任务`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "手动补发失败");
+    }
+  };
+
   const toggleConfig = async (config: ManagedAttendanceConfig) => {
     try {
       await updateConfig.mutateAsync({
@@ -207,9 +240,11 @@ export function ManagedAttendancePage(_props: { embedded?: boolean }) {
           worker_id: config.worker_id,
           photo_group_id: config.photo_group_id || null,
           monthly_attendance_days: config.monthly_attendance_days,
-          shift: config.shift as ManagedAttendanceShift,
+          shift: config.shift === "night" ? "night" : "day",
           check_in_time: config.check_in_time,
+          check_in_end_time: config.check_in_end_time,
           check_out_time: config.check_out_time,
+          check_out_end_time: config.check_out_end_time,
           is_enabled: !config.is_enabled,
           remark: config.remark || null,
         },
@@ -226,13 +261,13 @@ export function ManagedAttendancePage(_props: { embedded?: boolean }) {
 
   const handleDeleteConfig = async (config: ManagedAttendanceConfig) => {
     const confirmed = window.confirm(
-      `确认删除“${config.worker_name || "该人员"}”的托管配置？\n\n该配置生成的月度考勤和下发记录将同时从页面清除，未完成的设备任务会停止。此操作不可撤销。`,
+      `确认删除“${config.worker_name || "该人员"}”的托管配置？\n\n历史下发记录会保留，未完成的设备任务会停止。此操作不可撤销。`,
     );
     if (!confirmed) return;
     try {
       await deleteConfig.mutateAsync(config.id);
       if (selectedConfig?.id === config.id) setSelectedConfig(null);
-      toast.success("托管配置及关联下发记录已删除");
+      toast.success("托管配置已删除，历史下发记录已保留");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "删除托管配置失败");
     }
@@ -245,15 +280,39 @@ export function ManagedAttendancePage(_props: { embedded?: boolean }) {
       return toast.error("请选择项目和托管人员");
     if (!Number.isInteger(days) || days < 1 || days > 31)
       return toast.error("月考勤天数需为 1 到 31");
+    if (configForm.checkInEndTime < configForm.checkInTime)
+      return toast.error("进场结束时间不能早于开始时间");
+    if (configForm.checkOutEndTime < configForm.checkOutTime)
+      return toast.error("出场结束时间不能早于开始时间");
+    if (!configForm.photoPairs.length || configForm.photoPairs.length > 30)
+      return toast.error("照片组数量需为 1 到 30 组");
+    if (configForm.photoPairs.some((pair) => !pair.inPhoto || !pair.outPhoto))
+      return toast.error("每个照片组都需要上传 1 张进场和 1 张出场照片");
+    let newlyCreatedPhotoGroupId: string | null = null;
     try {
+      const workerName = workerOptions.find((worker) => worker.id === configForm.workerId)?.name || "托管人员";
+      const photoPayload = {
+        project_id: selectedProjectId,
+        name: `${workerName}托管照片组`,
+        generation_status: "ready",
+        in_photos: configForm.photoPairs.map((pair) => pair.inPhoto),
+        out_photos: configForm.photoPairs.map((pair) => pair.outPhoto),
+        remark: configForm.remark.trim() || null,
+      };
+      const photoGroup = editingConfig?.photo_group_id
+        ? await updatePhotoGroup.mutateAsync({ photoGroupId: editingConfig.photo_group_id, payload: photoPayload })
+        : await createPhotoGroup.mutateAsync(photoPayload);
+      if (!editingConfig?.photo_group_id) newlyCreatedPhotoGroupId = photoGroup.id;
       const payload: ManagedAttendanceConfigPayload = {
         project_id: selectedProjectId,
         worker_id: configForm.workerId,
-        photo_group_id: null,
+        photo_group_id: photoGroup.id,
         monthly_attendance_days: days,
-        shift: configForm.shift,
+        shift: editingConfig?.shift === "night" ? "night" : "day",
         check_in_time: configForm.checkInTime,
+        check_in_end_time: configForm.checkInEndTime,
         check_out_time: configForm.checkOutTime,
+        check_out_end_time: configForm.checkOutEndTime,
         is_enabled: editingConfig?.is_enabled ?? true,
         remark: configForm.remark.trim() || null,
       };
@@ -268,6 +327,9 @@ export function ManagedAttendancePage(_props: { embedded?: boolean }) {
       setEditingConfig(null);
       setConfigForm(defaultConfigForm);
     } catch (error) {
+      if (newlyCreatedPhotoGroupId) {
+        await managedAttendanceService.deletePhotoGroup(newlyCreatedPhotoGroupId).catch(() => undefined);
+      }
       toast.error(error instanceof Error ? error.message : "开启托管失败");
     }
   };
@@ -359,6 +421,8 @@ export function ManagedAttendancePage(_props: { embedded?: boolean }) {
             )
           }
           onGenerate={handleGenerate}
+          onResendDay={handleResendDay}
+          resendingDate={resendDay.isPending ? resendDay.variables?.attendanceDate || null : null}
           onMonthChange={setMonth}
         />
       ) : null}
@@ -366,7 +430,7 @@ export function ManagedAttendancePage(_props: { embedded?: boolean }) {
         open={configDialogOpen}
         form={configForm}
         workers={workerOptions}
-        saving={createConfig.isPending || updateConfig.isPending}
+        saving={createConfig.isPending || updateConfig.isPending || createPhotoGroup.isPending || updatePhotoGroup.isPending}
         editing={Boolean(editingConfig)}
         onOpenChange={(open) => {
           setConfigDialogOpen(open);
@@ -562,6 +626,8 @@ function ManagedCalendarTab({
   loading,
   onConfigChange,
   onGenerate,
+  onResendDay,
+  resendingDate,
   onMonthChange,
 }: {
   config: ManagedAttendanceConfig | null;
@@ -571,6 +637,8 @@ function ManagedCalendarTab({
   loading: boolean;
   onConfigChange: (id: string) => void;
   onGenerate: (config: ManagedAttendanceConfig) => void;
+  onResendDay: (config: ManagedAttendanceConfig, attendanceDate: string) => void;
+  resendingDate: string | null;
   onMonthChange: (month: string) => void;
 }) {
   const days = buildCalendarDays(month, records);
@@ -630,9 +698,9 @@ function ManagedCalendarTab({
               helper={`配置 ${config.monthly_attendance_days} 天/月`}
             />
             <InfoCard
-              label="班次"
-              value={managedAttendanceShiftLabel(config.shift)}
-              helper={`${config.check_in_time} - ${config.check_out_time}`}
+              label="考勤时间"
+              value={`${config.check_in_time}～${config.check_in_end_time}`}
+              helper={`出场 ${config.check_out_time}～${config.check_out_end_time}`}
             />
             <InfoCard
               label="服务状态"
@@ -648,7 +716,12 @@ function ManagedCalendarTab({
           请从托管人员点击“查看”，或在上方选择人员
         </div>
       ) : (
-        <CalendarGrid days={days} loading={loading} />
+        <CalendarGrid
+          days={days}
+          loading={loading}
+          resendingDate={resendingDate}
+          onResendDay={(attendanceDate) => onResendDay(config, attendanceDate)}
+        />
       )}
     </div>
   );
@@ -657,9 +730,13 @@ function ManagedCalendarTab({
 function CalendarGrid({
   days,
   loading,
+  resendingDate,
+  onResendDay,
 }: {
   days: CalendarDay[];
   loading: boolean;
+  resendingDate: string | null;
+  onResendDay: (attendanceDate: string) => void;
 }) {
   return (
     <section className="overflow-hidden rounded-xl border bg-white shadow-sm dark:border-border dark:bg-card">
@@ -687,12 +764,25 @@ function CalendarGrid({
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-sm font-semibold">{day.day}</span>
                   {day.records.length ? (
-                    <Badge
-                      variant="outline"
-                      className="h-5 border-emerald-200 bg-emerald-50 px-1.5 text-[10px] text-emerald-700"
-                    >
-                      出勤
-                    </Badge>
+                    <div className="flex items-center gap-1">
+                      <Badge
+                        variant="outline"
+                        className="h-5 border-emerald-200 bg-emerald-50 px-1.5 text-[10px] text-emerald-700"
+                      >
+                        出勤
+                      </Badge>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-6 gap-1 px-1.5 text-[10px]"
+                        disabled={resendingDate === day.date}
+                        onClick={() => onResendDay(day.date!)}
+                      >
+                        <RefreshCw className={cn("size-3", resendingDate === day.date && "animate-spin")} />
+                        补发
+                      </Button>
+                    </div>
                   ) : (
                     <span className="text-[10px] text-muted-foreground">
                       休息
@@ -729,6 +819,17 @@ function CalendarPunch({ record }: { record: ManagedAttendanceRecord }) {
       )}
     >
       <div className="flex items-center justify-between gap-2 px-2 py-2">
+        {record.photo_url ? (
+          <a href={record.photo_url} target="_blank" rel="noreferrer" title="查看考勤照片">
+            <img
+              src={record.photo_url}
+              alt={isIn ? "进场照片" : "出场照片"}
+              className="size-8 shrink-0 rounded-full border bg-slate-100 object-cover"
+            />
+          </a>
+        ) : (
+          <div className="flex size-8 shrink-0 items-center justify-center rounded-full border bg-slate-100 text-[9px] text-muted-foreground">无图</div>
+        )}
         <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-semibold text-white", isIn ? "bg-emerald-600" : "bg-amber-600")}>
           {isIn ? "进场" : "出场"}
         </span>
@@ -938,17 +1039,20 @@ function ConfigDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-2xl">
-        <form onSubmit={onSubmit}>
-          <DialogHeader>
-            <DialogTitle>
-              {editing ? "编辑自动托管" : "开启人员自动托管"}
-            </DialogTitle>
-            <DialogDescription>
-              开启后，每月最后一天自动随机生成该人员下个月的全部托管考勤。
-            </DialogDescription>
-          </DialogHeader>
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
+      <DialogContent className="flex h-[92svh] w-[96vw] max-w-[1440px] flex-col overflow-hidden p-0 sm:max-w-[1440px]">
+        <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
+          <div className="shrink-0 border-b px-6 pb-4 pt-6">
+            <DialogHeader>
+              <DialogTitle>
+                {editing ? "编辑自动托管" : "开启人员自动托管"}
+              </DialogTitle>
+              <DialogDescription>
+                开启后，每月最后一天自动随机生成该人员下个月的全部托管考勤。
+              </DialogDescription>
+            </DialogHeader>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+            <div className="grid gap-4 lg:grid-cols-3">
             <Field label="托管人员">
               <StructuredWorkerSingleSelect
                 workers={workers}
@@ -959,7 +1063,7 @@ function ConfigDialog({
                 placeholder="搜索姓名、单位或班组选择人员"
               />
             </Field>
-            <div className="md:col-span-2 rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2 text-xs leading-5 text-emerald-800">
+            <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2 text-xs leading-5 text-emerald-800 lg:col-span-2">
               系统按项目自动匹配考勤机：进场记录优先发进场机，出场记录优先发出场机；没有专用方向设备时使用自动/通用设备。同方向有多台时全部下发。
             </div>
             <Field label="每月随机考勤天数">
@@ -976,44 +1080,45 @@ function ConfigDialog({
                 }
               />
             </Field>
-            <Field label="班次">
-              <Select
-                value={form.shift}
-                onValueChange={(shift) =>
-                  onFormChange({
-                    ...form,
-                    shift: shift as ManagedAttendanceShift,
-                  })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="day">白班</SelectItem>
-                  <SelectItem value="night">夜班</SelectItem>
-                </SelectContent>
-              </Select>
+            <Field label="进场随机时间区间">
+              <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                <Input type="time" aria-label="进场开始时间" value={form.checkInTime} max={form.checkInEndTime} onChange={(event) => onFormChange({ ...form, checkInTime: event.target.value })} />
+                <span className="text-muted-foreground">～</span>
+                <Input type="time" aria-label="进场结束时间" value={form.checkInEndTime} min={form.checkInTime} onChange={(event) => onFormChange({ ...form, checkInEndTime: event.target.value })} />
+              </div>
             </Field>
-            <Field label="进场时间">
-              <Input
-                type="time"
-                value={form.checkInTime}
-                onChange={(event) =>
-                  onFormChange({ ...form, checkInTime: event.target.value })
-                }
-              />
+            <Field label="出场随机时间区间">
+              <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                <Input type="time" aria-label="出场开始时间" value={form.checkOutTime} max={form.checkOutEndTime} onChange={(event) => onFormChange({ ...form, checkOutTime: event.target.value })} />
+                <span className="text-muted-foreground">～</span>
+                <Input type="time" aria-label="出场结束时间" value={form.checkOutEndTime} min={form.checkOutTime} onChange={(event) => onFormChange({ ...form, checkOutEndTime: event.target.value })} />
+              </div>
             </Field>
-            <Field label="出场时间">
-              <Input
-                type="time"
-                value={form.checkOutTime}
-                onChange={(event) =>
-                  onFormChange({ ...form, checkOutTime: event.target.value })
-                }
-              />
-            </Field>
-            <div className="md:col-span-2">
+            <div className="space-y-3 lg:col-span-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <Label>进出场照片组</Label>
+                  <p className="mt-1 text-xs text-muted-foreground">每组各 1 张进场、出场照片；每天随机使用一组，全部轮完后才会重复（最多 30 组）。</p>
+                </div>
+                <Button type="button" variant="outline" size="sm" disabled={form.photoPairs.length >= 30 || saving} onClick={() => onFormChange({ ...form, photoPairs: [...form.photoPairs, { inPhoto: "", outPhoto: "" }] })}>
+                  <Plus className="mr-1 size-4" />添加一组
+                </Button>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+                {form.photoPairs.map((pair, index) => (
+                  <PhotoPairRow
+                    key={index}
+                    index={index}
+                    pair={pair}
+                    disabled={saving}
+                    removable={form.photoPairs.length > 1}
+                    onChange={(nextPair) => onFormChange({ ...form, photoPairs: form.photoPairs.map((item, itemIndex) => itemIndex === index ? nextPair : item) })}
+                    onRemove={() => onFormChange({ ...form, photoPairs: form.photoPairs.filter((_, itemIndex) => itemIndex !== index) })}
+                  />
+                ))}
+              </div>
+            </div>
+            <div className="lg:col-span-3">
               <Field label="备注">
                 <Input
                   value={form.remark}
@@ -1023,8 +1128,9 @@ function ConfigDialog({
                 />
               </Field>
             </div>
+            </div>
           </div>
-          <DialogFooter className="mt-5">
+          <DialogFooter className="shrink-0 border-t bg-background px-6 py-4">
             <Button
               type="button"
               variant="outline"
@@ -1044,6 +1150,56 @@ function ConfigDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function PhotoPairRow({ index, pair, disabled, removable, onChange, onRemove }: {
+  index: number;
+  pair: PhotoPair;
+  disabled: boolean;
+  removable: boolean;
+  onChange: (pair: PhotoPair) => void;
+  onRemove: () => void;
+}) {
+  const [uploading, setUploading] = useState<"in" | "out" | null>(null);
+  const upload = async (direction: "in" | "out", file?: File) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) return toast.error("请选择图片文件");
+    setUploading(direction);
+    try {
+      const record = await constructionProjectService.uploadFile(file, { bizType: "managed_attendance", fieldKey: direction === "in" ? "in_photo" : "out_photo" });
+      onChange(direction === "in" ? { ...pair, inPhoto: record.public_url } : { ...pair, outPhoto: record.public_url });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "照片上传失败");
+    } finally {
+      setUploading(null);
+    }
+  };
+  return (
+    <div className="rounded-lg border bg-slate-50/50 p-2 dark:bg-muted/20">
+      <div className="mb-1.5 flex items-center justify-between">
+        <span className="text-xs font-medium">照片组 {index + 1}</span>
+        {removable ? <Button type="button" variant="ghost" size="icon" className="size-6 text-red-600" disabled={disabled || Boolean(uploading)} onClick={onRemove}><X className="size-3.5" /></Button> : null}
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        {(["in", "out"] as const).map((direction) => {
+          const url = direction === "in" ? pair.inPhoto : pair.outPhoto;
+          return (
+            <label key={direction} className="relative flex aspect-[4/3] min-h-20 cursor-pointer flex-col items-center justify-center overflow-hidden rounded-md border border-dashed bg-slate-100 text-[11px] dark:bg-muted">
+              {url ? <img src={url} alt={`${direction === "in" ? "进场" : "出场"}照片`} className="absolute inset-0 size-full object-contain" /> : null}
+              <span className="absolute left-1 top-1 z-10 rounded bg-slate-950/65 px-1.5 py-0.5 text-white">
+                {direction === "in" ? "进" : "出"}
+              </span>
+              <span className={cn("relative z-10 rounded bg-white/90 px-1.5 py-1 shadow-sm", url && "mb-1.5 mt-auto")}>
+                {uploading === direction ? <Loader2 className="mr-1 inline size-3 animate-spin" /> : <Upload className="mr-1 inline size-3" />}
+                {url ? "更换" : "上传"}
+              </span>
+              <input type="file" accept="image/*" className="hidden" disabled={disabled || Boolean(uploading)} onChange={(event) => void upload(direction, event.target.files?.[0])} />
+            </label>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

@@ -6,7 +6,9 @@ export type ManagedAttendanceConfigLike = {
   monthly_attendance_days: number;
   shift: ManagedAttendanceShift | string;
   check_in_time: string;
+  check_in_end_time: string;
   check_out_time: string;
+  check_out_end_time: string;
 };
 
 export type ManagedAttendancePhotoGroupLike = {
@@ -70,7 +72,9 @@ export type ManagedAttendanceConfigPayload = {
   monthly_attendance_days: number;
   shift: ManagedAttendanceShift;
   check_in_time: string;
+  check_in_end_time: string;
   check_out_time: string;
+  check_out_end_time: string;
   is_enabled: boolean;
   remark?: string | null;
 };
@@ -113,6 +117,13 @@ export type ManagedAttendanceGenerateResult = {
   month: string;
   attendance_days: number;
   generated_count: number;
+};
+
+export type ManagedAttendanceResendDayResult = {
+  config_id: string;
+  attendance_date: string;
+  record_count: number;
+  job_count: number;
 };
 
 export type ManagedAttendancePhotoGroupListResponse =

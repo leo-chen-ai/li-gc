@@ -56,6 +56,22 @@ export type SupplementalAttendanceListFilters = {
   project_id?: string;
   keyword?: string;
   month?: string;
+  start_time?: string;
+  end_time?: string;
   send_status?: SupplementalAttendanceSendStatus;
   device_status?: SupplementalAttendanceDeviceStatus;
+};
+
+export type SupplementalAttendanceDispatchLog = {
+  job_id: string;
+  record_id: string;
+  attempt_count: number;
+  status: string;
+  last_error: string | null;
+  sent_at: string | null;
+  event_type: string | null;
+  message: string | null;
+  request_payload: { curl?: string; [key: string]: unknown } | null;
+  response_payload: unknown;
+  logged_at: string | null;
 };

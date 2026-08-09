@@ -196,6 +196,8 @@ export const API_ENDPOINTS = {
       `/admin/managed-attendance/configs/${configId}`,
     MANAGED_ATTENDANCE_GENERATE: (configId: string) =>
       `/admin/managed-attendance/configs/${configId}/generate`,
+    MANAGED_ATTENDANCE_RESEND_DAY: (configId: string) =>
+      `/admin/managed-attendance/configs/${configId}/resend-day`,
     MANAGED_ATTENDANCE_RECORDS: "/admin/managed-attendance/records",
   },
 } as const;

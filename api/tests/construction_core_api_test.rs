@@ -685,6 +685,62 @@ async fn admin_can_configure_generate_and_list_managed_attendance() {
     assert_eq!(status, StatusCode::CREATED, "{body}");
     let worker_id = body["data"]["id"].as_str().expect("worker id");
 
+    let a_only_project_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO construction_projects (name, status) VALUES ('仅海厂家项目', 1) RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let a_only_unit_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO construction_units (project_id, company_name) VALUES ($1, '海厂家单位') RETURNING id",
+    )
+    .bind(a_only_project_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let a_only_team_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO construction_teams (project_id, unit_id, name, work_type) VALUES ($1, $2, '海厂家班组', 10) RETURNING id",
+    )
+    .bind(a_only_project_id)
+    .bind(a_only_unit_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let a_only_worker_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO construction_workers (project_id, unit_id, team_id, name) VALUES ($1, $2, $3, '海厂家人员') RETURNING id",
+    )
+    .bind(a_only_project_id)
+    .bind(a_only_unit_id)
+    .bind(a_only_team_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO construction_attendance_devices (project_id, device_type, serial_number) VALUES ($1, '海厂家', 'MANAGED-A-ONLY-001')",
+    )
+    .bind(a_only_project_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        "/api/v1/admin/managed-attendance/configs",
+        &token,
+        json!({
+            "project_id": a_only_project_id,
+            "worker_id": a_only_worker_id,
+            "monthly_attendance_days": 3,
+            "shift": "day",
+            "check_in_time": "08:00",
+            "check_out_time": "18:00",
+            "is_enabled": true
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body.to_string().contains("未配置弹厂家考勤机"), "{body}");
+
     let (status, _body) = authed_json(
         app.clone(),
         "POST",
@@ -804,7 +860,7 @@ async fn admin_can_configure_generate_and_list_managed_attendance() {
         FROM device_dispatch_jobs
         WHERE job_type = 'supplemental_attendance'
           AND adapter_code = 'vendor_b'
-          AND transport = 'http_pull'
+          AND transport = 'http_push'
           AND attendance_device_id = $1
         "#,
     )
@@ -830,7 +886,7 @@ async fn admin_can_configure_generate_and_list_managed_attendance() {
     assert_eq!(records[0]["shift"], "night");
     assert_eq!(records[0]["photo_group_name"], "张三夜班照片组");
     assert_eq!(records[0]["status"], "generated");
-    assert_eq!(records[0]["dispatch_status"], "pending");
+    assert_eq!(records[0]["dispatch_status"], "skipped");
     let attendance_dates = records
         .iter()
         .filter_map(|record| record["attendance_date"].as_str())
@@ -873,7 +929,7 @@ async fn admin_can_configure_generate_and_list_managed_attendance() {
     .unwrap();
 
     let (status, regenerated) = authed_json(
-        app,
+        app.clone(),
         "POST",
         &format!("/api/v1/admin/managed-attendance/configs/{config_id}/generate"),
         &token,
@@ -896,6 +952,40 @@ async fn admin_can_configure_generate_and_list_managed_attendance() {
     assert_eq!(preserved.0, protected.1);
     assert_eq!(preserved.1, protected.2);
     assert_eq!(preserved.2, "success");
+
+    let protected_date: chrono::NaiveDate = sqlx::query_scalar(
+        "SELECT attendance_date FROM construction_managed_attendance_records WHERE id = $1",
+    )
+    .bind(protected.0)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let (status, resent) = authed_json(
+        app,
+        "POST",
+        &format!("/api/v1/admin/managed-attendance/configs/{config_id}/resend-day"),
+        &token,
+        json!({ "attendance_date": protected_date.format("%Y-%m-%d").to_string() }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{resent}");
+    assert_eq!(resent["data"]["record_count"], 2);
+    assert_eq!(resent["data"]["job_count"], 2);
+    let resent_states: Vec<(String, String)> = sqlx::query_as(
+        r#"
+        SELECT j.status, j.device_result_status
+        FROM device_dispatch_jobs j
+        JOIN construction_managed_attendance_records r ON r.id = j.managed_attendance_record_id
+        WHERE r.config_id = $1 AND r.attendance_date = $2
+        ORDER BY r.direction
+        "#,
+    )
+    .bind(Uuid::parse_str(config_id).unwrap())
+    .bind(protected_date)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(resent_states, vec![("pending".into(), "pending".into()); 2]);
 }
 
 #[tokio::test]

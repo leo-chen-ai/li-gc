@@ -10,6 +10,7 @@ import type {
   ManagedAttendancePhotoGroupListResponse,
   ManagedAttendancePhotoGroupPayload,
   ManagedAttendanceRecordListResponse,
+  ManagedAttendanceResendDayResult,
 } from "./types";
 
 function unwrapData<T>(response: ApiResponse<T>, fallbackMessage: string): T {
@@ -103,6 +104,17 @@ export const managedAttendanceService = {
       { month }
     );
     return unwrapData(response.data, "生成托管记录失败");
+  },
+
+  resendDay: async (
+    configId: string,
+    attendanceDate: string
+  ): Promise<ManagedAttendanceResendDayResult> => {
+    const response = await apiClient.post<ApiResponse<ManagedAttendanceResendDayResult>>(
+      API_ENDPOINTS.ADMIN.MANAGED_ATTENDANCE_RESEND_DAY(configId),
+      { attendance_date: attendanceDate }
+    );
+    return unwrapData(response.data, "手动补发失败");
   },
 
   listRecords: async (

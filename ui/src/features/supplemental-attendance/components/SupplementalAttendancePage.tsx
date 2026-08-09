@@ -2,19 +2,30 @@ import {
   Activity,
   CheckCircle2,
   Clock3,
+  Copy,
   RefreshCw,
   RotateCcw,
   Search,
   Send,
   ServerCog,
+  Trash2,
   TriangleAlert,
   Unplug,
 } from "lucide-react";
 import { useDeferredValue, useMemo, useState, type ReactNode } from "react";
+import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -32,13 +43,18 @@ import {
 } from "@/components/ui/table";
 import { ProjectSearchSelect } from "@/features/projects/components/ProjectSearchSelect";
 import { cn } from "@/lib/utils";
-import { useSupplementalAttendanceRecordsQuery } from "../hooks";
+import { supplementalAttendanceService } from "../services";
+import {
+  useDeleteSupplementalAttendanceRecordsMutation,
+  useSupplementalAttendanceRecordsQuery,
+} from "../hooks";
 import {
   supplementalDeviceStatusLabel,
   supplementalSendStatusLabel,
 } from "../status";
 import type {
   SupplementalAttendanceDeviceStatus,
+  SupplementalAttendanceDispatchLog,
   SupplementalAttendanceRecord,
   SupplementalAttendanceSendStatus,
   SupplementalAttendanceSummary,
@@ -57,6 +73,8 @@ const emptySummary: SupplementalAttendanceSummary = {
 export function SupplementalAttendancePage({ embedded = false }: { embedded?: boolean }) {
   const [projectId, setProjectId] = useState("");
   const [month, setMonth] = useState(currentMonth());
+  const [startTime, setStartTime] = useState("");
+  const [endTime, setEndTime] = useState("");
   const [keyword, setKeyword] = useState("");
   const [sendStatus, setSendStatus] = useState<
     SupplementalAttendanceSendStatus | "all"
@@ -65,6 +83,10 @@ export function SupplementalAttendancePage({ embedded = false }: { embedded?: bo
     SupplementalAttendanceDeviceStatus | "all"
   >("all");
   const [page, setPage] = useState(1);
+  const [selectedRecordIds, setSelectedRecordIds] = useState<Set<string>>(new Set());
+  const [dispatchLog, setDispatchLog] = useState<SupplementalAttendanceDispatchLog | null>(null);
+  const [logOpen, setLogOpen] = useState(false);
+  const [logLoading, setLogLoading] = useState(false);
   const deferredKeyword = useDeferredValue(keyword.trim());
 
   const filters = useMemo(
@@ -74,21 +96,70 @@ export function SupplementalAttendancePage({ embedded = false }: { embedded?: bo
       project_id: projectId || undefined,
       keyword: deferredKeyword || undefined,
       month: month || undefined,
+      start_time: startTime ? new Date(startTime).toISOString() : undefined,
+      end_time: endTime ? new Date(endTime).toISOString() : undefined,
       send_status: sendStatus === "all" ? undefined : sendStatus,
       device_status: deviceStatus === "all" ? undefined : deviceStatus,
     }),
-    [deferredKeyword, deviceStatus, month, page, projectId, sendStatus],
+    [deferredKeyword, deviceStatus, endTime, month, page, projectId, sendStatus, startTime],
   );
   const recordsQuery = useSupplementalAttendanceRecordsQuery(filters);
+  const deleteRecords = useDeleteSupplementalAttendanceRecordsMutation();
   const records = recordsQuery.data?.items ?? [];
   const total = recordsQuery.data?.total ?? 0;
   const summary = recordsQuery.data?.summary ?? emptySummary;
   const pageSize = recordsQuery.data?.page_size ?? PAGE_SIZE;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const currentPageRecordIds = [...new Set(records.map((record) => record.id))];
+  const allCurrentPageSelected = currentPageRecordIds.length > 0
+    && currentPageRecordIds.every((id) => selectedRecordIds.has(id));
+
+  const toggleRecord = (recordId: string, checked: boolean) => {
+    setSelectedRecordIds((current) => {
+      const next = new Set(current);
+      if (checked) next.add(recordId);
+      else next.delete(recordId);
+      return next;
+    });
+  };
+  const toggleCurrentPage = (checked: boolean) => {
+    setSelectedRecordIds((current) => {
+      const next = new Set(current);
+      currentPageRecordIds.forEach((id) => checked ? next.add(id) : next.delete(id));
+      return next;
+    });
+  };
+  const handleBatchDelete = async () => {
+    const ids = [...selectedRecordIds];
+    if (!ids.length) return;
+    if (!window.confirm(`确认删除选中的 ${ids.length} 条下发记录？\n\n相关未完成任务会停止，删除后不可恢复。`)) return;
+    try {
+      const result = await deleteRecords.mutateAsync(ids);
+      setSelectedRecordIds(new Set());
+      toast.success(`已删除 ${result.deleted_count} 条下发记录`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "批量删除下发记录失败");
+    }
+  };
+  const handleViewLog = async (jobId: string) => {
+    setLogOpen(true);
+    setLogLoading(true);
+    setDispatchLog(null);
+    try {
+      setDispatchLog(await supplementalAttendanceService.getDispatchLog(jobId));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "获取详细发送日志失败");
+      setLogOpen(false);
+    } finally {
+      setLogLoading(false);
+    }
+  };
 
   const resetFilters = () => {
     setProjectId("");
     setMonth(currentMonth());
+    setStartTime("");
+    setEndTime("");
     setKeyword("");
     setSendStatus("all");
     setDeviceStatus("all");
@@ -115,6 +186,8 @@ export function SupplementalAttendancePage({ embedded = false }: { embedded?: bo
       <FilterPanel
         projectId={projectId}
         month={month}
+        startTime={startTime}
+        endTime={endTime}
         keyword={keyword}
         sendStatus={sendStatus}
         deviceStatus={deviceStatus}
@@ -124,6 +197,14 @@ export function SupplementalAttendancePage({ embedded = false }: { embedded?: bo
         }}
         onMonthChange={(value) => {
           setMonth(value);
+          setPage(1);
+        }}
+        onStartTimeChange={(value) => {
+          setStartTime(value);
+          setPage(1);
+        }}
+        onEndTimeChange={(value) => {
+          setEndTime(value);
           setPage(1);
         }}
         onKeywordChange={(value) => {
@@ -142,6 +223,20 @@ export function SupplementalAttendancePage({ embedded = false }: { embedded?: bo
       />
 
       <section className="overflow-hidden rounded-xl border bg-white shadow-sm dark:border-border dark:bg-card">
+        <div className="flex min-h-12 items-center justify-between gap-3 border-b px-4 py-2">
+          <span className="text-sm text-muted-foreground">
+            {selectedRecordIds.size ? `已选择 ${selectedRecordIds.size} 条记录` : "可勾选记录后批量删除"}
+          </span>
+          <Button
+            variant="destructive"
+            size="sm"
+            disabled={!selectedRecordIds.size || deleteRecords.isPending}
+            onClick={() => void handleBatchDelete()}
+          >
+            <Trash2 className="mr-2 size-4" />
+            {deleteRecords.isPending ? "删除中" : "批量删除"}
+          </Button>
+        </div>
         {recordsQuery.isError ? (
           <QueryMessage tone="error">
             {recordsQuery.error instanceof Error
@@ -149,8 +244,16 @@ export function SupplementalAttendancePage({ embedded = false }: { embedded?: bo
               : "补考勤记录加载失败"}
           </QueryMessage>
         ) : null}
-        <DesktopRecords records={records} loading={recordsQuery.isLoading} />
-        <MobileRecords records={records} loading={recordsQuery.isLoading} />
+        <DesktopRecords
+          records={records}
+          loading={recordsQuery.isLoading}
+          selectedRecordIds={selectedRecordIds}
+          allCurrentPageSelected={allCurrentPageSelected}
+          onToggleRecord={toggleRecord}
+          onToggleCurrentPage={toggleCurrentPage}
+          onViewLog={handleViewLog}
+        />
+        <MobileRecords records={records} loading={recordsQuery.isLoading} selectedRecordIds={selectedRecordIds} onToggleRecord={toggleRecord} onViewLog={handleViewLog} />
         <PaginationFooter
           page={page}
           pageSize={pageSize}
@@ -160,6 +263,7 @@ export function SupplementalAttendancePage({ embedded = false }: { embedded?: bo
           onPageChange={setPage}
         />
       </section>
+      <DispatchLogDialog open={logOpen} loading={logLoading} log={dispatchLog} onOpenChange={setLogOpen} />
     </div>
   );
 }
@@ -246,11 +350,15 @@ function SummaryCards({ summary }: { summary: SupplementalAttendanceSummary }) {
 type FilterPanelProps = {
   projectId: string;
   month: string;
+  startTime: string;
+  endTime: string;
   keyword: string;
   sendStatus: SupplementalAttendanceSendStatus | "all";
   deviceStatus: SupplementalAttendanceDeviceStatus | "all";
   onProjectChange: (value: string) => void;
   onMonthChange: (value: string) => void;
+  onStartTimeChange: (value: string) => void;
+  onEndTimeChange: (value: string) => void;
   onKeywordChange: (value: string) => void;
   onSendStatusChange: (value: SupplementalAttendanceSendStatus | "all") => void;
   onDeviceStatusChange: (
@@ -262,7 +370,7 @@ type FilterPanelProps = {
 function FilterPanel(props: FilterPanelProps) {
   return (
     <section className="rounded-xl border bg-white p-4 shadow-sm dark:bg-card">
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(240px,1.3fr)_170px_minmax(210px,1fr)_190px_190px_auto]">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <ProjectSearchSelect
           value={props.projectId}
           onValueChange={props.onProjectChange}
@@ -275,6 +383,28 @@ function FilterPanel(props: FilterPanelProps) {
           value={props.month}
           onChange={(event) => props.onMonthChange(event.target.value)}
         />
+        <label className="relative">
+          <span className="pointer-events-none absolute left-3 top-1 z-10 text-[10px] text-muted-foreground">开始时间</span>
+          <Input
+            className="pt-4"
+            type="datetime-local"
+            aria-label="开始时间"
+            value={props.startTime}
+            max={props.endTime || undefined}
+            onChange={(event) => props.onStartTimeChange(event.target.value)}
+          />
+        </label>
+        <label className="relative">
+          <span className="pointer-events-none absolute left-3 top-1 z-10 text-[10px] text-muted-foreground">结束时间</span>
+          <Input
+            className="pt-4"
+            type="datetime-local"
+            aria-label="结束时间"
+            value={props.endTime}
+            min={props.startTime || undefined}
+            onChange={(event) => props.onEndTimeChange(event.target.value)}
+          />
+        </label>
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -357,15 +487,28 @@ function StatusSelect({
 function DesktopRecords({
   records,
   loading,
+  selectedRecordIds,
+  allCurrentPageSelected,
+  onToggleRecord,
+  onToggleCurrentPage,
+  onViewLog,
 }: {
   records: SupplementalAttendanceRecord[];
   loading: boolean;
+  selectedRecordIds: Set<string>;
+  allCurrentPageSelected: boolean;
+  onToggleRecord: (recordId: string, checked: boolean) => void;
+  onToggleCurrentPage: (checked: boolean) => void;
+  onViewLog: (jobId: string) => void;
 }) {
   return (
     <div className="hidden overflow-x-auto md:block">
       <Table className="min-w-[1540px]">
         <TableHeader>
           <TableRow>
+            <TableHead className="w-12">
+              <Checkbox aria-label="全选当前页" checked={allCurrentPageSelected} onCheckedChange={(checked) => onToggleCurrentPage(checked === true)} />
+            </TableHead>
             <TableHead>人员 / 项目</TableHead>
             <TableHead>考勤日期 / 方向</TableHead>
             <TableHead>计划时间 / 照片</TableHead>
@@ -378,7 +521,10 @@ function DesktopRecords({
         </TableHeader>
         <TableBody>
           {records.map((record) => (
-            <TableRow key={record.id} className="align-top">
+            <TableRow key={`${record.id}-${record.device_job_id || "unassigned"}`} className="align-top">
+              <TableCell>
+                <Checkbox aria-label={`选择${record.worker_name || "该人员"}的下发记录`} checked={selectedRecordIds.has(record.id)} onCheckedChange={(checked) => onToggleRecord(record.id, checked === true)} />
+              </TableCell>
               <TableCell>
                 <WorkerProject record={record} />
               </TableCell>
@@ -425,6 +571,11 @@ function DesktopRecords({
                   message={record.send_message}
                   meta={`尝试 ${record.send_attempt_count} 次${record.device_job_id ? ` · 任务 ${record.device_job_id}` : ""}`}
                 />
+                {record.device_job_id ? (
+                  <Button type="button" variant="outline" size="sm" className="mt-2 h-7 text-xs" onClick={() => onViewLog(record.device_job_id!)}>
+                    详细日志
+                  </Button>
+                ) : null}
               </TableCell>
               <TableCell>
                 <DeviceStatusBadge status={record.device_result_status} />
@@ -446,7 +597,7 @@ function DesktopRecords({
           {!records.length ? (
             <TableRow>
               <TableCell
-                colSpan={8}
+                colSpan={9}
                 className="h-32 text-center text-muted-foreground"
               >
                 {loading ? "补考勤链路加载中" : "当前筛选条件下暂无补考勤记录"}
@@ -462,9 +613,15 @@ function DesktopRecords({
 function MobileRecords({
   records,
   loading,
+  selectedRecordIds,
+  onToggleRecord,
+  onViewLog,
 }: {
   records: SupplementalAttendanceRecord[];
   loading: boolean;
+  selectedRecordIds: Set<string>;
+  onToggleRecord: (recordId: string, checked: boolean) => void;
+  onViewLog: (jobId: string) => void;
 }) {
   if (!records.length) {
     return (
@@ -477,9 +634,12 @@ function MobileRecords({
   return (
     <div className="divide-y md:hidden">
       {records.map((record) => (
-        <article key={record.id} className="space-y-3 p-4">
+        <article key={`${record.id}-${record.device_job_id || "unassigned"}`} className="space-y-3 p-4">
           <div className="flex items-start justify-between gap-3">
-            <WorkerProject record={record} />
+            <div className="flex items-start gap-3">
+              <Checkbox className="mt-1" aria-label={`选择${record.worker_name || "该人员"}的下发记录`} checked={selectedRecordIds.has(record.id)} onCheckedChange={(checked) => onToggleRecord(record.id, checked === true)} />
+              <WorkerProject record={record} />
+            </div>
             <Badge variant="outline">{directionLabel(record.direction)}</Badge>
           </div>
           <div className="grid grid-cols-2 gap-2 rounded-lg bg-slate-50 p-3 text-xs dark:bg-muted/30">
@@ -504,6 +664,11 @@ function MobileRecords({
                 message={record.send_message}
                 meta={`尝试 ${record.send_attempt_count} 次`}
               />
+              {record.device_job_id ? (
+                <Button type="button" variant="outline" size="sm" className="mt-2 h-7 text-xs" onClick={() => onViewLog(record.device_job_id!)}>
+                  详细日志
+                </Button>
+              ) : null}
             </MobileStatusPanel>
             <MobileStatusPanel
               title="考勤机返回状态"
@@ -562,6 +727,64 @@ function DeviceIdentity({ record }: { record: SupplementalAttendanceRecord }) {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function DispatchLogDialog({
+  open,
+  loading,
+  log,
+  onOpenChange,
+}: {
+  open: boolean;
+  loading: boolean;
+  log: SupplementalAttendanceDispatchLog | null;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const requestText = log?.request_payload
+    ? JSON.stringify(log.request_payload, null, 2)
+    : "该次历史发送未保存完整请求参数，请重新补发后查看。";
+  const responseText = log?.response_payload
+    ? JSON.stringify(log.response_payload, null, 2)
+    : log?.last_error || "暂无对方响应数据";
+  const curl = typeof log?.request_payload?.curl === "string" ? log.request_payload.curl : "";
+  const copy = async (value: string, label: string) => {
+    await navigator.clipboard.writeText(value);
+    toast.success(`${label}已复制`);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[92svh] w-[94vw] max-w-5xl overflow-y-auto sm:max-w-5xl">
+        <DialogHeader>
+          <DialogTitle>详细发送日志</DialogTitle>
+          <DialogDescription>
+            {log ? `任务 ${log.job_id} · 尝试 ${log.attempt_count} 次 · ${log.logged_at ? formatDateTime(log.logged_at) : "暂无日志时间"}` : "正在读取最近一次发送详情"}
+          </DialogDescription>
+        </DialogHeader>
+        {loading ? (
+          <div className="py-16 text-center text-sm text-muted-foreground">详细日志加载中...</div>
+        ) : log ? (
+          <div className="space-y-4">
+            <LogBlock title="完整 cURL" value={curl || "该次历史发送未保存 cURL，请重新补发后查看。"} onCopy={curl ? () => void copy(curl, "cURL") : undefined} />
+            <LogBlock title="实际请求参数" value={requestText} onCopy={log.request_payload ? () => void copy(requestText, "请求参数") : undefined} />
+            <LogBlock title="对方原始响应" value={responseText} onCopy={() => void copy(responseText, "响应内容")} />
+          </div>
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function LogBlock({ title, value, onCopy }: { title: string; value: string; onCopy?: () => void }) {
+  return (
+    <section className="overflow-hidden rounded-lg border">
+      <div className="flex items-center justify-between border-b bg-slate-50 px-3 py-2 dark:bg-muted/30">
+        <h3 className="text-sm font-medium">{title}</h3>
+        {onCopy ? <Button type="button" variant="ghost" size="sm" onClick={onCopy}><Copy className="mr-1 size-4" />复制</Button> : null}
+      </div>
+      <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-all p-3 text-xs leading-5">{value}</pre>
+    </section>
   );
 }
 

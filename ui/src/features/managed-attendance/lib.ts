@@ -5,12 +5,13 @@ import type {
 
 export function summarizeManagedAttendanceConfig(config: ManagedAttendanceConfigLike) {
   const days = Number(config.monthly_attendance_days) || 0;
-  const shift = config.shift === "night" ? "夜班" : "白班";
   const plannedRecords = Math.max(days, 0) * 2;
   const inTime = config.check_in_time || "--:--";
+  const inEndTime = config.check_in_end_time || inTime;
   const outTime = config.check_out_time || "--:--";
+  const outEndTime = config.check_out_end_time || outTime;
 
-  return `${shift} · 每月 ${days} 天 · 预计 ${plannedRecords} 条 · ${inTime}/${outTime}`;
+  return `每月 ${days} 天 · 预计 ${plannedRecords} 条 · ${inTime}～${inEndTime}/${outTime}～${outEndTime}`;
 }
 
 export function isManagedPhotoGroupReady(photoGroup: ManagedAttendancePhotoGroupLike) {
@@ -19,10 +20,6 @@ export function isManagedPhotoGroupReady(photoGroup: ManagedAttendancePhotoGroup
     (photoGroup.in_photos?.filter(Boolean).length ?? 0) > 0 &&
     (photoGroup.out_photos?.filter(Boolean).length ?? 0) > 0
   );
-}
-
-export function managedAttendanceShiftLabel(shift: string) {
-  return shift === "night" ? "夜班" : "白班";
 }
 
 export function managedAttendanceStatusLabel(status: string) {

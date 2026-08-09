@@ -157,6 +157,19 @@ export function useGenerateManagedAttendanceMutation() {
   });
 }
 
+export function useResendManagedAttendanceDayMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ configId, attendanceDate }: { configId: string; attendanceDate: string }) =>
+      managedAttendanceService.resendDay(configId, attendanceDate),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: managedAttendanceKeys.recordsRoot() });
+      queryClient.invalidateQueries({ queryKey: managedAttendanceKeys.configsRoot() });
+      queryClient.invalidateQueries({ queryKey: ["supplemental-attendance"] });
+    },
+  });
+}
+
 export function useManagedAttendanceRecordsQuery(
   filters?: ManagedAttendanceListFilters,
 ) {

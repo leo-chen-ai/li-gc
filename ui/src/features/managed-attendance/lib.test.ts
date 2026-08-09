@@ -12,9 +12,11 @@ test("summarizes managed attendance config by attendance days and directions", (
       monthly_attendance_days: 22,
       shift: "night",
       check_in_time: "19:10",
+      check_in_end_time: "19:30",
       check_out_time: "23:05",
+      check_out_end_time: "23:20",
     }),
-    "夜班 · 每月 22 天 · 预计 44 条 · 19:10/23:05"
+    "每月 22 天 · 预计 44 条 · 19:10～19:30/23:05～23:20"
   );
 });
 

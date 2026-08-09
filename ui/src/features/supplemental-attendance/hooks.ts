@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { supplementalAttendanceService } from "./services";
 import type { SupplementalAttendanceListFilters } from "./types";
@@ -17,5 +17,13 @@ export function useSupplementalAttendanceRecordsQuery(
     queryFn: () => supplementalAttendanceService.listRecords(filters),
     placeholderData: (previousData) => previousData,
     refetchInterval: 15_000,
+  });
+}
+
+export function useDeleteSupplementalAttendanceRecordsMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: supplementalAttendanceService.deleteRecords,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: supplementalAttendanceKeys.all }),
   });
 }

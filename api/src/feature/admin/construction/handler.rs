@@ -351,7 +351,9 @@ const MANAGED_ATTENDANCE_CONFIG_COLUMNS: &[ColumnSpec] = &[
     column("monthly_attendance_days", ColumnKind::SmallInt),
     column("shift", ColumnKind::Text),
     column("check_in_time", ColumnKind::Text),
+    column("check_in_end_time", ColumnKind::Text),
     column("check_out_time", ColumnKind::Text),
+    column("check_out_end_time", ColumnKind::Text),
     column("is_enabled", ColumnKind::Boolean),
     column("remark", ColumnKind::Text),
 ];
@@ -7406,7 +7408,7 @@ pub async fn update_attendance_device(
           AND j.attendance_device_id = d.id
           AND j.job_type = 'supplemental_attendance'
           AND j.adapter_code = 'vendor_b'
-          AND d.device_type <> 'B厂家'
+          AND d.device_type NOT IN ('B厂家', '弹厂家')
           AND j.device_result_status <> 'success'
           AND j.status = 'pending'
         "#,
@@ -7638,8 +7640,7 @@ pub async fn create_managed_attendance_photo_group(
     State(state): State<AppState>,
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
-    ensure_json_string_array_if_present(&body, "in_photos")?;
-    ensure_json_string_array_if_present(&body, "out_photos")?;
+    validate_managed_photo_pairs(&body)?;
     create_row(
         state.db.pool(),
         "construction_managed_attendance_photo_groups",
@@ -7676,8 +7677,7 @@ pub async fn update_managed_attendance_photo_group(
     Path(photo_group_id): Path<Uuid>,
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
-    ensure_json_string_array_if_present(&body, "in_photos")?;
-    ensure_json_string_array_if_present(&body, "out_photos")?;
+    validate_managed_photo_pairs(&body)?;
     update_row(
         state.db.pool(),
         "construction_managed_attendance_photo_groups",
@@ -7764,12 +7764,7 @@ pub async fn update_managed_attendance_config(
         &[("id", config_id)],
     )
     .await?;
-    retire_ineligible_managed_dispatch_jobs(
-        state.db.pool(),
-        config_id,
-        "托管配置已停用",
-    )
-    .await?;
+    retire_ineligible_managed_dispatch_jobs(state.db.pool(), config_id, "托管配置已停用").await?;
     let row = fetch_managed_attendance_config(state.db.pool(), config_id).await?;
     Ok(ApiSuccess::default().with_data(row))
 }
@@ -7815,12 +7810,12 @@ pub async fn delete_managed_attendance_config(
     sqlx::query(
         r#"
         UPDATE construction_managed_attendance_records
-        SET is_deleted = TRUE,
-            deleted_at = NOW(),
-            dispatch_status = CASE WHEN dispatch_status = 'success' THEN dispatch_status ELSE 'skipped' END,
-            dispatch_message = CASE WHEN dispatch_status = 'success' THEN dispatch_message ELSE '托管配置已删除' END,
+        SET dispatch_status = CASE WHEN dispatch_status = 'success' THEN dispatch_status ELSE 'skipped' END,
+            dispatch_message = CASE WHEN dispatch_status = 'success' THEN dispatch_message ELSE '托管配置已删除，历史记录已保留' END,
             updated_at = NOW()
-        WHERE config_id = $1 AND is_deleted = FALSE
+        WHERE config_id = $1
+          AND is_deleted = FALSE
+          AND dispatch_status <> 'success'
         "#,
     )
     .bind(config_id)
@@ -7905,6 +7900,136 @@ pub async fn generate_managed_attendance_records(
         });
     let result = generate_managed_records_for_month(state.db.pool(), config_id, month).await?;
     Ok(ApiSuccess::default().with_data(result))
+}
+
+pub async fn resend_managed_attendance_day(
+    State(state): State<AppState>,
+    Path(config_id): Path<Uuid>,
+    Json(body): Json<Value>,
+) -> ApiResult<Value> {
+    let attendance_date = body
+        .get("attendance_date")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| invalid_input("attendance_date 不能为空"))
+        .and_then(|value| {
+            chrono::NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d")
+                .map_err(|_| invalid_column_value("attendance_date", "YYYY-MM-DD"))
+        })?;
+
+    let mut tx = state.db.pool().begin().await.map_err(db_error)?;
+    let record_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM construction_managed_attendance_records r
+        JOIN construction_managed_attendance_configs c
+          ON c.id = r.config_id AND c.is_deleted = FALSE AND c.is_enabled = TRUE
+        WHERE r.config_id = $1
+          AND r.attendance_date = $2
+          AND r.is_deleted = FALSE
+        "#,
+    )
+    .bind(config_id)
+    .bind(attendance_date)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(db_error)?;
+    if record_count == 0 {
+        return Err(invalid_input(
+            "该日期没有可补发的托管考勤记录，或托管配置已停用",
+        ));
+    }
+
+    let job_statuses = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT j.status
+        FROM device_dispatch_jobs j
+        JOIN construction_managed_attendance_records r
+          ON r.id = j.managed_attendance_record_id AND r.is_deleted = FALSE
+        WHERE r.config_id = $1
+          AND r.attendance_date = $2
+          AND j.job_type = 'supplemental_attendance'
+        FOR UPDATE OF j
+        "#,
+    )
+    .bind(config_id)
+    .bind(attendance_date)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(db_error)?;
+    if job_statuses.is_empty() {
+        return Err(invalid_input(
+            "该日期没有可补发的设备任务，请先重新生成当月记录",
+        ));
+    }
+    if job_statuses.iter().any(|status| status == "processing") {
+        return Err(invalid_input("该日期仍有任务正在下发，请稍后再补发"));
+    }
+
+    let job_count = sqlx::query(
+        r#"
+        UPDATE device_dispatch_jobs j
+        SET status = 'pending',
+            next_attempt_at = NOW(),
+            last_error = NULL,
+            locked_by = NULL,
+            locked_until = NULL,
+            device_result_status = 'pending',
+            device_result_message = '管理员手动补发',
+            device_reported_at = NULL,
+            attempt_count = 0,
+            sent_at = NULL,
+            ack_at = NULL,
+            ack_code = NULL,
+            ack_payload = NULL,
+            updated_at = NOW()
+        FROM construction_managed_attendance_records r
+        WHERE j.managed_attendance_record_id = r.id
+          AND r.config_id = $1
+          AND r.attendance_date = $2
+          AND r.is_deleted = FALSE
+          AND j.job_type = 'supplemental_attendance'
+          AND j.adapter_code = 'vendor_b'
+          AND j.transport = 'http_push'
+        "#,
+    )
+    .bind(config_id)
+    .bind(attendance_date)
+    .execute(&mut *tx)
+    .await
+    .map_err(db_error)?
+    .rows_affected();
+    if job_count == 0 {
+        return Err(invalid_input("该日期没有支持手动补发的弹厂家任务"));
+    }
+
+    sqlx::query(
+        r#"
+        UPDATE construction_managed_attendance_records
+        SET status = 'generated',
+            dispatch_status = 'pending',
+            dispatched_at = NULL,
+            dispatch_message = '已手动补发，等待推送',
+            error_message = NULL,
+            updated_at = NOW()
+        WHERE config_id = $1
+          AND attendance_date = $2
+          AND is_deleted = FALSE
+        "#,
+    )
+    .bind(config_id)
+    .bind(attendance_date)
+    .execute(&mut *tx)
+    .await
+    .map_err(db_error)?;
+    tx.commit().await.map_err(db_error)?;
+
+    Ok(ApiSuccess::default().with_data(serde_json::json!({
+        "config_id": config_id,
+        "attendance_date": attendance_date,
+        "record_count": record_count,
+        "job_count": job_count,
+    })))
 }
 
 pub async fn list_managed_attendance_records(
@@ -9641,6 +9766,47 @@ fn ensure_json_string_array_if_present(body: &Value, column: &str) -> Result<(),
     }
 }
 
+fn validate_managed_photo_pairs(body: &Value) -> Result<(), ApiError> {
+    if body.get("in_photos").is_none() && body.get("out_photos").is_none() {
+        return Ok(());
+    }
+    ensure_json_string_array_if_present(body, "in_photos")?;
+    ensure_json_string_array_if_present(body, "out_photos")?;
+    let read = |column: &str| {
+        body.get(column)
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::trim)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    };
+    let in_photos = read("in_photos");
+    let out_photos = read("out_photos");
+    if in_photos.is_empty() || out_photos.is_empty() {
+        return Err(invalid_input("至少需要上传 1 组完整的进场、出场照片"));
+    }
+    if in_photos.len() != out_photos.len() {
+        return Err(invalid_input(
+            "每个照片组必须同时包含 1 张进场和 1 张出场照片",
+        ));
+    }
+    if in_photos.len() > 30 {
+        return Err(invalid_input("托管照片最多支持 30 组"));
+    }
+    if in_photos
+        .iter()
+        .chain(out_photos.iter())
+        .any(|url| url.is_empty())
+    {
+        return Err(invalid_input("照片地址不能为空"));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 struct ContractTemplateSource {
     content: String,
@@ -11004,6 +11170,7 @@ async fn validate_managed_attendance_config_body(
 
     validate_managed_config_values(object)?;
     ensure_worker_in_project(pool, project_id, worker_id).await?;
+    ensure_vendor_b_device_in_project(pool, project_id).await?;
     if let Some(photo_group_id) = photo_group_id {
         ensure_photo_group_in_project(pool, project_id, photo_group_id).await?;
     }
@@ -11105,9 +11272,17 @@ fn validate_managed_config_values(object: &serde_json::Map<String, Value>) -> Re
     if let Some(value) = object.get("check_in_time").and_then(Value::as_str) {
         parse_managed_time("check_in_time", value)?;
     }
+    if let Some(value) = object.get("check_in_end_time").and_then(Value::as_str) {
+        parse_managed_time("check_in_end_time", value)?;
+    }
     if let Some(value) = object.get("check_out_time").and_then(Value::as_str) {
         parse_managed_time("check_out_time", value)?;
     }
+    if let Some(value) = object.get("check_out_end_time").and_then(Value::as_str) {
+        parse_managed_time("check_out_end_time", value)?;
+    }
+    validate_managed_time_range(object, "check_in_time", "check_in_end_time", "进场")?;
+    validate_managed_time_range(object, "check_out_time", "check_out_end_time", "出场")?;
 
     Ok(())
 }
@@ -11134,6 +11309,35 @@ async fn ensure_worker_in_project(
         Ok(())
     } else {
         Err(invalid_input("托管工人不属于所选项目"))
+    }
+}
+
+async fn ensure_vendor_b_device_in_project(
+    pool: &sqlx::PgPool,
+    project_id: Uuid,
+) -> Result<(), ApiError> {
+    let exists = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS(
+            SELECT 1
+            FROM construction_attendance_devices
+            WHERE project_id = $1
+              AND is_deleted = FALSE
+              AND device_type IN ('B厂家', '弹厂家')
+              AND NULLIF(BTRIM(serial_number), '') IS NOT NULL
+        )
+        "#,
+    )
+    .bind(project_id)
+    .fetch_one(pool)
+    .await
+    .map_err(db_error)?;
+    if exists {
+        Ok(())
+    } else {
+        Err(invalid_input(
+            "该项目未配置弹厂家考勤机，当前自动托管暂不支持海厂家（原A厂家）设备",
+        ))
     }
 }
 
@@ -11202,7 +11406,9 @@ pub(crate) async fn generate_managed_records_for_month(
             c.monthly_attendance_days,
             c.shift,
             c.check_in_time,
+            c.check_in_end_time,
             c.check_out_time,
+            c.check_out_end_time,
             c.is_enabled,
             w.name AS worker_name,
             w.id_card AS worker_id_card,
@@ -11232,14 +11438,18 @@ pub(crate) async fn generate_managed_records_for_month(
     let monthly_attendance_days: i16 = row.get("monthly_attendance_days");
     let shift: String = row.get("shift");
     let check_in_time: String = row.get("check_in_time");
+    let check_in_end_time: String = row.get("check_in_end_time");
     let check_out_time: String = row.get("check_out_time");
+    let check_out_end_time: String = row.get("check_out_end_time");
     let worker_name: Option<String> = row.try_get("worker_name").ok();
     let worker_id_card: Option<String> = row.try_get("worker_id_card").ok();
     let in_photos: Option<Value> = row.try_get("in_photos").ok();
     let out_photos: Option<Value> = row.try_get("out_photos").ok();
     let worker_id_card_mask = worker_id_card.as_deref().map(mask_id_card);
     let in_time = parse_managed_time("check_in_time", &check_in_time)?;
+    let in_end_time = parse_managed_time("check_in_end_time", &check_in_end_time)?;
     let out_time = parse_managed_time("check_out_time", &check_out_time)?;
+    let out_end_time = parse_managed_time("check_out_end_time", &check_out_end_time)?;
     let attendance_days = selected_month_days(month, monthly_attendance_days, config_id)?;
     let next_month =
         next_month_start(month).ok_or_else(|| invalid_column_value("month", "YYYY-MM"))?;
@@ -11300,15 +11510,32 @@ pub(crate) async fn generate_managed_records_for_month(
     .execute(&mut *tx)
     .await
     .map_err(db_error)?;
-    for attendance_date in &attendance_days {
+    let photo_pairs =
+        deterministic_photo_pairs(in_photos.as_ref(), out_photos.as_ref(), config_id, month);
+    for (day_index, attendance_date) in attendance_days.iter().enumerate() {
         for direction in [0_i16, 1_i16] {
-            let planned_at =
-                managed_planned_at(*attendance_date, in_time, out_time, &shift, direction)?;
-            let photo_url = if direction == 0 {
-                deterministic_photo_url(in_photos.as_ref(), config_id, *attendance_date, direction)
+            let (range_start, range_end) = if direction == 0 {
+                (in_time, in_end_time)
             } else {
-                deterministic_photo_url(out_photos.as_ref(), config_id, *attendance_date, direction)
+                (out_time, out_end_time)
             };
+            let planned_at = managed_planned_at(
+                *attendance_date,
+                range_start,
+                range_end,
+                &shift,
+                direction,
+                config_id,
+            )?;
+            let photo_url = photo_pairs
+                .get(day_index % photo_pairs.len().max(1))
+                .map(|pair| {
+                    if direction == 0 {
+                        pair.0.clone()
+                    } else {
+                        pair.1.clone()
+                    }
+                });
 
             let existing_dispatch_states = sqlx::query_as::<_, (String, String)>(
                 r#"
@@ -11401,10 +11628,12 @@ pub(crate) async fn generate_managed_records_for_month(
                 FROM construction_attendance_devices
                 WHERE project_id = $1
                   AND is_deleted = FALSE
+                  AND device_type IN ('B厂家', '弹厂家')
                   AND direction = CASE
                       WHEN EXISTS (
                           SELECT 1 FROM construction_attendance_devices exact
                           WHERE exact.project_id = $1 AND exact.is_deleted = FALSE
+                            AND exact.device_type IN ('B厂家', '弹厂家')
                             AND exact.direction = $2
                       ) THEN $2
                       ELSE 2
@@ -11439,18 +11668,35 @@ pub(crate) async fn generate_managed_records_for_month(
             .map_err(db_error)?;
             if targets.is_empty() {
                 synchronize_managed_dispatch_job(
-                    &mut tx, managed_attendance_record_id, project_id, worker_id,
-                    worker_name.as_deref().unwrap_or_default(), direction, planned_at,
-                    photo_url.as_deref(), None, None, None,
-                ).await?;
+                    &mut tx,
+                    managed_attendance_record_id,
+                    project_id,
+                    worker_id,
+                    worker_name.as_deref().unwrap_or_default(),
+                    direction,
+                    planned_at,
+                    photo_url.as_deref(),
+                    None,
+                    None,
+                    None,
+                )
+                .await?;
             } else {
                 for (device_id, device_type, serial_number) in targets {
                     synchronize_managed_dispatch_job(
-                        &mut tx, managed_attendance_record_id, project_id, worker_id,
-                        worker_name.as_deref().unwrap_or_default(), direction, planned_at,
-                        photo_url.as_deref(), Some(device_id), Some(device_type.as_str()),
+                        &mut tx,
+                        managed_attendance_record_id,
+                        project_id,
+                        worker_id,
+                        worker_name.as_deref().unwrap_or_default(),
+                        direction,
+                        planned_at,
+                        photo_url.as_deref(),
+                        Some(device_id),
+                        Some(device_type.as_str()),
                         serial_number.as_deref(),
-                    ).await?;
+                    )
+                    .await?;
                 }
             }
             generated_count += 1;
@@ -11516,21 +11762,37 @@ async fn synchronize_managed_dispatch_job(
     };
 
     let device_type = target_device_type.unwrap_or("unknown");
-    let supported = device_type == "B厂家";
+    let supported = matches!(device_type, "B厂家" | "弹厂家");
+    let has_photo = photo_url.is_some_and(|value| !value.trim().is_empty());
+    let dispatchable = supported && has_photo;
     let adapter_code = if supported {
         "vendor_b".to_owned()
     } else {
         unsupported_adapter_code(device_type)
     };
     let transport = if supported {
-        "http_pull"
+        "http_push"
     } else {
         "unsupported"
     };
-    let initial_platform_status = if supported { "pending" } else { "failed" };
-    let initial_device_status = if supported { "pending" } else { "failed" };
-    let unsupported_message =
-        (!supported).then(|| format!("暂不支持设备类型“{device_type}”的补录考勤下发"));
+    let planned_time_expired = dispatchable && planned_at <= chrono::Utc::now();
+    let initial_platform_status = if planned_time_expired {
+        "skipped"
+    } else if dispatchable {
+        "pending"
+    } else {
+        "failed"
+    };
+    let initial_device_status = if dispatchable { "pending" } else { "failed" };
+    let unsupported_message = if planned_time_expired {
+        Some("生成记录时计划执行时间已过，自动跳过；如需发送请使用手动补发".to_owned())
+    } else if !supported {
+        Some(format!("暂不支持设备类型“{device_type}”的补录考勤下发"))
+    } else if !has_photo {
+        Some("托管考勤未配置照片，无法调用弹厂家考勤照片接口".to_owned())
+    } else {
+        None
+    };
     let device_sn = target_device_serial_number
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -11581,7 +11843,7 @@ async fn synchronize_managed_dispatch_job(
             )
             VALUES (
                 $1, $2, $3, $4, 'supplemental_attendance', NULL, $5, $6,
-                $7, NOW(), $8, 'supplemental_attendance', $9, $10, $11, $12, $8
+                $7, $13, $8, 'supplemental_attendance', $9, $10, $11, $12, $8
             )
             ON CONFLICT (managed_attendance_record_id, attendance_device_id)
                 WHERE managed_attendance_record_id IS NOT NULL AND attendance_device_id IS NOT NULL
@@ -11609,7 +11871,7 @@ async fn synchronize_managed_dispatch_job(
                       OR (device_dispatch_jobs.device_result_status = 'accepted' AND device_dispatch_jobs.status = 'delivered')
                       OR device_dispatch_jobs.status = 'processing'
                         THEN device_dispatch_jobs.next_attempt_at
-                    ELSE NOW()
+                    ELSE EXCLUDED.next_attempt_at
                 END,
                 last_error = CASE
                     WHEN device_dispatch_jobs.device_result_status = 'success'
@@ -11705,6 +11967,7 @@ async fn synchronize_managed_dispatch_job(
         .bind(transport)
         .bind(managed_attendance_record_id)
         .bind(initial_device_status)
+        .bind(planned_at)
         .fetch_one(&mut **tx)
         .await
         .map_err(db_error)?;
@@ -11898,18 +12161,36 @@ fn next_month_start(month: chrono::NaiveDate) -> Option<chrono::NaiveDate> {
 
 fn managed_planned_at(
     attendance_date: chrono::NaiveDate,
-    in_time: chrono::NaiveTime,
-    out_time: chrono::NaiveTime,
+    range_start: chrono::NaiveTime,
+    range_end: chrono::NaiveTime,
     shift: &str,
     direction: i16,
+    config_id: Uuid,
 ) -> Result<chrono::DateTime<chrono::Utc>, ApiError> {
     let mut date = attendance_date;
-    let time = if direction == 0 { in_time } else { out_time };
-    if direction == 1 && shift == "night" && out_time <= in_time {
+    if range_end < range_start {
+        return Err(invalid_input("考勤随机时间区间结束时间不能早于开始时间"));
+    }
+    if direction == 1
+        && shift == "night"
+        && range_start < chrono::NaiveTime::from_hms_opt(12, 0, 0).unwrap()
+    {
         date = attendance_date
             .succ_opt()
             .ok_or_else(|| invalid_column_value("attendance_date", "valid date"))?;
     }
+    let start_seconds = range_start.num_seconds_from_midnight();
+    let end_seconds = range_end.num_seconds_from_midnight();
+    let mut seed = [0_u8; 32];
+    seed[..16].copy_from_slice(config_id.as_bytes());
+    seed[16..20].copy_from_slice(&attendance_date.year().to_le_bytes());
+    seed[20..24].copy_from_slice(&attendance_date.month().to_le_bytes());
+    seed[24..28].copy_from_slice(&attendance_date.day().to_le_bytes());
+    seed[28..30].copy_from_slice(&direction.to_le_bytes());
+    let mut rng = StdRng::from_seed(seed);
+    let random_seconds = rng.gen_range(start_seconds..=end_seconds);
+    let time = chrono::NaiveTime::from_num_seconds_from_midnight_opt(random_seconds, 0)
+        .ok_or_else(|| invalid_column_value("planned_at", "valid time range"))?;
     let local = date.and_time(time);
     let offset = chrono::FixedOffset::east_opt(8 * 3600)
         .ok_or_else(|| invalid_column_value("timezone", "UTC+8"))?;
@@ -11920,34 +12201,57 @@ fn managed_planned_at(
     Ok(planned_at.with_timezone(&chrono::Utc))
 }
 
+fn validate_managed_time_range(
+    object: &serde_json::Map<String, Value>,
+    start_column: &str,
+    end_column: &str,
+    label: &str,
+) -> Result<(), ApiError> {
+    let (Some(start), Some(end)) = (
+        object.get(start_column).and_then(Value::as_str),
+        object.get(end_column).and_then(Value::as_str),
+    ) else {
+        return Ok(());
+    };
+    if parse_managed_time(start_column, start)? > parse_managed_time(end_column, end)? {
+        return Err(invalid_input(format!("{label}结束时间不能早于开始时间")));
+    }
+    Ok(())
+}
+
 fn parse_managed_time(column: &str, value: &str) -> Result<chrono::NaiveTime, ApiError> {
     chrono::NaiveTime::parse_from_str(value.trim(), "%H:%M")
         .or_else(|_| chrono::NaiveTime::parse_from_str(value.trim(), "%H:%M:%S"))
         .map_err(|_| invalid_column_value(column, "HH:mm"))
 }
 
-fn deterministic_photo_url(
-    value: Option<&Value>,
+fn deterministic_photo_pairs(
+    in_value: Option<&Value>,
+    out_value: Option<&Value>,
     config_id: Uuid,
-    attendance_date: chrono::NaiveDate,
-    direction: i16,
-) -> Option<String> {
-    let photos = value?
-        .as_array()?
-        .iter()
-        .filter_map(Value::as_str)
-        .map(str::trim)
-        .filter(|url| !url.is_empty())
+    month: chrono::NaiveDate,
+) -> Vec<(String, String)> {
+    let strings = |value: Option<&Value>| {
+        value
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .filter(|url| !url.is_empty())
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    let mut pairs = strings(in_value)
+        .into_iter()
+        .zip(strings(out_value))
         .collect::<Vec<_>>();
-    if photos.is_empty() {
-        return None;
-    }
-    let id_bytes = config_id.as_bytes();
-    let id_part = u64::from_le_bytes(id_bytes[..8].try_into().expect("UUID has 16 bytes"));
-    let date_part = u64::try_from(attendance_date.num_days_from_ce()).unwrap_or_default();
-    let index = (id_part ^ date_part ^ u64::try_from(direction).unwrap_or_default()) as usize
-        % photos.len();
-    Some(photos[index].to_owned())
+    let mut seed = [0_u8; 32];
+    seed[..16].copy_from_slice(config_id.as_bytes());
+    seed[16..20].copy_from_slice(&month.year().to_le_bytes());
+    seed[20..24].copy_from_slice(&month.month().to_le_bytes());
+    pairs.shuffle(&mut StdRng::from_seed(seed));
+    pairs
 }
 
 fn mask_id_card(value: &str) -> String {
@@ -13499,6 +13803,76 @@ mod tests {
         assert_ne!(
             first.iter().map(|date| date.day()).collect::<Vec<_>>(),
             (1..=12).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn managed_planned_time_is_stable_and_inside_configured_range() {
+        let config_id = Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
+        let date = chrono::NaiveDate::from_ymd_opt(2026, 8, 9).unwrap();
+        let start = chrono::NaiveTime::from_hms_opt(8, 0, 0).unwrap();
+        let end = chrono::NaiveTime::from_hms_opt(8, 30, 0).unwrap();
+        let first = managed_planned_at(date, start, end, "day", 0, config_id).unwrap();
+        let second = managed_planned_at(date, start, end, "day", 0, config_id).unwrap();
+        let local_time = first
+            .with_timezone(&chrono::FixedOffset::east_opt(8 * 3600).unwrap())
+            .time();
+
+        assert_eq!(first, second);
+        assert!(local_time >= start && local_time <= end);
+    }
+
+    #[test]
+    fn managed_photo_pairs_are_stable_and_not_repeated_before_exhaustion() {
+        let config_id = Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
+        let month = chrono::NaiveDate::from_ymd_opt(2026, 9, 1).unwrap();
+        let in_photos = serde_json::json!(["in-1", "in-2", "in-3"]);
+        let out_photos = serde_json::json!(["out-1", "out-2", "out-3"]);
+        let first =
+            deterministic_photo_pairs(Some(&in_photos), Some(&out_photos), config_id, month);
+        let second =
+            deterministic_photo_pairs(Some(&in_photos), Some(&out_photos), config_id, month);
+
+        assert_eq!(first, second);
+        assert_eq!(first.len(), 3);
+        assert_eq!(
+            first
+                .iter()
+                .map(|pair| &pair.0)
+                .collect::<HashSet<_>>()
+                .len(),
+            3
+        );
+        for (in_photo, out_photo) in first {
+            assert_eq!(
+                in_photo.trim_start_matches("in-"),
+                out_photo.trim_start_matches("out-")
+            );
+        }
+    }
+
+    #[test]
+    fn managed_photo_pair_payload_requires_complete_pairs_and_caps_at_thirty() {
+        assert!(
+            validate_managed_photo_pairs(&serde_json::json!({
+                "in_photos": ["in-1"], "out_photos": ["out-1"]
+            }))
+            .is_ok()
+        );
+        assert!(
+            validate_managed_photo_pairs(&serde_json::json!({
+                "in_photos": ["in-1", "in-2"], "out_photos": ["out-1"]
+            }))
+            .is_err()
+        );
+        let photos = (0..31)
+            .map(|index| format!("photo-{index}"))
+            .collect::<Vec<_>>();
+        assert!(
+            validate_managed_photo_pairs(&serde_json::json!({
+                "in_photos": photos, "out_photos": photos
+            }))
+            .is_err()
         );
     }
 

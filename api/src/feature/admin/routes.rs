@@ -105,6 +105,10 @@ pub fn admin_routes() -> Router<AppState> {
             post(construction::handler::generate_managed_attendance_records),
         )
         .route(
+            "/managed-attendance/configs/{config_id}/resend-day",
+            post(construction::handler::resend_managed_attendance_day),
+        )
+        .route(
             "/managed-attendance/records",
             get(construction::handler::list_managed_attendance_records),
         )
@@ -457,7 +461,12 @@ pub fn management_routes(state: AppState) -> Router<AppState> {
         )
         .route(
             "/supplemental-attendance/records",
-            get(supplemental_attendance::list_records),
+            get(supplemental_attendance::list_records)
+                .delete(supplemental_attendance::delete_records),
+        )
+        .route(
+            "/supplemental-attendance/records/{job_id}/log",
+            get(supplemental_attendance::get_dispatch_log),
         )
         .route("/projects", get(construction::handler::list_projects))
         .route(

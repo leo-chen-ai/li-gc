@@ -54,6 +54,10 @@ async fn main() -> eyre::Result<()> {
         quax::feature::admin::managed_attendance_scheduler::spawn_managed_attendance_scheduler(
             state.clone(),
         );
+        // Push due managed attendance records to the vendor B photo endpoint.
+        quax::feature::admin::managed_attendance_dispatcher::spawn_managed_attendance_dispatcher(
+            state.clone(),
+        );
         // Attendance device MQTT consumers and integration outbox consumers.
         quax::feature::device_mqtt::worker::spawn_device_mqtt_worker(state.clone());
         quax::feature::device_mqtt::retry::spawn_device_issue_retry_worker(state.clone());
