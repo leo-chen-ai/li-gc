@@ -60,7 +60,7 @@ import type {
   SupplementalAttendanceSummary,
 } from "../types";
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE_OPTIONS = [10, 20, 50] as const;
 const emptySummary: SupplementalAttendanceSummary = {
   total: 0,
   unassigned: 0,
@@ -83,6 +83,7 @@ export function SupplementalAttendancePage({ embedded = false }: { embedded?: bo
     SupplementalAttendanceDeviceStatus | "all"
   >("all");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(20);
   const [selectedRecordIds, setSelectedRecordIds] = useState<Set<string>>(new Set());
   const [dispatchLog, setDispatchLog] = useState<SupplementalAttendanceDispatchLog | null>(null);
   const [logOpen, setLogOpen] = useState(false);
@@ -92,7 +93,7 @@ export function SupplementalAttendancePage({ embedded = false }: { embedded?: bo
   const filters = useMemo(
     () => ({
       page,
-      page_size: PAGE_SIZE,
+      page_size: pageSize,
       project_id: projectId || undefined,
       keyword: deferredKeyword || undefined,
       month: month || undefined,
@@ -101,14 +102,13 @@ export function SupplementalAttendancePage({ embedded = false }: { embedded?: bo
       send_status: sendStatus === "all" ? undefined : sendStatus,
       device_status: deviceStatus === "all" ? undefined : deviceStatus,
     }),
-    [deferredKeyword, deviceStatus, endTime, month, page, projectId, sendStatus, startTime],
+    [deferredKeyword, deviceStatus, endTime, month, page, pageSize, projectId, sendStatus, startTime],
   );
   const recordsQuery = useSupplementalAttendanceRecordsQuery(filters);
   const deleteRecords = useDeleteSupplementalAttendanceRecordsMutation();
   const records = recordsQuery.data?.items ?? [];
   const total = recordsQuery.data?.total ?? 0;
   const summary = recordsQuery.data?.summary ?? emptySummary;
-  const pageSize = recordsQuery.data?.page_size ?? PAGE_SIZE;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const currentPageRecordIds = [...new Set(records.map((record) => record.id))];
   const allCurrentPageSelected = currentPageRecordIds.length > 0
@@ -261,6 +261,7 @@ export function SupplementalAttendancePage({ embedded = false }: { embedded?: bo
           totalPages={totalPages}
           loading={recordsQuery.isFetching}
           onPageChange={setPage}
+          onPageSizeChange={(s) => { setPageSize(s as (typeof PAGE_SIZE_OPTIONS)[number]); setPage(1); }}
         />
       </section>
       <DispatchLogDialog open={logOpen} loading={logLoading} log={dispatchLog} onOpenChange={setLogOpen} />
@@ -900,6 +901,7 @@ function PaginationFooter({
   totalPages,
   loading,
   onPageChange,
+  onPageSizeChange,
 }: {
   page: number;
   pageSize: number;
@@ -907,15 +909,29 @@ function PaginationFooter({
   totalPages: number;
   loading: boolean;
   onPageChange: (page: number) => void;
+  onPageSizeChange?: (size: number) => void;
 }) {
   const start = total ? (page - 1) * pageSize + 1 : 0;
   const end = Math.min(page * pageSize, total);
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 border-t bg-slate-50/70 px-4 py-3 text-sm dark:bg-muted/20">
       <span className="text-muted-foreground">
-        显示 {start}-{end} 条，共 {total} 条，每页 {pageSize} 条
+        显示 {start}-{end} 条，共 {total} 条
       </span>
       <div className="flex items-center gap-2">
+        {onPageSizeChange && (
+          <>
+            <span className="text-xs">每页</span>
+            <select
+              value={pageSize}
+              onChange={(event) => onPageSizeChange(Number(event.target.value))}
+              className="h-8 rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-700 outline-none focus:border-[#0f6b5d] focus:ring-2 focus:ring-[#0f6b5d]/15 dark:border-border dark:bg-background dark:text-foreground"
+              aria-label="选择每页条数"
+            >
+              {PAGE_SIZE_OPTIONS.map((option) => (<option key={option} value={option}>{option} 条</option>))}
+            </select>
+          </>
+        )}
         <Button
           variant="outline"
           size="sm"

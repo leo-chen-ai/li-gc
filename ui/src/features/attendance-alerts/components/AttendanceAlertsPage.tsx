@@ -75,7 +75,7 @@ import {
   type AttendanceAlertTabKey,
 } from "../lib";
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE_OPTIONS = [10, 20, 50] as const;
 
 type ConfigFormState = {
   project_id: string;
@@ -102,10 +102,12 @@ export function AttendanceAlertsPage() {
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [configKeyword, setConfigKeyword] = useState("");
   const [configPage, setConfigPage] = useState(1);
+  const [configPageSize, setConfigPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(10);
   const [logKeyword, setLogKeyword] = useState("");
   const [logCategory, setLogCategory] = useState<ConstructionAttendanceAlertCategory | "all">("all");
   const [logDate, setLogDate] = useState("");
   const [logPage, setLogPage] = useState(1);
+  const [logPageSize, setLogPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(10);
   const [formOpen, setFormOpen] = useState(false);
   const [editingConfig, setEditingConfig] = useState<ConstructionAttendanceAlertConfig | null>(null);
   const [pendingDelete, setPendingDelete] = useState<ConstructionAttendanceAlertConfig | null>(null);
@@ -133,22 +135,22 @@ export function AttendanceAlertsPage() {
   const configFilters = useMemo(
     () => ({
       page: configPage,
-      page_size: PAGE_SIZE,
+      page_size: configPageSize,
       keyword: configKeyword.trim() || undefined,
       project_id: selectedProjectId || undefined,
     }),
-    [configKeyword, configPage, selectedProjectId]
+    [configKeyword, configPage, configPageSize, selectedProjectId]
   );
   const logFilters = useMemo(
     () => ({
       page: logPage,
-      page_size: PAGE_SIZE,
+      page_size: logPageSize,
       keyword: logKeyword.trim() || undefined,
       project_id: selectedProjectId || undefined,
       category: logCategory === "all" ? undefined : logCategory,
       alert_date: logDate || undefined,
     }),
-    [logCategory, logDate, logKeyword, logPage, selectedProjectId]
+    [logCategory, logDate, logKeyword, logPage, logPageSize, selectedProjectId]
   );
 
   const configsQuery = useAttendanceAlertConfigsQuery(configFilters);
@@ -161,8 +163,8 @@ export function AttendanceAlertsPage() {
   const logs = logsQuery.data?.items ?? [];
   const configTotal = configsQuery.data?.total ?? 0;
   const logTotal = logsQuery.data?.total ?? 0;
-  const configTotalPages = Math.max(1, Math.ceil(configTotal / (configsQuery.data?.page_size ?? PAGE_SIZE)));
-  const logTotalPages = Math.max(1, Math.ceil(logTotal / (logsQuery.data?.page_size ?? PAGE_SIZE)));
+  const configTotalPages = Math.max(1, Math.ceil(configTotal / configPageSize));
+  const logTotalPages = Math.max(1, Math.ceil(logTotal / logPageSize));
   const enabledCount = configs.filter((config) => config.is_enabled).length;
   const alertCount = logs.reduce((total, log) => total + log.absent_count, 0);
   const currentProject = projects.find((project) => project.id === selectedProjectId);
@@ -406,9 +408,10 @@ export function AttendanceAlertsPage() {
         <PaginationFooter
           total={configTotal}
           page={configPage}
+          pageSize={configPageSize}
           totalPages={configTotalPages}
-          onPrevious={() => setConfigPage((current) => Math.max(1, current - 1))}
-          onNext={() => setConfigPage((current) => Math.min(configTotalPages, current + 1))}
+          onPageChange={(p) => setConfigPage(p)}
+          onPageSizeChange={(s) => { setConfigPageSize(s as (typeof PAGE_SIZE_OPTIONS)[number]); setConfigPage(1); }}
         />
       </section>
       ) : null}
@@ -510,9 +513,10 @@ export function AttendanceAlertsPage() {
         <PaginationFooter
           total={logTotal}
           page={logPage}
+          pageSize={logPageSize}
           totalPages={logTotalPages}
-          onPrevious={() => setLogPage((current) => Math.max(1, current - 1))}
-          onNext={() => setLogPage((current) => Math.min(logTotalPages, current + 1))}
+          onPageChange={(p) => setLogPage(p)}
+          onPageSizeChange={(s) => { setLogPageSize(s as (typeof PAGE_SIZE_OPTIONS)[number]); setLogPage(1); }}
         />
       </section>
       ) : null}
@@ -692,17 +696,18 @@ function TableMessage({
 function PaginationFooter({
   total,
   page,
+  pageSize,
   totalPages,
-  onPrevious,
-  onNext,
+  onPageChange,
+  onPageSizeChange,
 }: {
   total: number;
   page: number;
+  pageSize: number;
   totalPages: number;
-  onPrevious: () => void;
-  onNext: () => void;
+  onPageChange: (page: number) => void;
+  onPageSizeChange?: (size: number) => void;
 }) {
-  const pageSize = PAGE_SIZE;
   const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const rangeEnd = Math.min(total, page * pageSize);
 
@@ -712,13 +717,26 @@ function PaginationFooter({
         显示 {rangeStart}-{rangeEnd} 条，共 {total} 条
       </span>
       <div className="flex items-center gap-2">
-        <Button variant="outline" size="sm" onClick={onPrevious} disabled={page <= 1}>
+        {onPageSizeChange && (
+          <>
+            <span className="text-xs">每页</span>
+            <select
+              value={pageSize}
+              onChange={(event) => onPageSizeChange(Number(event.target.value))}
+              className="h-8 rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-700 outline-none focus:border-[#0f6b5d] focus:ring-2 focus:ring-[#0f6b5d]/15 dark:border-border dark:bg-background dark:text-foreground"
+              aria-label="选择每页条数"
+            >
+              {PAGE_SIZE_OPTIONS.map((option) => (<option key={option} value={option}>{option} 条</option>))}
+            </select>
+          </>
+        )}
+        <Button variant="outline" size="sm" onClick={() => onPageChange(Math.max(1, page - 1))} disabled={page <= 1}>
           上一页
         </Button>
         <span className="min-w-16 text-center">
           {page}/{totalPages}
         </span>
-        <Button variant="outline" size="sm" onClick={onNext} disabled={page >= totalPages}>
+        <Button variant="outline" size="sm" onClick={() => onPageChange(Math.min(totalPages, page + 1))} disabled={page >= totalPages}>
           下一页
         </Button>
       </div>

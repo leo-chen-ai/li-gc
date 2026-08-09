@@ -62,7 +62,7 @@ import type {
 } from "@/features/projects/types/construction-types";
 import { cn } from "@/lib/utils";
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE_OPTIONS = [10, 20, 50] as const;
 
 const statusOptions = [
   { value: "pending", label: "下发中" },
@@ -117,6 +117,7 @@ export function AttendanceDeviceIssueReportsPage() {
   const [status, setStatus] = useState("all");
   const [action, setAction] = useState("all");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(10);
   const [formOpen, setFormOpen] = useState(false);
   const [reportPendingDelete, setReportPendingDelete] = useState<ConstructionAttendanceDeviceIssueReport | null>(null);
   const [form, setForm] = useState<IssueReportFormState>(defaultFormState);
@@ -131,7 +132,7 @@ export function AttendanceDeviceIssueReportsPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [action, attendanceDeviceId, keyword, selectedProjectId, status]);
+  }, [action, attendanceDeviceId, keyword, pageSize, selectedProjectId, status]);
 
   useEffect(() => {
     if (searchProjectId) setSelectedProjectId(searchProjectId);
@@ -140,7 +141,7 @@ export function AttendanceDeviceIssueReportsPage() {
   const filters = useMemo(
     () => ({
       page,
-      page_size: PAGE_SIZE,
+      page_size: pageSize,
       keyword: keyword.trim() || undefined,
       project_id: selectedProjectId || undefined,
       attendance_device_id: attendanceDeviceId || undefined,
@@ -148,13 +149,12 @@ export function AttendanceDeviceIssueReportsPage() {
       action: action === "all" ? undefined : action,
       include_delete_actions: includeDeleteActions ? "1" : undefined,
     }),
-    [action, attendanceDeviceId, includeDeleteActions, keyword, page, selectedProjectId, status]
+    [action, attendanceDeviceId, includeDeleteActions, keyword, page, pageSize, selectedProjectId, status]
   );
 
   const reportsQuery = useAttendanceDeviceIssueReportsQuery(filters);
   const reports = reportsQuery.data?.items ?? [];
   const total = reportsQuery.data?.total ?? 0;
-  const pageSize = reportsQuery.data?.page_size ?? PAGE_SIZE;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const rangeEnd = Math.min(total, page * pageSize);
@@ -476,6 +476,15 @@ export function AttendanceDeviceIssueReportsPage() {
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-[#f8faf9] px-5 py-3 text-sm text-slate-500 dark:border-border dark:bg-muted/30 dark:text-muted-foreground">
           <span>显示 {rangeStart}-{rangeEnd} 条，共 {total} 条</span>
           <div className="flex items-center gap-2">
+            <span className="text-xs">每页</span>
+            <select
+              value={pageSize}
+              onChange={(event) => { setPageSize(Number(event.target.value) as (typeof PAGE_SIZE_OPTIONS)[number]); setPage(1); }}
+              className="h-8 rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-700 outline-none focus:border-[#0f6b5d] focus:ring-2 focus:ring-[#0f6b5d]/15 dark:border-border dark:bg-background dark:text-foreground"
+              aria-label="选择每页条数"
+            >
+              {PAGE_SIZE_OPTIONS.map((option) => (<option key={option} value={option}>{option} 条</option>))}
+            </select>
             <Button type="button" variant="outline" size="sm" disabled={page <= 1 || reportsQuery.isLoading} onClick={() => setPage((current) => Math.max(1, current - 1))}>
               上一页
             </Button>

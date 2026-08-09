@@ -1,4 +1,5 @@
 export const DEFAULT_PROJECT_TABLE_PAGE_SIZE = 10;
+export const PROJECT_PAGE_SIZE_OPTIONS = [10, 20, 50] as const;
 
 export type CsvCell =
   | string

@@ -50,7 +50,7 @@ import type {
   EnterpriseCustomerStatus,
 } from "../types";
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE_OPTIONS = [10, 20, 50] as const;
 
 type CustomerFormState = {
   customer_code: string;
@@ -81,6 +81,7 @@ export function EnterpriseCustomersPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(10);
   const [formOpen, setFormOpen] = useState(false);
   const [formState, setFormState] = useState<CustomerFormState>(emptyForm);
   const [editing, setEditing] = useState<EnterpriseCustomer | null>(null);
@@ -89,13 +90,13 @@ export function EnterpriseCustomersPage() {
   const filters = useMemo(
     () => buildEnterpriseCustomerFilters({
       page,
-      pageSize: PAGE_SIZE,
+      pageSize,
       keyword,
       status,
       dateFrom,
       dateTo,
     }),
-    [dateFrom, dateTo, keyword, page, status]
+    [dateFrom, dateTo, keyword, page, pageSize, status]
   );
   const customersQuery = useEnterpriseCustomersQuery(filters);
   const createCustomer = useCreateEnterpriseCustomerMutation();
@@ -103,7 +104,7 @@ export function EnterpriseCustomersPage() {
   const deleteCustomer = useDeleteEnterpriseCustomerMutation();
   const rows = customersQuery.data?.items ?? [];
   const total = customersQuery.data?.total ?? 0;
-  const range = pageRange(total, page, PAGE_SIZE);
+  const range = pageRange(total, page, pageSize);
   const totals = rows.reduce(
     (sum, row) => ({
       collection: sum.collection + (row.collection_amount_cents ?? 0),
@@ -331,6 +332,15 @@ export function EnterpriseCustomersPage() {
         <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3 text-sm text-slate-500">
           <span>显示 {range.start}-{range.end} 条，共 {total} 条</span>
           <div className="flex items-center gap-2">
+            <span className="text-xs">每页</span>
+            <select
+              value={pageSize}
+              onChange={(event) => { setPageSize(Number(event.target.value) as (typeof PAGE_SIZE_OPTIONS)[number]); setPage(1); }}
+              className="h-8 rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-700 outline-none focus:border-[#0f6b5d] focus:ring-2 focus:ring-[#0f6b5d]/15 dark:border-border dark:bg-background dark:text-foreground"
+              aria-label="选择每页条数"
+            >
+              {PAGE_SIZE_OPTIONS.map((option) => (<option key={option} value={option}>{option} 条</option>))}
+            </select>
             <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>上一页</Button>
             <span className="min-w-12 text-center">{page}/{range.pageCount}</span>
             <Button variant="outline" size="sm" disabled={page >= range.pageCount} onClick={() => setPage(page + 1)}>下一页</Button>

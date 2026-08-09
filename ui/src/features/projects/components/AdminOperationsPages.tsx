@@ -141,7 +141,8 @@ import type {
   UploadFileRecord,
 } from "@/features/projects/types/construction-types";
 
-const pageSize = 10;
+const ADMIN_PAGE_SIZE_OPTIONS = [10, 20, 50] as const;
+const DEFAULT_PAGE_SIZE = 10;
 
 export function AdminOverviewPage() {
   const overview = useConstructionOverviewQuery();
@@ -268,7 +269,7 @@ export function AdminOverviewPage() {
 }
 
 export function ContractTemplateManagementPage() {
-  const [filters, setFilters] = useState<ConstructionModuleListFilters>({ page: 1, page_size: pageSize });
+  const [filters, setFilters] = useState<ConstructionModuleListFilters>({ page: 1, page_size: DEFAULT_PAGE_SIZE });
   const query = useContractTemplatesQuery(filters);
   const createTemplate = useCreateContractTemplateMutation();
   const updateTemplate = useUpdateContractTemplateMutation();
@@ -403,7 +404,7 @@ export function ContractTemplateManagementPage() {
           </TableRow>
         ))}
       </DataTable>
-      <Pager total={query.data?.total ?? 0} page={filters.page ?? 1} onPageChange={(page) => setFilters((current) => ({ ...current, page }))} />
+      <Pager total={query.data?.total ?? 0} page={filters.page ?? 1} pageSize={filters.page_size ?? DEFAULT_PAGE_SIZE} onPageChange={(page) => setFilters((current) => ({ ...current, page }))} onPageSizeChange={(s) => setFilters((current) => ({ ...current, page: 1, page_size: s }))} />
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-4xl">
           <form onSubmit={submit}>
@@ -599,7 +600,7 @@ export function WorkHourConfigPage() {
 
 export function PlatformIntegrationPage() {
   const [tab, setTab] = useState<"configs" | "logs">("configs");
-  const [filters, setFilters] = useState<ConstructionModuleListFilters>({ page: 1, page_size: pageSize });
+  const [filters, setFilters] = useState<ConstructionModuleListFilters>({ page: 1, page_size: DEFAULT_PAGE_SIZE });
   const tabControls = <PlatformTabControls tab={tab} setTab={setTab} />;
   return (
     <div className="space-y-4">
@@ -718,7 +719,7 @@ function PlatformConfigPanel({ filters, setFilters, tabControls }: { filters: Co
           </TableRow>
         ))}
       </DataTable>
-      <Pager total={query.data?.total ?? 0} page={filters.page ?? 1} onPageChange={(page) => setFilters((current) => ({ ...current, page }))} />
+      <Pager total={query.data?.total ?? 0} page={filters.page ?? 1} pageSize={filters.page_size ?? DEFAULT_PAGE_SIZE} onPageChange={(page) => setFilters((current) => ({ ...current, page }))} onPageSizeChange={(s) => setFilters((current) => ({ ...current, page: 1, page_size: s }))} />
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-4xl">
           <form onSubmit={submit}>
@@ -909,7 +910,7 @@ function PlatformLogPanel({ filters, setFilters, tabControls }: { filters: Const
           <TableRow key={row.id}><TableCell className="font-medium">{row.platform_name || "-"}</TableCell><TableCell className="max-w-[240px] truncate">{row.project_name || row.project_id}</TableCell><TableCell>{row.operation}</TableCell><TableCell>{row.direction}</TableCell><TableCell><PlatformStatusBadge status={row.status} /></TableCell><TableCell>{row.request_count}/{row.success_count}/{row.failure_count}</TableCell><TableCell className="max-w-[320px] truncate text-xs text-slate-500" title={row.message ?? undefined}>{row.message || "-"}</TableCell><TableCell>{formatDateTime(row.occurred_at)}</TableCell><TableCell className="text-right">{row.source === "system" ? <div className="inline-flex gap-1"><Button type="button" size="sm" variant="ghost" onClick={() => setDetailLog(row)}>详情</Button>{(platformLogPlatformCode(row.payload) === YONGXIN_V2_PLATFORM_TYPE || platformLogPlatformCode(row.payload) === XINLEDA_PLATFORM_TYPE) && (row.status === "failed" || row.status === "waiting_data" || row.status === "waiting_media") ? <Button type="button" size="sm" variant="outline" disabled={retryJob.isPending} onClick={() => void retry(row)}><RefreshCw className="mr-1 size-3" />重试</Button> : null}</div> : <RowActions onEdit={() => openEdit(row)} onDelete={() => void remove(row)} />}</TableCell></TableRow>
         ))}
       </DataTable>
-      <Pager total={query.data?.total ?? 0} page={filters.page ?? 1} onPageChange={(page) => setFilters((current) => ({ ...current, page }))} />
+      <Pager total={query.data?.total ?? 0} page={filters.page ?? 1} pageSize={filters.page_size ?? DEFAULT_PAGE_SIZE} onPageChange={(page) => setFilters((current) => ({ ...current, page }))} onPageSizeChange={(s) => setFilters((current) => ({ ...current, page: 1, page_size: s }))} />
       <Dialog open={Boolean(detailLog)} onOpenChange={(open) => { if (!open) setDetailLog(null); }}>
         <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-4xl">
           <DialogHeader><DialogTitle>平台任务详情</DialogTitle><DialogDescription>{detailLog ? `${detailLog.platform_name ?? "平台"} · ${detailLog.operation} · ${formatDateTime(detailLog.occurred_at)}` : ""}</DialogDescription></DialogHeader>
@@ -1080,7 +1081,7 @@ function ListToolbar({ keyword, onKeywordChange, placeholder }: { keyword: strin
 }
 
 function ModuleFilters({ filters, setFilters, placeholder }: { filters: ConstructionModuleListFilters; setFilters: (updater: (current: ConstructionModuleListFilters) => ConstructionModuleListFilters) => void; placeholder: string }) {
-  return <div className="grid gap-3 rounded-lg border bg-[#f8faf9] p-3 lg:grid-cols-[minmax(260px,1fr)_minmax(280px,1fr)_auto]"><div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={filters.keyword ?? ""} onChange={(event) => setFilters((current) => ({ ...current, keyword: event.target.value, page: 1 }))} placeholder={placeholder} className="pl-9" /></div><ProjectSearchSelect value={filters.project_id ?? ""} includeAllOption allOptionLabel="全部项目" onValueChange={(project_id) => setFilters((current) => ({ ...current, project_id: project_id || undefined, page: 1 }))} /><Button variant="outline" onClick={() => setFilters((current) => ({ page: 1, page_size: current.page_size ?? pageSize }))}>重置</Button></div>;
+  return <div className="grid gap-3 rounded-lg border bg-[#f8faf9] p-3 lg:grid-cols-[minmax(260px,1fr)_minmax(280px,1fr)_auto]"><div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={filters.keyword ?? ""} onChange={(event) => setFilters((current) => ({ ...current, keyword: event.target.value, page: 1 }))} placeholder={placeholder} className="pl-9" /></div><ProjectSearchSelect value={filters.project_id ?? ""} includeAllOption allOptionLabel="全部项目" onValueChange={(project_id) => setFilters((current) => ({ ...current, project_id: project_id || undefined, page: 1 }))} /><Button variant="outline" onClick={() => setFilters((current) => ({ page: 1, page_size: current.page_size ?? DEFAULT_PAGE_SIZE }))}>重置</Button></div>;
 }
 
 function PlatformLogFilters({
@@ -1137,7 +1138,7 @@ function PlatformLogFilters({
         <option value="delivery_unknown">结果待核对</option>
         <option value="disabled">平台已停用</option>
       </select>
-      <Button variant="outline" onClick={() => setFilters((current) => ({ page: 1, page_size: current.page_size ?? pageSize }))}>重置</Button>
+      <Button variant="outline" onClick={() => setFilters((current) => ({ page: 1, page_size: current.page_size ?? DEFAULT_PAGE_SIZE }))}>重置</Button>
     </div>
   );
 }
@@ -1147,9 +1148,9 @@ function DataTable({ loading, headers, colSpan, children }: { loading: boolean; 
   return <div className="overflow-hidden rounded-lg border bg-white shadow-sm"><div className="w-full overflow-x-auto"><Table><TableHeader><TableRow>{headers.map((header) => <TableHead key={header}>{header}</TableHead>)}</TableRow></TableHeader><TableBody>{loading ? <TableRow><TableCell colSpan={colSpan} className="h-24 text-center text-muted-foreground"><Loader2 className="mr-2 inline size-4 animate-spin" />加载中</TableCell></TableRow> : empty ? <TableRow><TableCell colSpan={colSpan} className="h-24 text-center text-muted-foreground">暂无数据</TableCell></TableRow> : children}</TableBody></Table></div></div>;
 }
 
-function Pager({ total, page, onPageChange }: { total: number; page: number; onPageChange: (page: number) => void }) {
+function Pager({ total, page, pageSize, onPageChange, onPageSizeChange }: { total: number; page: number; pageSize: number; onPageChange: (page: number) => void; onPageSizeChange?: (size: number) => void }) {
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
-  return <div className="flex items-center justify-between text-sm text-muted-foreground"><span>显示 {(page - 1) * pageSize + (total > 0 ? 1 : 0)}-{Math.min(page * pageSize, total)} 条，共 {total} 条</span><div className="flex items-center gap-2"><Button variant="outline" size="sm" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>上一页</Button><span>{page}/{pageCount}</span><Button variant="outline" size="sm" disabled={page >= pageCount} onClick={() => onPageChange(page + 1)}>下一页</Button></div></div>;
+  return <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground"><span>显示 {(page - 1) * pageSize + (total > 0 ? 1 : 0)}-{Math.min(page * pageSize, total)} 条，共 {total} 条</span><div className="flex items-center gap-2">{onPageSizeChange && (<><span className="text-xs">每页</span><select value={pageSize} onChange={(event) => onPageSizeChange(Number(event.target.value))} className="h-8 rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-700 outline-none focus:border-[#0f6b5d] focus:ring-2 focus:ring-[#0f6b5d]/15 dark:border-border dark:bg-background dark:text-foreground" aria-label="选择每页条数">{ADMIN_PAGE_SIZE_OPTIONS.map((option) => (<option key={option} value={option}>{option} 条</option>))}</select></>)}<Button variant="outline" size="sm" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>上一页</Button><span>{page}/{pageCount}</span><Button variant="outline" size="sm" disabled={page >= pageCount} onClick={() => onPageChange(page + 1)}>下一页</Button></div></div>;
 }
 
 function RowActions({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => void }) {

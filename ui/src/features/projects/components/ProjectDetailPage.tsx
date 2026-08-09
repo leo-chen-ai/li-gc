@@ -162,6 +162,7 @@ import {
   buildProjectResourceListParams,
   buildExcelCsv,
   DEFAULT_PROJECT_TABLE_PAGE_SIZE,
+  PROJECT_PAGE_SIZE_OPTIONS,
   downloadCsv,
   type EditableWageRow,
   formatCentsAsYuan,
@@ -256,6 +257,7 @@ type TablePaginationConfig = {
   pageSize: number;
   total: number;
   onPageChange: (page: number) => void;
+  onPageSizeChange?: (size: number) => void;
 };
 
 const DEFAULT_UNIT_FILTERS: UnitLedgerFilters = {
@@ -380,6 +382,10 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const [teamPage, setTeamPage] = useState(1);
   const [workerPage, setWorkerPage] = useState(1);
   const [attendancePage, setAttendancePage] = useState(1);
+  const [unitPageSize, setUnitPageSize] = useState<(typeof PROJECT_PAGE_SIZE_OPTIONS)[number]>(DEFAULT_PROJECT_TABLE_PAGE_SIZE);
+  const [teamPageSize, setTeamPageSize] = useState<(typeof PROJECT_PAGE_SIZE_OPTIONS)[number]>(DEFAULT_PROJECT_TABLE_PAGE_SIZE);
+  const [workerPageSize, setWorkerPageSize] = useState<(typeof PROJECT_PAGE_SIZE_OPTIONS)[number]>(DEFAULT_PROJECT_TABLE_PAGE_SIZE);
+  const [attendancePageSize, setAttendancePageSize] = useState<(typeof PROJECT_PAGE_SIZE_OPTIONS)[number]>(DEFAULT_PROJECT_TABLE_PAGE_SIZE);
   const [attendanceViewMode, setAttendanceViewMode] = useState<AttendanceViewMode>("calendar");
   const [attendanceCalendarMonth, setAttendanceCalendarMonth] = useState(currentPayrollMonth());
   const [workerTreeSelection, setWorkerTreeSelection] = useState<WorkerTreeSelection>({ kind: "all" });
@@ -418,16 +424,18 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     () =>
       buildProjectResourceListParams({
         page: unitPage,
+        pageSize: unitPageSize,
         keyword: appliedUnitFilters.keyword,
         companyType: normalizeSelectFilter(appliedUnitFilters.companyType),
         salaryCalcType: normalizeSelectFilter(appliedUnitFilters.salaryCalcType),
       }),
-    [appliedUnitFilters.companyType, appliedUnitFilters.keyword, appliedUnitFilters.salaryCalcType, unitPage]
+    [appliedUnitFilters.companyType, appliedUnitFilters.keyword, appliedUnitFilters.salaryCalcType, unitPage, unitPageSize]
   );
   const teamListFilters = useMemo(
     () =>
       buildProjectResourceListParams({
         page: teamPage,
+        pageSize: teamPageSize,
         keyword: appliedTeamFilters.keyword,
         unitId: normalizeSelectFilter(appliedTeamFilters.unitId),
         workType: normalizeSelectFilter(appliedTeamFilters.workType),
@@ -438,29 +446,31 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
               ? false
               : null,
       }),
-    [appliedTeamFilters.attendanceConfigured, appliedTeamFilters.keyword, appliedTeamFilters.unitId, appliedTeamFilters.workType, teamPage]
+    [appliedTeamFilters.attendanceConfigured, appliedTeamFilters.keyword, appliedTeamFilters.unitId, appliedTeamFilters.workType, teamPage, teamPageSize]
   );
   const workerListFilters = useMemo(
     () =>
       buildProjectResourceListParams({
         page: workerPage,
+        pageSize: workerPageSize,
         unitId: workerScopeFilter.unitId,
         teamId: normalizeSelectFilter(appliedWorkerFilters.teamId) || workerScopeFilter.teamId,
         keyword: appliedWorkerFilters.keyword,
         workStatus: normalizeSelectFilter(appliedWorkerFilters.workStatus),
         workType: normalizeSelectFilter(appliedWorkerFilters.workType),
       }),
-    [appliedWorkerFilters.keyword, appliedWorkerFilters.teamId, appliedWorkerFilters.workStatus, appliedWorkerFilters.workType, workerPage, workerScopeFilter.teamId, workerScopeFilter.unitId]
+    [appliedWorkerFilters.keyword, appliedWorkerFilters.teamId, appliedWorkerFilters.workStatus, appliedWorkerFilters.workType, workerPage, workerPageSize, workerScopeFilter.teamId, workerScopeFilter.unitId]
   );
   const attendanceListFilters = useMemo(
     () =>
       buildProjectResourceListParams({
         page: attendancePage,
+        pageSize: attendancePageSize,
         keyword: appliedAttendanceFilters.keyword,
         attendanceDate: appliedAttendanceFilters.attendanceDate || null,
         direction: normalizeSelectFilter(appliedAttendanceFilters.direction),
       }),
-    [appliedAttendanceFilters.attendanceDate, appliedAttendanceFilters.direction, appliedAttendanceFilters.keyword, attendancePage]
+    [appliedAttendanceFilters.attendanceDate, appliedAttendanceFilters.direction, appliedAttendanceFilters.keyword, attendancePage, attendancePageSize]
   );
   const attendanceCalendarFilters = useMemo(
     () =>
@@ -1307,9 +1317,10 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
               units={tableUnits}
               pagination={{
                 page: unitQuery.data?.page ?? unitPage,
-                pageSize: unitQuery.data?.page_size ?? DEFAULT_PROJECT_TABLE_PAGE_SIZE,
+                pageSize: unitQuery.data?.page_size ?? unitPageSize,
                 total: unitQuery.data?.total ?? 0,
                 onPageChange: setUnitPage,
+                onPageSizeChange: (s) => { setUnitPageSize(s as (typeof PROJECT_PAGE_SIZE_OPTIONS)[number]); setUnitPage(1); },
               }}
               onEdit={openEditDialog}
               onDelete={handleDeleteRecord}
@@ -1321,9 +1332,10 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
               teams={tableTeams}
               pagination={{
                 page: teamQuery.data?.page ?? teamPage,
-                pageSize: teamQuery.data?.page_size ?? DEFAULT_PROJECT_TABLE_PAGE_SIZE,
+                pageSize: teamQuery.data?.page_size ?? teamPageSize,
                 total: teamQuery.data?.total ?? 0,
                 onPageChange: setTeamPage,
+                onPageSizeChange: (s) => { setTeamPageSize(s as (typeof PROJECT_PAGE_SIZE_OPTIONS)[number]); setTeamPage(1); },
               }}
               onEdit={openEditDialog}
               onDelete={handleDeleteRecord}
@@ -1341,9 +1353,10 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
               onSelectionChange={handleWorkerTreeSelectionChange}
               pagination={{
                 page: workerQuery.data?.page ?? workerPage,
-                pageSize: workerQuery.data?.page_size ?? DEFAULT_PROJECT_TABLE_PAGE_SIZE,
+                pageSize: workerQuery.data?.page_size ?? workerPageSize,
                 total: workerQuery.data?.total ?? 0,
                 onPageChange: setWorkerPage,
+                onPageSizeChange: (s) => { setWorkerPageSize(s as (typeof PROJECT_PAGE_SIZE_OPTIONS)[number]); setWorkerPage(1); },
               }}
               onRetireWorker={updateWorker.mutateAsync}
               onReissueWorker={handleReissueWorker}
@@ -1364,9 +1377,10 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
               onCalendarMonthChange={setAttendanceCalendarMonth}
               pagination={{
                 page: attendanceQuery.data?.page ?? attendancePage,
-                pageSize: attendanceQuery.data?.page_size ?? DEFAULT_PROJECT_TABLE_PAGE_SIZE,
+                pageSize: attendanceQuery.data?.page_size ?? attendancePageSize,
                 total: attendanceQuery.data?.total ?? 0,
                 onPageChange: setAttendancePage,
+                onPageSizeChange: (s) => { setAttendancePageSize(s as (typeof PROJECT_PAGE_SIZE_OPTIONS)[number]); setAttendancePage(1); },
               }}
             />
           )}
@@ -3169,8 +3183,9 @@ function WorkerAttendanceDialog({
   projectId: string;
   onOpenChange: (open: boolean) => void;
 }) {
-  const DIALOG_PAGE_SIZE = 20;
+  const DIALOG_PAGE_SIZE_OPTIONS = [10, 20, 50] as const;
   const [page, setPage] = useState(1);
+  const [dialogPageSize, setDialogPageSize] = useState<(typeof DIALOG_PAGE_SIZE_OPTIONS)[number]>(20);
   const [attendanceDate, setAttendanceDate] = useState("");
 
   useEffect(() => {
@@ -3182,17 +3197,17 @@ function WorkerAttendanceDialog({
     if (!open || !worker) return undefined;
     return {
       worker_id: worker.id,
-      page_size: DIALOG_PAGE_SIZE,
+      page_size: dialogPageSize,
       page,
       ...(attendanceDate ? { attendance_date: attendanceDate } : {}),
     };
-  }, [open, worker, page, attendanceDate]);
+  }, [open, worker, page, dialogPageSize, attendanceDate]);
 
   const attendanceQuery = useProjectAttendanceQuery(projectId, queryFilters);
   const isQueryEnabled = open && Boolean(worker);
   const rawItems = isQueryEnabled ? (attendanceQuery.data?.items ?? []) : [];
   const total = attendanceQuery.data?.total ?? 0;
-  const totalPages = getTotalPages(total, DIALOG_PAGE_SIZE);
+  const totalPages = getTotalPages(total, dialogPageSize);
 
   const records: AttendanceRecord[] = useMemo(() => {
     if (!worker) return [];
@@ -3316,9 +3331,18 @@ function WorkerAttendanceDialog({
         </div>
 
         {/* Pagination */}
-        <div className="flex items-center justify-between">
-          <div className="text-xs text-slate-500 dark:text-muted-foreground">
-            共 {total} 条记录{total > 0 ? `，第 ${page} / ${totalPages} 页` : ""}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-muted-foreground">
+            <span>共 {total} 条记录{total > 0 ? `，第 ${page} / ${totalPages} 页` : ""}</span>
+            <span className="text-xs">每页</span>
+            <select
+              value={dialogPageSize}
+              onChange={(event) => { setDialogPageSize(Number(event.target.value) as (typeof DIALOG_PAGE_SIZE_OPTIONS)[number]); setPage(1); }}
+              className="h-7 rounded-md border border-slate-200 bg-white px-1.5 text-xs text-slate-700 outline-none focus:border-[#0f6b5d] focus:ring-2 focus:ring-[#0f6b5d]/15 dark:border-border dark:bg-background dark:text-foreground"
+              aria-label="选择每页条数"
+            >
+              {DIALOG_PAGE_SIZE_OPTIONS.map((option) => (<option key={option} value={option}>{option} 条</option>))}
+            </select>
           </div>
           {totalPages > 1 && (
             <div className="flex items-center gap-1">
@@ -4531,6 +4555,24 @@ function DataTable({
             显示 {from}-{to} 条，共 {total} 条
           </span>
           <div className="flex items-center gap-2">
+            {pagination?.onPageSizeChange && (
+              <>
+                <span className="text-xs">每页</span>
+                <select
+                  value={pageSize}
+                  onChange={(event) => {
+                    pagination.onPageSizeChange?.(Number(event.target.value));
+                  }}
+                  className={cn(
+                    "h-8 rounded-md border bg-white px-2 text-sm outline-none focus:border-[#0f6b5d] focus:ring-2 focus:ring-[#0f6b5d]/15 dark:border-border dark:bg-background dark:text-foreground",
+                    classic && "border-[#dcdfe6] text-[#606266] dark:border-border dark:text-foreground"
+                  )}
+                  aria-label="选择每页条数"
+                >
+                  {PROJECT_PAGE_SIZE_OPTIONS.map((option) => (<option key={option} value={option}>{option} 条</option>))}
+                </select>
+              </>
+            )}
             <Button
               type="button"
               size="sm"
