@@ -1,5 +1,3 @@
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
-use chrono::{DateTime, Utc};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -9,10 +7,9 @@ use uuid::Uuid;
 
 use crate::state::AppState;
 
-const DEFAULT_PHOTO_ENDPOINT: &str = "https://gd.aibims.com/api.php/Api/V2/photo";
+const DEFAULT_PHOTO_ENDPOINT: &str = "https://gd.aibims.com/api.php/Aiot/V1/uploadAiotLogs";
 const WORKER_INTERVAL_SECONDS: u64 = 10;
 const CLAIM_LIMIT: i64 = 20;
-const VENDOR_PHOTO_MAX_BYTES: usize = 20 * 1024;
 
 #[derive(Debug, FromRow)]
 struct DispatchJob {
@@ -21,7 +18,6 @@ struct DispatchJob {
     worker_id: Uuid,
     worker_name: String,
     device_id: String,
-    planned_at: DateTime<Utc>,
     direction: i16,
     photo_url: String,
     attempt_count: i32,
@@ -29,18 +25,16 @@ struct DispatchJob {
 }
 
 #[derive(Debug, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
 struct AttendancePhotoRequest {
-    base64: String,
-    platform: &'static str,
-    name: String,
+    #[serde(rename = "paramType")]
+    param_type: &'static str,
     device_id: String,
-    file_name: String,
     worker_id: String,
-    time: String,
-    direction: &'static str,
-    #[serde(rename = "type")]
-    passage_type: &'static str,
+    name: String,
+    photo: String,
+    platform: &'static str,
+    dev_id: String,
+    dir: &'static str,
 }
 
 #[derive(Debug, Deserialize)]
@@ -150,7 +144,6 @@ async fn claim_due_jobs(
                r.worker_id,
                COALESCE(r.worker_name, '') AS worker_name,
                c.device_sn AS device_id,
-               r.planned_at,
                r.direction,
                r.photo_url,
                c.attempt_count,
@@ -172,36 +165,17 @@ async fn send_attendance_photo(
     endpoint: &str,
     job: &DispatchJob,
 ) -> Result<DispatchAttemptSuccess, DispatchAttemptError> {
-    let photo_response = client
-        .get(&job.photo_url)
-        .send()
-        .await
-        .map_err(|error| attempt_error(format!("下载托管照片失败: {error}")))?
-        .error_for_status()
-        .map_err(|error| attempt_error(format!("下载托管照片失败: {error}")))?;
-    let photo_bytes = photo_response
-        .bytes()
-        .await
-        .map_err(|error| attempt_error(format!("读取托管照片失败: {error}")))?;
-    if photo_bytes.is_empty() {
-        return Err(attempt_error("托管照片内容为空"));
-    }
-    let encoded_photo = encode_photo_for_vendor(photo_bytes.to_vec())
-        .await
-        .map_err(attempt_error)?;
-    let request = build_request(job, encoded_photo);
-    let ts = Utc::now().timestamp_millis().to_string();
+    let request = build_request(job);
     let request_body = serde_json::to_value(&request).unwrap_or(Value::Null);
     let request_payload = serde_json::json!({
         "method": "POST",
         "url": endpoint,
-        "headers": {"content-type": "application/json", "ts": ts},
+        "headers": {"content-type": "application/json"},
         "body": request_body,
-        "curl": build_curl(endpoint, &ts, &request),
+        "curl": build_curl(endpoint, &request),
     });
     let response = client
         .post(endpoint)
-        .header("ts", ts)
         .json(&request)
         .send()
         .await
@@ -247,49 +221,24 @@ async fn send_attendance_photo(
             response_payload: Some(response_payload),
         });
     }
-    let path = parsed
-        .data
-        .as_ref()
-        .and_then(|data| data.get("path"))
-        .and_then(Value::as_str)
-        .unwrap_or_default();
     Ok(DispatchAttemptSuccess {
-        result: serde_json::json!({"success": true, "code": parsed.code, "path": path}),
+        result: serde_json::json!({"success": true, "code": parsed.code, "data": parsed.data}),
         request_payload,
         response_payload,
     })
 }
 
-fn attempt_error(message: impl Into<String>) -> DispatchAttemptError {
-    DispatchAttemptError {
-        message: message.into(),
-        request_payload: None,
-        response_payload: None,
-    }
-}
-
-fn build_curl(endpoint: &str, ts: &str, request: &AttendancePhotoRequest) -> String {
+fn build_curl(endpoint: &str, request: &AttendancePhotoRequest) -> String {
     let body = serde_json::to_string(request).unwrap_or_else(|_| "{}".to_owned());
     format!(
-        "curl --url '{}' -H 'content-type: application/json' -H 'ts: {}' --data-raw '{}'",
+        "curl --url '{}' -H 'content-type: application/json' --data-raw '{}'",
         shell_quote(endpoint),
-        shell_quote(ts),
         shell_quote(&body),
     )
 }
 
 fn shell_quote(value: &str) -> String {
     value.replace('\'', "'\\''")
-}
-
-async fn encode_photo_for_vendor(photo_bytes: Vec<u8>) -> Result<String, String> {
-    let compressed = crate::infrastructure::image_compression::compress_to_jpeg_below_async(
-        photo_bytes,
-        VENDOR_PHOTO_MAX_BYTES,
-    )
-    .await
-    .map_err(|error| format!("托管照片压缩到20KB失败: {error}"))?;
-    Ok(BASE64_STANDARD.encode(compressed))
 }
 
 fn parse_attendance_photo_response(body: &str) -> Result<AttendancePhotoResponse, String> {
@@ -301,18 +250,16 @@ fn parse_attendance_photo_response(body: &str) -> Result<AttendancePhotoResponse
     })
 }
 
-fn build_request(job: &DispatchJob, base64: String) -> AttendancePhotoRequest {
-    let millis = job.planned_at.timestamp_millis();
+fn build_request(job: &DispatchJob) -> AttendancePhotoRequest {
     AttendancePhotoRequest {
-        base64,
-        platform: "danGong",
-        name: job.worker_name.clone(),
+        param_type: "check_port",
         device_id: job.device_id.clone(),
-        file_name: format!("{}-{millis}.jpg", job.worker_id),
         worker_id: job.worker_id.to_string(),
-        time: millis.to_string(),
-        direction: if job.direction == 0 { "in" } else { "out" },
-        passage_type: "face",
+        name: job.worker_name.clone(),
+        photo: job.photo_url.clone(),
+        platform: "danGong",
+        dev_id: job.device_id.clone(),
+        dir: if job.direction == 0 { "in" } else { "out" },
     }
 }
 
@@ -426,8 +373,6 @@ fn truncate(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use image::{DynamicImage, ImageBuffer, Rgb};
-    use std::io::Cursor;
 
     #[test]
     fn maps_managed_record_to_photo_contract() {
@@ -437,57 +382,32 @@ mod tests {
             worker_id: Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap(),
             worker_name: "测试人员".to_owned(),
             device_id: "DEVICE-B-001".to_owned(),
-            planned_at: DateTime::from_timestamp_millis(1_783_353_600_123).unwrap(),
             direction: 1,
             photo_url: "https://example.test/photo.jpg".to_owned(),
             attempt_count: 1,
             max_attempts: 5,
         };
-        let value = serde_json::to_value(build_request(&job, "aGVsbG8=".to_owned())).unwrap();
-        assert_eq!(value["base64"], "aGVsbG8=");
+        let value = serde_json::to_value(build_request(&job)).unwrap();
+        assert_eq!(value["paramType"], "check_port");
         assert_eq!(value["platform"], "danGong");
-        assert_eq!(value["deviceId"], "DEVICE-B-001");
+        assert_eq!(value["device_id"], "DEVICE-B-001");
+        assert_eq!(value["dev_id"], "DEVICE-B-001");
         assert!(value.get("projectId").is_none());
-        assert_eq!(value["workerId"], "22222222-2222-2222-2222-222222222222");
-        assert_eq!(value["time"], "1783353600123");
-        assert_eq!(value["direction"], "out");
-        assert_eq!(value["type"], "face");
-        assert!(
-            value["base64"]
-                .as_str()
-                .is_some_and(|data| !data.starts_with("data:"))
-        );
+        assert_eq!(value["worker_id"], "22222222-2222-2222-2222-222222222222");
+        assert_eq!(value["photo"], "https://example.test/photo.jpg");
+        assert_eq!(value["dir"], "out");
+        assert!(value.get("base64").is_none());
+        assert!(value.get("time").is_none());
     }
 
     #[test]
     fn accepts_vendor_success_response_with_empty_data_array() {
         let parsed = parse_attendance_photo_response(
-            r#"{"success":true,"code":0,"message":"success","data":[],"event":"photo"}"#,
+            r#"{"success":true,"code":0,"message":"上传成功","data":[],"event":"getparam"}"#,
         )
         .unwrap();
         assert!(parsed.success);
         assert_eq!(parsed.code, 0);
         assert_eq!(parsed.data, Some(serde_json::json!([])));
-    }
-
-    #[tokio::test]
-    async fn compresses_vendor_photo_below_twenty_kilobytes_before_base64() {
-        let source = ImageBuffer::from_fn(1200, 900, |x, y| {
-            Rgb([
-                ((x * 17 + y * 7) % 256) as u8,
-                ((x * 3 + y * 19) % 256) as u8,
-                ((x * 11 + y * 13) % 256) as u8,
-            ])
-        });
-        let mut png = Cursor::new(Vec::new());
-        DynamicImage::ImageRgb8(source)
-            .write_to(&mut png, image::ImageFormat::Png)
-            .unwrap();
-
-        let encoded = encode_photo_for_vendor(png.into_inner()).await.unwrap();
-        let compressed = BASE64_STANDARD.decode(encoded).unwrap();
-
-        assert!(compressed.len() < VENDOR_PHOTO_MAX_BYTES);
-        assert!(compressed.starts_with(&[0xff, 0xd8, 0xff]));
     }
 }
