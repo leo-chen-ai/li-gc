@@ -168,24 +168,24 @@ test("all 12 Xinleda interfaces support imports, async log queries and file uplo
 });
 
 test("all 8 Yongxin interfaces support project/team/async/file flows", async () => {
-  const project = await request("/project/v1/query", { body: {} });
+  const project = await request("/project/V2/query", { body: {} });
   assert.equal(project.code, 0);
   assert.equal(project.data.projectCode, "MOCK-PROJECT-001");
-  await request("/projectCorp/v2/add", { body: { corpName: "模拟单位" } });
-  const team = await request("/team/v2/add", { body: { teamName: "测试班组" } });
+  await request("/projectCorp/V2/add", { body: { corpName: "模拟单位" } });
+  const team = await request("/team/V2/add", { body: { teamName: "测试班组" } });
   assert.match(team.data.teamSysNo, /^MOCK-TEAM-/);
 
-  const worker = await request("/worker/v2/add", { body: { name: "张三", teamSysNo: team.data.teamSysNo } });
-  const entry = await request("/entryExit/v2/add", { body: { name: "张三", type: 1 } });
-  const attendance = await request("/attend/v2/add", { body: { name: "张三", direction: 1 } });
+  const worker = await request("/worker/V2/add", { body: { name: "张三", teamSysNo: team.data.teamSysNo } });
+  const entry = await request("/entryExit/V2/add", { body: { name: "张三", type: 1 } });
+  const attendance = await request("/attend/V2/add", { body: { name: "张三", direction: 1 } });
   for (const response of [worker, entry, attendance]) assert.match(response.data.requestSerialCode, /^yongxin-/);
 
-  const result = await request("/asyncHandleResult/v1/query", {
+  const result = await request("/asyncHandleResult/V2/query", {
     body: { requestSerialCode: worker.data.requestSerialCode }
   });
   assert.equal(result.data.state, "2");
 
-  const uploaded = await request("/sysFile/v1/uploadImg", {
+  const uploaded = await request("/sysFile/V2/uploadImg", {
     body: { appKey: "anything", fileBase: Buffer.from("image").toString("base64"), fileType: "jpg" }
   });
   assert.match(uploaded.data, /^\/mock-files\/yongxin\//);
@@ -271,7 +271,7 @@ test("strict mode checks the documented signatures", async () => {
   const yongxinSign = createHash("md5")
     .update(`mock-yongxin-app&1234567890abcdef&${yongxinTimestamp}`)
     .digest("hex");
-  const yongxin = await request("/project/v1/query", {
+  const yongxin = await request("/project/V2/query", {
     body: {},
     headers: {
       projectCode: "MOCK-PROJECT-001",
@@ -283,7 +283,7 @@ test("strict mode checks the documented signatures", async () => {
   assert.equal(yongxin.code, 0);
 
   async function invalidYongxin(headers, body = {}) {
-    const response = await fetch(`${baseUrl}/project/v1/query`, {
+    const response = await fetch(`${baseUrl}/project/V2/query`, {
       method: "POST",
       headers: { "content-type": "application/json", ...headers },
       body: JSON.stringify(body)
@@ -308,7 +308,7 @@ test("strict mode checks the documented signatures", async () => {
   })).code, 2005);
   assert.equal((await invalidYongxin({})).code, 2007);
 
-  const invalidUpload = await fetch(`${baseUrl}/sysFile/v1/uploadImg`, {
+  const invalidUpload = await fetch(`${baseUrl}/sysFile/V2/uploadImg`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ appKey: "wrong-key", fileBase: "dGVzdA==", fileType: "jpg" })
@@ -341,7 +341,7 @@ test("admin API records requests and injects deterministic transient faults", as
     headers: adminHeaders,
     body: JSON.stringify({
       platform: "yongxin",
-      operation: "attend/v2/add",
+      operation: "attend/V2/add",
       remaining: 1,
       status: 503,
       body: { code: 503, msg: "retry me" }
@@ -349,16 +349,16 @@ test("admin API records requests and injects deterministic transient faults", as
   });
   assert.equal(fault.status, 201);
 
-  const failed = await fetch(`${baseUrl}/attend/v2/add`, {
+  const failed = await fetch(`${baseUrl}/attend/V2/add`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ name: "张三" })
   });
   assert.equal(failed.status, 503);
-  const recovered = await request("/attend/v2/add", { body: { name: "张三" } });
+  const recovered = await request("/attend/V2/add", { body: { name: "张三" } });
   assert.equal(recovered.code, 0);
 
-  const response = await fetch(`${baseUrl}/__mock/requests?platform=yongxin&operation=attend%2Fv2%2Fadd`, {
+  const response = await fetch(`${baseUrl}/__mock/requests?platform=yongxin&operation=attend%2FV2%2Fadd`, {
     headers: { authorization: "Bearer test-admin-token" }
   });
   assert.equal(response.status, 200);

@@ -15,14 +15,14 @@ pub const PLATFORM_CODE: &str = "yongxin_v2";
 pub const PLATFORM_NAME: &str = "甬薪";
 const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 
-pub const PROJECT_QUERY_PATH: &str = "project/v1/query";
-pub const UNIT_ADD_PATH: &str = "projectCorp/v2/add";
-pub const TEAM_ADD_PATH: &str = "team/v2/add";
-pub const WORKER_ADD_PATH: &str = "worker/v2/add";
-pub const ENTRY_EXIT_ADD_PATH: &str = "entryExit/v2/add";
-pub const ATTENDANCE_ADD_PATH: &str = "attend/v2/add";
-pub const ASYNC_RESULT_PATH: &str = "asyncHandleResult/v1/query";
-pub const IMAGE_UPLOAD_PATH: &str = "sysFile/v1/uploadImg";
+pub const PROJECT_QUERY_PATH: &str = "project/V2/query";
+pub const UNIT_ADD_PATH: &str = "projectCorp/V2/add";
+pub const TEAM_ADD_PATH: &str = "team/V2/add";
+pub const WORKER_ADD_PATH: &str = "worker/V2/add";
+pub const ENTRY_EXIT_ADD_PATH: &str = "entryExit/V2/add";
+pub const ATTENDANCE_ADD_PATH: &str = "attend/V2/add";
+pub const ASYNC_RESULT_PATH: &str = "asyncHandleResult/V2/query";
+pub const IMAGE_UPLOAD_PATH: &str = "sysFile/V2/uploadImg";
 
 #[derive(Debug, Error)]
 pub enum YongxinError {

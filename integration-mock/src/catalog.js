@@ -28,14 +28,14 @@ export const XINLEDA_METHODS = [
 ];
 
 export const YONGXIN_ROUTES = [
-  ["POST", "/project/v1/query", "project/v1/query"],
-  ["POST", "/projectCorp/v2/add", "projectCorp/v2/add"],
-  ["POST", "/team/v2/add", "team/v2/add"],
-  ["POST", "/worker/v2/add", "worker/v2/add"],
-  ["POST", "/entryExit/v2/add", "entryExit/v2/add"],
-  ["POST", "/attend/v2/add", "attend/v2/add"],
-  ["POST", "/asyncHandleResult/v1/query", "asyncHandleResult/v1/query"],
-  ["POST", "/sysFile/v1/uploadImg", "sysFile/v1/uploadImg"]
+  ["POST", "/project/V2/query", "project/V2/query"],
+  ["POST", "/projectCorp/V2/add", "projectCorp/V2/add"],
+  ["POST", "/team/V2/add", "team/V2/add"],
+  ["POST", "/worker/V2/add", "worker/V2/add"],
+  ["POST", "/entryExit/V2/add", "entryExit/V2/add"],
+  ["POST", "/attend/V2/add", "attend/V2/add"],
+  ["POST", "/asyncHandleResult/V2/query", "asyncHandleResult/V2/query"],
+  ["POST", "/sysFile/V2/uploadImg", "sysFile/V2/uploadImg"]
 ];
 
 export const DOCUMENTED_INTERFACE_COUNT =

@@ -187,7 +187,7 @@ function xinledaUploadAuth(query, config) {
 }
 
 function yongxinAuth(headers, body, operation, config) {
-  if (operation === "sysFile/v1/uploadImg") {
+  if (operation === "sysFile/V2/uploadImg") {
     if (!body?.appKey) return { valid: false, status: 200, body: { code: 2007, msg: "缺少 appKey", data: null } };
     if (!safeEqual(body.appKey, config.yongxinAppKey)) return { valid: false, status: 200, body: { code: 2002, msg: "key不存在", data: null } };
     return { valid: true };
@@ -399,7 +399,7 @@ function yongxinEnvelope(data = null, msg = "ok") {
 function handleYongxin(operation, body, headers, rawBody, db, config) {
   const projectCode = String(headers.projectcode ?? config.yongxinProjectCode);
   switch (operation) {
-    case "project/v1/query":
+    case "project/V2/query":
       return yongxinEnvelope({
         projectCode,
         projectName: config.ningboProjectName,
@@ -429,23 +429,23 @@ function handleYongxin(operation, body, headers, rawBody, db, config) {
         hasBankUndertakes: true,
         hasRightMonth: true
       });
-    case "projectCorp/v2/add":
+    case "projectCorp/V2/add":
       return yongxinEnvelope(null);
-    case "team/v2/add":
+    case "team/V2/add":
       return yongxinEnvelope({ teamSysNo: db.addYongxinTeam(projectCode, body ?? {}) });
-    case "worker/v2/add":
-    case "entryExit/v2/add":
-    case "attend/v2/add": {
+    case "worker/V2/add":
+    case "entryExit/V2/add":
+    case "attend/V2/add": {
       const token = db.createJob("yongxin", operation, body, { accepted: true }, "2", "mock completed");
       return yongxinEnvelope({ requestSerialCode: token }, "mock queued");
     }
-    case "asyncHandleResult/v1/query": {
+    case "asyncHandleResult/V2/query": {
       const token = String(body?.requestSerialCode ?? "");
       const job = db.getJob(token);
       if (!job) return { code: 2011, msg: "数据不存在", data: null };
       return yongxinEnvelope({ requestSerialCode: token, state: job.state, message: job.message });
     }
-    case "sysFile/v1/uploadImg": {
+    case "sysFile/V2/uploadImg": {
       const extension = String(body?.fileType ?? "jpg");
       const estimatedSize = typeof body?.fileBase === "string" ? Math.floor(body.fileBase.length * 0.75) : rawBody.length;
       return yongxinEnvelope(db.addFile("yongxin", null, `image/${extension}`, estimatedSize, extension));

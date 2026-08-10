@@ -94,7 +94,7 @@ Authorization: Bearer <MOCK_ADMIN_TOKEN>
 ```json
 {
   "platform": "yongxin",
-  "operation": "attend/v2/add",
+  "operation": "attend/V2/add",
   "remaining": 1,
   "status": 503,
   "delayMs": 0,

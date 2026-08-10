@@ -138,15 +138,15 @@ const uploadBody = await uploadResponse.json();
 assert.equal(uploadBody.code, 0);
 calls.push({ platform: "xinleda", operation: "upfiles", status: uploadResponse.status });
 
-await yongxin("project/v1/query", "/project/v1/query", {});
-await yongxin("projectCorp/v2/add", "/projectCorp/v2/add", { corpName: "烟测参建单位", corpCode: "91330200MOCK000001" });
-const yongxinTeam = await yongxin("team/v2/add", "/team/v2/add", { corpCode: "91330200MOCK000001", teamName: `甬薪烟测班组-${runId}` });
-const yongxinWorker = await yongxin("worker/v2/add", "/worker/v2/add", { teamSysNo: yongxinTeam.data.teamSysNo, name: "烟测工人" });
-await yongxin("entryExit/v2/add", "/entryExit/v2/add", { teamSysNo: yongxinTeam.data.teamSysNo, name: "烟测工人", type: 1, date: "2026-07-26 09:00:00" });
-await yongxin("attend/v2/add", "/attend/v2/add", { name: "烟测工人", direction: 1, date: "2026-07-26 09:00:00", attendType: 0 });
-const asyncResult = await yongxin("asyncHandleResult/v1/query", "/asyncHandleResult/v1/query", { requestSerialCode: yongxinWorker.data.requestSerialCode });
+await yongxin("project/V2/query", "/project/V2/query", {});
+await yongxin("projectCorp/V2/add", "/projectCorp/V2/add", { corpName: "烟测参建单位", corpCode: "91330200MOCK000001" });
+const yongxinTeam = await yongxin("team/V2/add", "/team/V2/add", { corpCode: "91330200MOCK000001", teamName: `甬薪烟测班组-${runId}` });
+const yongxinWorker = await yongxin("worker/V2/add", "/worker/V2/add", { teamSysNo: yongxinTeam.data.teamSysNo, name: "烟测工人" });
+await yongxin("entryExit/V2/add", "/entryExit/V2/add", { teamSysNo: yongxinTeam.data.teamSysNo, name: "烟测工人", type: 1, date: "2026-07-26 09:00:00" });
+await yongxin("attend/V2/add", "/attend/V2/add", { name: "烟测工人", direction: 1, date: "2026-07-26 09:00:00", attendType: 0 });
+const asyncResult = await yongxin("asyncHandleResult/V2/query", "/asyncHandleResult/V2/query", { requestSerialCode: yongxinWorker.data.requestSerialCode });
 assert.equal(asyncResult.data.state, "2");
-await call("yongxin", "sysFile/v1/uploadImg", "/sysFile/v1/uploadImg", {
+await call("yongxin", "sysFile/V2/uploadImg", "/sysFile/V2/uploadImg", {
   body: { appKey: credentials.yongxinAppKey, fileBase: Buffer.from("smoke").toString("base64"), fileType: "jpg" }
 });
 
