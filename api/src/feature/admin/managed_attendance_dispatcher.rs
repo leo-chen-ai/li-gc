@@ -32,6 +32,7 @@ struct DispatchJob {
 #[serde(rename_all = "camelCase")]
 struct AttendancePhotoRequest {
     base64: String,
+    platform: &'static str,
     name: String,
     device_id: String,
     file_name: String,
@@ -304,6 +305,7 @@ fn build_request(job: &DispatchJob, base64: String) -> AttendancePhotoRequest {
     let millis = job.planned_at.timestamp_millis();
     AttendancePhotoRequest {
         base64,
+        platform: "danGong",
         name: job.worker_name.clone(),
         device_id: job.device_id.clone(),
         file_name: format!("{}-{millis}.jpg", job.worker_id),
@@ -443,6 +445,7 @@ mod tests {
         };
         let value = serde_json::to_value(build_request(&job, "aGVsbG8=".to_owned())).unwrap();
         assert_eq!(value["base64"], "aGVsbG8=");
+        assert_eq!(value["platform"], "danGong");
         assert_eq!(value["deviceId"], "DEVICE-B-001");
         assert!(value.get("projectId").is_none());
         assert_eq!(value["workerId"], "22222222-2222-2222-2222-222222222222");
