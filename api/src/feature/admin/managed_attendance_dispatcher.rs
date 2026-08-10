@@ -18,7 +18,6 @@ const VENDOR_PHOTO_MAX_BYTES: usize = 20 * 1024;
 struct DispatchJob {
     id: Uuid,
     managed_attendance_record_id: Uuid,
-    project_id: Uuid,
     worker_id: Uuid,
     worker_name: String,
     device_id: String,
@@ -33,7 +32,6 @@ struct DispatchJob {
 #[serde(rename_all = "camelCase")]
 struct AttendancePhotoRequest {
     base64: String,
-    project_id: String,
     name: String,
     device_id: String,
     file_name: String,
@@ -148,7 +146,6 @@ async fn claim_due_jobs(
         )
         SELECT c.id,
                c.managed_attendance_record_id,
-               r.project_id,
                r.worker_id,
                COALESCE(r.worker_name, '') AS worker_name,
                c.device_sn AS device_id,
@@ -307,7 +304,6 @@ fn build_request(job: &DispatchJob, base64: String) -> AttendancePhotoRequest {
     let millis = job.planned_at.timestamp_millis();
     AttendancePhotoRequest {
         base64,
-        project_id: job.project_id.to_string(),
         name: job.worker_name.clone(),
         device_id: job.device_id.clone(),
         file_name: format!("{}-{millis}.jpg", job.worker_id),
@@ -436,7 +432,6 @@ mod tests {
         let job = DispatchJob {
             id: Uuid::new_v4(),
             managed_attendance_record_id: Uuid::new_v4(),
-            project_id: Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap(),
             worker_id: Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap(),
             worker_name: "测试人员".to_owned(),
             device_id: "DEVICE-B-001".to_owned(),
@@ -449,6 +444,7 @@ mod tests {
         let value = serde_json::to_value(build_request(&job, "aGVsbG8=".to_owned())).unwrap();
         assert_eq!(value["base64"], "aGVsbG8=");
         assert_eq!(value["deviceId"], "DEVICE-B-001");
+        assert!(value.get("projectId").is_none());
         assert_eq!(value["workerId"], "22222222-2222-2222-2222-222222222222");
         assert_eq!(value["time"], "1783353600123");
         assert_eq!(value["direction"], "out");
