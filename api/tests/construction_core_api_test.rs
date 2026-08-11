@@ -507,6 +507,11 @@ async fn admin_can_manage_project_nested_resources_and_fake_attendance() {
         .expect("attendance records array");
     assert_eq!(attendance_records.len(), 1);
     assert_eq!(attendance_records[0]["id"], attendance_id);
+    assert_eq!(
+        attendance_records[0]["yongxin_reporting"]["status"],
+        "not_configured"
+    );
+    assert_eq!(attendance_records[0]["yongxin_reporting"]["enabled"], false);
 
     let attendance_uuid = Uuid::parse_str(attendance_id).expect("attendance uuid");
     sqlx::query(
@@ -1233,6 +1238,167 @@ async fn admin_project_resource_lists_filter_paginate_and_summarize_attendance_o
     assert_eq!(day["first_in_time"], "07:30");
     assert_eq!(day["last_out_time"], "18:05");
     assert_eq!(day["working_hours"], 10.58);
+}
+
+#[tokio::test]
+async fn unit_list_reports_yongxin_platform_sync_status() {
+    let (app, pool, _container) = build_test_app_with_pool().await;
+    let token = admin_token();
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        "/api/v1/admin/projects",
+        &token,
+        json!({ "name": "甬薪单位上报状态测试项目", "status": 1 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let project_id = body["data"]["id"].as_str().expect("project id");
+    let project_uuid = Uuid::parse_str(project_id).expect("valid project id");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        "/api/v1/admin/platform-configs",
+        &token,
+        json!({
+            "project_id": project_id,
+            "platform_name": "甬薪精管 V2",
+            "platform_type": "yongxin_v2",
+            "config": {},
+            "is_enabled": true
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let config_id = Uuid::parse_str(body["data"]["id"].as_str().expect("platform config id"))
+        .expect("valid platform config id");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        "/api/v1/admin/platform-configs",
+        &token,
+        json!({
+            "project_id": project_id,
+            "platform_name": "市住建",
+            "platform_type": "ningbo_housing",
+            "config": {},
+            "is_enabled": true
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+
+    let binding_id = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        INSERT INTO integration_project_bindings (
+            project_id, platform_id, platform_config_id, is_enabled
+        )
+        SELECT $1, platform.id, $2, TRUE
+        FROM integration_platforms platform
+        WHERE platform.code = 'yongxin_v2' AND platform.is_deleted = FALSE
+        RETURNING id
+        "#,
+    )
+    .bind(project_uuid)
+    .bind(config_id)
+    .fetch_one(&pool)
+    .await
+    .expect("Yongxin binding");
+
+    let mut unit_ids = Vec::new();
+    for name in ["甬薪已同步单位", "甬薪未同步单位", "甬薪结果未知单位"] {
+        let (status, body) = authed_json(
+            app.clone(),
+            "POST",
+            &format!("/api/v1/admin/projects/{project_id}/units"),
+            &token,
+            json!({ "company_name": name }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+        unit_ids.push(
+            Uuid::parse_str(body["data"]["id"].as_str().expect("unit id")).expect("valid unit id"),
+        );
+    }
+
+    for (unit_id, job_status) in [(unit_ids[0], "success"), (unit_ids[2], "delivery_unknown")] {
+        sqlx::query(
+            r#"
+            INSERT INTO integration_jobs (
+                project_id, binding_id, platform_code, operation, entity_type,
+                local_entity_id, idempotency_key, request_payload, status
+            )
+            VALUES ($1, $2, 'yongxin_v2', 'unit.sync', 'unit', $3, $4, '{}'::jsonb, $5)
+            "#,
+        )
+        .bind(project_uuid)
+        .bind(binding_id)
+        .bind(unit_id)
+        .bind(format!("yongxin-unit-status-{unit_id}"))
+        .bind(job_status)
+        .execute(&pool)
+        .await
+        .expect("insert Yongxin unit job");
+    }
+
+    let (status, body) = get_authed(
+        app.clone(),
+        &format!("/api/v1/admin/projects/{project_id}/units"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let units = body["data"]["items"].as_array().expect("unit items");
+    let synced = units
+        .iter()
+        .find(|unit| unit["company_name"] == "甬薪已同步单位")
+        .expect("synced unit");
+    assert_eq!(
+        synced["reporting_platforms"][0]["platform_type"],
+        "yongxin_v2"
+    );
+    assert_eq!(
+        synced["reporting_platforms"][0]["platform_name"],
+        "甬薪精管 V2"
+    );
+    assert_eq!(
+        synced["reporting_platforms"]
+            .as_array()
+            .expect("reporting platforms")
+            .len(),
+        1
+    );
+    assert_eq!(synced["reporting_platforms"][0]["status"], "success");
+
+    let not_reported = units
+        .iter()
+        .find(|unit| unit["company_name"] == "甬薪未同步单位")
+        .expect("not reported unit");
+    assert_eq!(
+        not_reported["reporting_platforms"][0]["status"],
+        "not_reported"
+    );
+
+    let summary = &body["data"]["reporting_summary"][0];
+    assert_eq!(summary["platform_type"], "yongxin_v2");
+    assert_eq!(summary["total_count"], 3);
+    assert_eq!(summary["success_count"], 1);
+    assert_eq!(summary["failure_count"], 1);
+    assert_eq!(summary["not_reported_count"], 1);
+
+    let (status, body) = authed_json(
+        app,
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/units/reporting/repair"),
+        &token,
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["attempted_count"], 1);
 }
 
 #[tokio::test]

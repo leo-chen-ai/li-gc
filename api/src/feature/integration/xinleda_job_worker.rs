@@ -861,10 +861,17 @@ async fn call_api(
             status: 200,
             body,
             duration_ms: 0,
+            request_url: credentials
+                .endpoint(xinleda::OPENAPI_PATH)
+                .map(|url| url.to_string())
+                .unwrap_or_else(|_| xinleda::OPENAPI_PATH.to_owned()),
+            request_headers: json!({"Content-Type": "application/json"}),
+            request_body: json!({"method": method, "data": payload}),
         };
         record_attempt(
             state.db.pool(),
             job,
+            credentials,
             method,
             payload,
             Some(&response),
@@ -890,6 +897,7 @@ async fn call_api(
             record_attempt(
                 state.db.pool(),
                 job,
+                credentials,
                 method,
                 payload,
                 Some(&response),
@@ -913,6 +921,7 @@ async fn call_api(
             record_attempt(
                 state.db.pool(),
                 job,
+                credentials,
                 method,
                 payload,
                 None,
@@ -958,6 +967,12 @@ async fn upload_attendance_photo(
             status: 200,
             body: json!({"code": 0, "message": "dry-run", "data": [format!("/dry-run/{attendance_id}.jpg")]}),
             duration_ms: 0,
+            request_url: credentials
+                .endpoint(xinleda::UPLOAD_PATH)
+                .map(|url| url.to_string())
+                .unwrap_or_else(|_| xinleda::UPLOAD_PATH.to_owned()),
+            request_headers: json!({"Content-Type": "multipart/form-data"}),
+            request_body: json!({"files": "[BINARY_OMITTED]"}),
         }
     } else {
         let method_guard =
@@ -983,6 +998,7 @@ async fn upload_attendance_photo(
     record_attempt(
         state.db.pool(),
         job,
+        credentials,
         "upfiles",
         &json!({"files": "[REDACTED]"}),
         Some(&response),
@@ -1224,6 +1240,7 @@ async fn finish_status(
 async fn record_attempt(
     pool: &PgPool,
     job: &ClaimedJob,
+    credentials: &xinleda::XinledaCredentials,
     method: &str,
     request_body: &Value,
     response: Option<&xinleda::XinledaResponse>,
@@ -1243,6 +1260,25 @@ async fn record_attempt(
             return;
         }
     };
+    let request_path = if method == "upfiles" {
+        xinleda::UPLOAD_PATH
+    } else {
+        xinleda::OPENAPI_PATH
+    };
+    let request_url = response
+        .map(|value| value.request_url.clone())
+        .unwrap_or_else(|| {
+            credentials
+                .endpoint(request_path)
+                .map(|url| url.to_string())
+                .unwrap_or_else(|_| format!("/{request_path}"))
+        });
+    let request_headers = response
+        .map(|value| value.request_headers.clone())
+        .unwrap_or_else(|| json!({"Content-Type": if method == "upfiles" { "multipart/form-data" } else { "application/json" }}));
+    let logged_body = response
+        .map(|value| value.request_body.clone())
+        .unwrap_or_else(|| request_body.clone());
     if let Err(error) = sqlx::query(
         r#"
         INSERT INTO integration_attempts (
@@ -1253,40 +1289,22 @@ async fn record_attempt(
         VALUES ($1, $2, $3, $4, 'http', 'POST', $5, $6, $7, $8, $9, $10, $11, $12)
         "#,
     )
-    .bind(job.id).bind(job.project_id).bind(job.binding_id).bind(attempt_no)
-    .bind(if method == "upfiles" { "/upfiles".to_owned() } else { format!("/openapi#{method}") })
-    .bind(json!({"appid": "[REDACTED]", "timestamp": "[GENERATED]", "nonce": "[GENERATED]", "sign": "[REDACTED]"}))
-    .bind(sanitize_payload(request_body))
-    .bind(response.map(|value| value.status as i32)).bind(response.map(|value| &value.body))
-    .bind(response.map(|value| value.duration_ms)).bind(status).bind(error_message)
-    .execute(pool).await {
+    .bind(job.id)
+    .bind(job.project_id)
+    .bind(job.binding_id)
+    .bind(attempt_no)
+    .bind(request_url)
+    .bind(request_headers)
+    .bind(logged_body)
+    .bind(response.map(|value| value.status as i32))
+    .bind(response.map(|value| &value.body))
+    .bind(response.map(|value| value.duration_ms))
+    .bind(status)
+    .bind(error_message)
+    .execute(pool)
+    .await
+    {
         warn!(job_id = %job.id, error = %error, "failed to record Xinleda attempt");
-    }
-}
-
-fn sanitize_payload(value: &Value) -> Value {
-    match value {
-        Value::Object(object) => Value::Object(
-            object
-                .iter()
-                .map(|(key, value)| {
-                    let sensitive = matches!(
-                        key.as_str(),
-                        "id_card_no" | "bank_no" | "owner_cardid" | "files"
-                    );
-                    (
-                        key.clone(),
-                        if sensitive {
-                            Value::String("[REDACTED]".to_owned())
-                        } else {
-                            sanitize_payload(value)
-                        },
-                    )
-                })
-                .collect(),
-        ),
-        Value::Array(items) => Value::Array(items.iter().map(sanitize_payload).collect()),
-        _ => value.clone(),
     }
 }
 

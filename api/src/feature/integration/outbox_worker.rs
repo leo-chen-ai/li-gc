@@ -104,6 +104,67 @@ pub async fn enqueue_team_sync(
     .await
 }
 
+pub async fn enqueue_unit_sync(
+    pool: &PgPool,
+    project_id: Uuid,
+    unit_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    enqueue_event(
+        pool,
+        project_id,
+        "construction.unit.changed",
+        "unit",
+        unit_id,
+        json!({ "operation": "repair" }),
+    )
+    .await
+}
+
+pub async fn enqueue_worker_platform_repair(
+    pool: &PgPool,
+    project_id: Uuid,
+    worker_id: Uuid,
+    platform_config_id: Uuid,
+    entry_exit_changed: bool,
+) -> Result<(), sqlx::Error> {
+    enqueue_event(
+        pool,
+        project_id,
+        "construction.worker.changed",
+        "worker",
+        worker_id,
+        json!({
+            "operation": "repair",
+            "platform_config_id": platform_config_id,
+            "entry_exit_changed": entry_exit_changed,
+        }),
+    )
+    .await
+}
+
+pub async fn enqueue_attendance_platform_repair(
+    pool: &PgPool,
+    project_id: Uuid,
+    attendance_id: Uuid,
+    platform_config_id: Uuid,
+    requested_by_user_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    enqueue_event(
+        pool,
+        project_id,
+        "construction.attendance.created",
+        "attendance",
+        attendance_id,
+        json!({
+            "operation": "repair",
+            "source": "manual_yongxin_repair",
+            "platform_config_id": platform_config_id,
+            "requested_by_user_id": requested_by_user_id,
+        }),
+    )
+    .await
+}
+
 pub async fn enqueue_team_exit(
     pool: &PgPool,
     project_id: Uuid,

@@ -9,6 +9,7 @@ const yesNoOptions = [
 const deviceTypeOptions = [
   { label: "海厂家", value: "海厂家" },
   { label: "弹厂家", value: "弹厂家" },
+  { label: "芊熠厂家", value: "芊熠厂家" },
 ];
 
 const companyTypeOptions = [

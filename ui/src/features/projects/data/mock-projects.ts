@@ -42,6 +42,7 @@ export type ConstructionUnit = {
   phone: string;
   workers: number;
   salaryType: string;
+  reportingPlatforms?: ConstructionEntityReportingPlatform[];
 };
 
 export type Team = {
@@ -98,6 +99,15 @@ export type AttendanceRecord = {
   photoUrl?: string;
   generated?: boolean;
   status: "有效" | "待补图" | "异常";
+  yongxinReporting?: {
+    enabled: boolean;
+    jobId: string | null;
+    status: string;
+    message: string | null;
+    externalRequestId: string | null;
+    remoteState: string | null;
+    updatedAt: string | null;
+  };
 };
 
 export const projects: Project[] = [

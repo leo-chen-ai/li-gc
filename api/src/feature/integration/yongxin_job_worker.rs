@@ -557,7 +557,7 @@ async fn execute_attendance_sync(
             SELECT p.photo_data
             FROM construction_attendance_record_photos p
             WHERE p.attendance_record_id = record.id
-              AND p.source IN ('mqtt_rec_push', 'device_vendor_b_photo')
+              AND p.source IN ('mqtt_rec_push', 'device_vendor_b_photo', 'qianyi_mqtt')
               AND BTRIM(p.photo_data) <> ''
             ORDER BY CASE p.photo_kind WHEN 'closeup' THEN 0 ELSE 1 END, p.created_at
             LIMIT 1
@@ -795,10 +795,17 @@ async fn call_json(
             status: 200,
             body: json!({"code": 0, "msg": "dry-run", "data": data}),
             duration_ms: 0,
+            request_url: credentials
+                .endpoint(path)
+                .map(|url| url.to_string())
+                .unwrap_or_else(|_| path.to_owned()),
+            request_headers: json!({"Content-Type": "application/json"}),
+            request_body: payload.clone(),
         };
         record_attempt(
             state.db.pool(),
             job,
+            credentials,
             "POST",
             path,
             payload,
@@ -824,6 +831,7 @@ async fn call_json(
             record_attempt(
                 state.db.pool(),
                 job,
+                credentials,
                 "POST",
                 path,
                 payload,
@@ -850,6 +858,7 @@ async fn call_json(
             record_attempt(
                 state.db.pool(),
                 job,
+                credentials,
                 "POST",
                 path,
                 payload,
@@ -900,10 +909,17 @@ async fn upload_media_from_source(
             status: 200,
             body: json!({"code": 0, "msg": "dry-run", "data": format!("/dry-run/{hash}.{file_type}")}),
             duration_ms: 0,
+            request_url: credentials
+                .endpoint(yongxin_v2::IMAGE_UPLOAD_PATH)
+                .map(|url| url.to_string())
+                .unwrap_or_else(|_| yongxin_v2::IMAGE_UPLOAD_PATH.to_owned()),
+            request_headers: json!({"Content-Type": "application/json"}),
+            request_body: json!({"fileBase": "[BINARY_OMITTED]", "fileType": file_type}),
         };
         record_attempt(
             state.db.pool(),
             job,
+            credentials,
             "POST",
             yongxin_v2::IMAGE_UPLOAD_PATH,
             &json!({"fileBase": "[REDACTED]", "fileType": file_type}),
@@ -923,6 +939,7 @@ async fn upload_media_from_source(
                 record_attempt(
                     state.db.pool(),
                     job,
+                    credentials,
                     "POST",
                     yongxin_v2::IMAGE_UPLOAD_PATH,
                     &json!({"fileBase": "[REDACTED]", "fileType": file_type}),
@@ -953,6 +970,7 @@ async fn upload_media_from_source(
                 record_attempt(
                     state.db.pool(),
                     job,
+                    credentials,
                     "POST",
                     yongxin_v2::IMAGE_UPLOAD_PATH,
                     &json!({"fileBase": "[REDACTED]", "fileType": file_type}),
@@ -1344,6 +1362,7 @@ async fn finish_status(
 async fn record_attempt(
     pool: &PgPool,
     job: &ClaimedJob,
+    credentials: &yongxin_v2::YongxinCredentials,
     method: &str,
     path: &str,
     request_body: &Value,
@@ -1364,7 +1383,28 @@ async fn record_attempt(
             return;
         }
     };
-    let sanitized = sanitize_payload(request_body);
+    let request_url = response
+        .map(|value| value.request_url.clone())
+        .unwrap_or_else(|| {
+            credentials
+                .endpoint(path)
+                .map(|url| url.to_string())
+                .unwrap_or_else(|_| path.to_owned())
+        });
+    let request_headers = response
+        .map(|value| value.request_headers.clone())
+        .unwrap_or_else(|| {
+            json!({
+                "Content-Type": "application/json",
+                "projectCode": credentials.project_code,
+                "appKey": credentials.app_key,
+                "timestamp": "[REQUEST_NOT_SENT]",
+                "sign": "[REQUEST_NOT_SENT]"
+            })
+        });
+    let logged_request_body = response
+        .map(|value| value.request_body.clone())
+        .unwrap_or_else(|| request_body.clone());
     if let Err(error) = sqlx::query(
         r#"
         INSERT INTO integration_attempts (
@@ -1381,14 +1421,9 @@ async fn record_attempt(
     .bind(job.binding_id)
     .bind(attempt_no)
     .bind(method)
-    .bind(path)
-    .bind(json!({
-        "projectCode": "[CONFIGURED]",
-        "appKey": "[REDACTED]",
-        "timestamp": "[GENERATED]",
-        "sign": "[REDACTED]"
-    }))
-    .bind(sanitized)
+    .bind(request_url)
+    .bind(request_headers)
+    .bind(logged_request_body)
     .bind(response.map(|value| value.status as i32))
     .bind(response.map(|value| &value.body))
     .bind(response.map(|value| value.duration_ms))
@@ -1398,38 +1433,6 @@ async fn record_attempt(
     .await
     {
         warn!(job_id = %job.id, error = %error, "failed to record integration attempt");
-    }
-}
-
-fn sanitize_payload(value: &Value) -> Value {
-    match value {
-        Value::Object(object) => Value::Object(
-            object
-                .iter()
-                .map(|(key, value)| {
-                    let sensitive = matches!(
-                        key.as_str(),
-                        "idCardNumber"
-                            | "payRollBankCardNumber"
-                            | "fileBase"
-                            | "identityFront"
-                            | "identityBack"
-                            | "avatar"
-                            | "imgUrl"
-                    );
-                    (
-                        key.clone(),
-                        if sensitive {
-                            Value::String("[REDACTED]".to_owned())
-                        } else {
-                            sanitize_payload(value)
-                        },
-                    )
-                })
-                .collect(),
-        ),
-        Value::Array(items) => Value::Array(items.iter().map(sanitize_payload).collect()),
-        _ => value.clone(),
     }
 }
 
@@ -1789,25 +1792,5 @@ mod tests {
         assert_eq!(work_type_code(Some(38)).unwrap(), "390");
         assert_eq!(company_type_code(Some(1)).unwrap(), "009");
         assert_eq!(native_place_code(Some(330200)).unwrap(), "27");
-    }
-
-    #[test]
-    fn sensitive_attempt_fields_are_redacted_recursively() {
-        let sanitized = sanitize_payload(&json!({
-            "name": "张三",
-            "nested": {"idCardNumber": "cipher", "fileBase": "large"}
-        }));
-        assert_eq!(
-            sanitized
-                .pointer("/nested/idCardNumber")
-                .and_then(Value::as_str),
-            Some("[REDACTED]")
-        );
-        assert_eq!(
-            sanitized
-                .pointer("/nested/fileBase")
-                .and_then(Value::as_str),
-            Some("[REDACTED]")
-        );
     }
 }

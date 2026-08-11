@@ -257,7 +257,7 @@ async fn enqueue_bootstrap_events(
                   SELECT 1
                   FROM construction_attendance_record_photos photo
                   WHERE photo.attendance_record_id = record.id
-                    AND photo.source IN ('mqtt_rec_push', 'device_vendor_b_photo')
+                    AND photo.source IN ('mqtt_rec_push', 'device_vendor_b_photo', 'qianyi_mqtt')
                     AND BTRIM(photo.photo_data) <> ''
               )
             ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING
@@ -552,6 +552,30 @@ mod tests {
                 &json!({"operation": "delete"})
             ),
             vec!["entry_exit.sync"]
+        );
+    }
+
+    #[test]
+    fn worker_entry_exit_repair_creates_worker_and_entry_exit_jobs() {
+        assert_eq!(
+            operations_for_event(
+                yongxin_v2::PLATFORM_CODE,
+                "construction.worker.changed",
+                &json!({"operation": "repair", "entry_exit_changed": true})
+            ),
+            vec!["worker.sync", "entry_exit.sync"]
+        );
+    }
+
+    #[test]
+    fn attendance_repair_creates_only_attendance_job() {
+        assert_eq!(
+            operations_for_event(
+                yongxin_v2::PLATFORM_CODE,
+                "construction.attendance.created",
+                &json!({"operation": "repair", "source": "manual_yongxin_repair"})
+            ),
+            vec!["attendance.sync"]
         );
     }
 }

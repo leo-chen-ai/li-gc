@@ -8,6 +8,7 @@ import {
   ChevronRight,
   ChevronDown,
   Download,
+  Eye,
   FileDown,
   Layers3,
   List,
@@ -29,6 +30,7 @@ import { toast } from "sonner";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { updateAdminWindowTitle } from "@/components/layout/admin-window-storage";
 import {
   DropdownMenu,
@@ -108,7 +110,10 @@ import {
   useProjectAttendanceDevicesQuery,
   useProjectAttendanceQuery,
   useProjectQuery,
+  usePreviewYongxinAttendanceRepairMutation,
+  useRepairUnitReportingMutation,
   useRepairTeamReportingMutation,
+  useRepairYongxinAttendanceMutation,
   useRepairWorkerReportingMutation,
   useProjectTeamsQuery,
   useProjectUnitsQuery,
@@ -141,6 +146,7 @@ import type {
   ConstructionWageListResponse,
   ConstructionWorker,
   ConstructionWorkerPayload,
+  YongxinAttendanceRepairPreviewResult,
 } from "../types/construction-types";
 import {
   buildProjectOverviewAudit,
@@ -530,6 +536,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const createUnit = useCreateUnitMutation(projectId);
   const updateUnit = useUpdateUnitMutation(projectId);
   const deleteUnit = useDeleteUnitMutation(projectId);
+  const repairUnitReporting = useRepairUnitReportingMutation(projectId);
   const createTeam = useCreateTeamMutation(projectId);
   const updateTeam = useUpdateTeamMutation(projectId);
   const deleteTeam = useDeleteTeamMutation(projectId);
@@ -541,6 +548,8 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const createAttendance = useCreateAttendanceMutation(projectId);
   const updateAttendance = useUpdateAttendanceMutation(projectId);
   const deleteAttendance = useDeleteAttendanceMutation(projectId);
+  const repairYongxinAttendance = useRepairYongxinAttendanceMutation(projectId);
+  const previewYongxinAttendanceRepair = usePreviewYongxinAttendanceRepairMutation(projectId);
   const createAttendanceDeviceIssueReport = useCreateAttendanceDeviceIssueReportMutation();
   const createWageBatch = useCreateWageBatchMutation(projectId);
   const updateWageBatch = useUpdateWageBatchMutation(projectId);
@@ -695,6 +704,21 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const [projectFormOpen, setProjectFormOpen] = useState(false);
   const [advancedExportOpen, setAdvancedExportOpen] = useState(false);
   const [attendanceGeneratorOpen, setAttendanceGeneratorOpen] = useState(false);
+  const [yongxinRepairOpen, setYongxinRepairOpen] = useState(false);
+  const [yongxinRepairStartDate, setYongxinRepairStartDate] = useState(dateInputToday());
+  const [yongxinRepairEndDate, setYongxinRepairEndDate] = useState(dateInputToday());
+  const [yongxinRepairTeamId, setYongxinRepairTeamId] = useState("all");
+  const [yongxinRepairWorkerKeyword, setYongxinRepairWorkerKeyword] = useState("");
+  const [yongxinRepairWorkerIds, setYongxinRepairWorkerIds] = useState<string[]>([]);
+  const [yongxinRepairPreview, setYongxinRepairPreview] = useState<YongxinAttendanceRepairPreviewResult | null>(null);
+  const yongxinRepairWorkers = useMemo(() => {
+    const keyword = yongxinRepairWorkerKeyword.trim().toLowerCase();
+    return rawWorkers.filter((worker) => {
+      if (yongxinRepairTeamId !== "all" && worker.team_id !== yongxinRepairTeamId) return false;
+      if (!keyword) return true;
+      return `${worker.name ?? ""} ${worker.id_card ?? ""}`.toLowerCase().includes(keyword);
+    });
+  }, [rawWorkers, yongxinRepairTeamId, yongxinRepairWorkerKeyword]);
   const [advancedExportTarget, setAdvancedExportTarget] = useState<AdvancedExportTarget>("workers");
   const [advancedExportFormats, setAdvancedExportFormats] = useState<string[]>([]);
   const [advancedExportScope, setAdvancedExportScope] = useState<AdvancedExportScopeFilters>(
@@ -906,8 +930,35 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     }
   };
 
+  const handleRepairUnitReporting = async () => {
+    if (!window.confirm("确认修正失败和未传的参建单位上报？系统将重新调用已启用的甬薪或薪乐达单位接口。")) {
+      return;
+    }
+
+    try {
+      const result = await repairUnitReporting.mutateAsync();
+      const totals = result.reporting_summary.reduce(
+        (current, item) => ({
+          success: current.success + item.success_count,
+          failure: current.failure + item.failure_count,
+          notReported: current.notReported + item.not_reported_count,
+        }),
+        { success: 0, failure: 0, notReported: 0 }
+      );
+      if (result.attempted_count === 0) {
+        toast.info("当前没有可安全重试的参建单位上报");
+      } else if (totals.failure > 0 || totals.notReported > 0) {
+        toast.warning(`已提交 ${result.attempted_count} 家单位修正，后台处理中；当前成功 ${totals.success}，失败 ${totals.failure}，未传 ${totals.notReported}`);
+      } else {
+        toast.success(`已提交 ${result.attempted_count} 家单位修正，当前成功 ${totals.success}`);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "修正参建单位上报失败");
+    }
+  };
+
   const handleRepairWorkerReporting = async () => {
-    if (!window.confirm("确认修正失败和未传的工人上报？系统将按甬建码、任职信息、项目班组关系重新调用市住建接口。")) {
+    if (!window.confirm("确认修正失败和未传的工人上报？系统将分别重新调用已启用的市住建、甬薪或薪乐达接口，已成功的平台不会重复发送。")) {
       return;
     }
 
@@ -1206,6 +1257,28 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
             {activeTab === "考勤记录" && isSystemAdmin ? (
               <Button
                 size="sm"
+                variant="outline"
+                className="h-8 gap-2 border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                onClick={() => {
+                  const startDate = `${attendanceCalendarMonth}-01`;
+                  const monthEnd = lastDateOfMonth(attendanceCalendarMonth);
+                  const today = dateInputToday();
+                  setYongxinRepairStartDate(startDate);
+                  setYongxinRepairEndDate(today.startsWith(`${attendanceCalendarMonth}-`) ? today : monthEnd);
+                  setYongxinRepairTeamId("all");
+                  setYongxinRepairWorkerKeyword("");
+                  setYongxinRepairWorkerIds([]);
+                  setYongxinRepairPreview(null);
+                  setYongxinRepairOpen(true);
+                }}
+              >
+                <Upload className="size-4" />
+                甬薪补推考勤
+              </Button>
+            ) : null}
+            {activeTab === "考勤记录" && isSystemAdmin ? (
+              <Button
+                size="sm"
                 className="h-8 gap-2 bg-violet-600 text-white hover:bg-violet-700"
                 onClick={() => setAttendanceGeneratorOpen(true)}
               >
@@ -1281,6 +1354,9 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                 teams={projectTeams}
                 unitFilters={unitFilters}
                 onUnitFiltersChange={(patch) => setUnitFilters((current) => ({ ...current, ...patch }))}
+                unitReportingSummary={unitQuery.data?.reporting_summary ?? []}
+                onRepairUnitReporting={() => void handleRepairUnitReporting()}
+                isRepairingUnitReporting={repairUnitReporting.isPending}
                 teamFilters={teamFilters}
                 teamReportingSummary={teamQuery.data?.reporting_summary ?? []}
                 onRepairTeamReporting={() => void handleRepairTeamReporting()}
@@ -1409,6 +1485,82 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
           void queryClient.invalidateQueries({ queryKey: constructionProjectKeys.attendanceRoot(projectId) });
         }}
       />
+
+      <Dialog open={yongxinRepairOpen} onOpenChange={setYongxinRepairOpen}>
+        <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>甬薪补推考勤</DialogTitle>
+            <DialogDescription>
+              先选择班组和工人并预览待补推记录，确认后才会加入甬薪队列。已成功、处理中或结果待核对的数据不会重复发送。
+            </DialogDescription>
+          </DialogHeader>
+          {!yongxinRepairPreview ? <>
+            <div className="grid gap-4 py-2 sm:grid-cols-2">
+              <div className="space-y-2"><label className="text-sm font-medium" htmlFor="yongxin-repair-start">开始日期</label><Input id="yongxin-repair-start" type="date" value={yongxinRepairStartDate} onChange={(event) => setYongxinRepairStartDate(event.target.value)} /></div>
+              <div className="space-y-2"><label className="text-sm font-medium" htmlFor="yongxin-repair-end">结束日期</label><Input id="yongxin-repair-end" type="date" value={yongxinRepairEndDate} onChange={(event) => setYongxinRepairEndDate(event.target.value)} /></div>
+              <div className="space-y-2"><label className="text-sm font-medium">班组</label><Select value={yongxinRepairTeamId} onValueChange={(value) => { setYongxinRepairTeamId(value); setYongxinRepairWorkerIds([]); }}><SelectTrigger><SelectValue placeholder="全部班组" /></SelectTrigger><SelectContent><SelectItem value="all">全部班组</SelectItem>{rawTeams.map((team) => <SelectItem key={team.id} value={team.id}>{team.name || "未命名班组"}</SelectItem>)}</SelectContent></Select></div>
+              <div className="space-y-2"><label className="text-sm font-medium" htmlFor="yongxin-repair-worker-search">搜索工人</label><Input id="yongxin-repair-worker-search" value={yongxinRepairWorkerKeyword} onChange={(event) => setYongxinRepairWorkerKeyword(event.target.value)} placeholder="姓名或身份证号" /></div>
+            </div>
+            <div className="rounded-lg border">
+              <div className="flex items-center justify-between border-b bg-slate-50 px-3 py-2 text-sm">
+                <span>可选工人 {yongxinRepairWorkers.length} 人，已选 {yongxinRepairWorkerIds.length} 人</span>
+                <Button type="button" variant="ghost" size="sm" onClick={() => {
+                  const visibleIds = yongxinRepairWorkers.map((worker) => worker.id);
+                  const allSelected = visibleIds.length > 0 && visibleIds.every((id) => yongxinRepairWorkerIds.includes(id));
+                  setYongxinRepairWorkerIds((current) => allSelected ? current.filter((id) => !visibleIds.includes(id)) : Array.from(new Set([...current, ...visibleIds])));
+                }}>{yongxinRepairWorkers.length > 0 && yongxinRepairWorkers.every((worker) => yongxinRepairWorkerIds.includes(worker.id)) ? "取消全选" : "全选当前"}</Button>
+              </div>
+              <div className="grid max-h-56 gap-1 overflow-y-auto p-2 sm:grid-cols-2">
+                {yongxinRepairWorkers.map((worker) => <label key={worker.id} className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-2 hover:bg-slate-50"><Checkbox checked={yongxinRepairWorkerIds.includes(worker.id)} onCheckedChange={(checked) => setYongxinRepairWorkerIds((current) => checked ? [...current, worker.id] : current.filter((id) => id !== worker.id))} /><span className="min-w-0"><span className="block truncate text-sm font-medium">{worker.name || "未命名工人"}</span><span className="block truncate text-xs text-muted-foreground">{worker.id_card || "无身份证号"}</span></span></label>)}
+                {yongxinRepairWorkers.length === 0 ? <div className="col-span-2 py-8 text-center text-sm text-muted-foreground">当前条件下没有工人</div> : null}
+              </div>
+            </div>
+          </> : <>
+            <div className="grid gap-3 sm:grid-cols-3"><div className="rounded-lg border bg-slate-50 p-3"><div className="text-xs text-muted-foreground">已选工人</div><div className="mt-1 text-xl font-semibold">{yongxinRepairWorkerIds.length} 人</div></div><div className="rounded-lg border bg-slate-50 p-3"><div className="text-xs text-muted-foreground">实际涉及工人</div><div className="mt-1 text-xl font-semibold">{yongxinRepairPreview.worker_count} 人</div></div><div className="rounded-lg border bg-slate-50 p-3"><div className="text-xs text-muted-foreground">待补推记录</div><div className="mt-1 text-xl font-semibold">{yongxinRepairPreview.record_count} 条</div></div></div>
+            {yongxinRepairPreview.has_more ? <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">当前符合条件的记录超过 500 条，本批只展示并推送前 500 条。</div> : null}
+            <div className="max-h-[42vh] overflow-auto rounded-lg border"><Table><TableHeader className="sticky top-0 bg-slate-50"><TableRow><TableHead>工人</TableHead><TableHead>班组</TableHead><TableHead>方向</TableHead><TableHead>考勤时间</TableHead><TableHead>当前状态</TableHead></TableRow></TableHeader><TableBody>{yongxinRepairPreview.records.map((record) => <TableRow key={record.attendance_id}><TableCell><div className="font-medium">{record.worker_name}</div><div className="text-xs text-muted-foreground">{record.worker_identity || "无身份证号"}</div></TableCell><TableCell>{record.team_name || "未分配班组"}</TableCell><TableCell>{record.direction === 0 ? "进场" : "出场"}</TableCell><TableCell>{new Date(record.trigger_time).toLocaleString("zh-CN", { hour12: false })}</TableCell><TableCell>{record.current_status ? <div><div>{formatYongxinJobStatus(record.current_status)}</div><div className="max-w-52 truncate text-xs text-red-600" title={record.current_message || ""}>{record.current_message}</div></div> : "未上报"}</TableCell></TableRow>)}</TableBody></Table>{yongxinRepairPreview.records.length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">所选范围没有需要补推的考勤记录</div> : null}</div>
+          </>}
+          <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs leading-5 text-sky-800">
+            每批最多加入 500 条。考勤上传、图片上传以及异步结果查询都会写入“平台对接管理 → 平台日志”，可按甬薪、成功/失败、工人姓名、身份证号或异步流水号搜索。
+          </div>
+          <DialogFooter className="gap-2 sm:justify-between">
+            <Button type="button" variant="ghost" asChild>
+              <a href={`/app/admin/platform-integrations?tab=logs&project_id=${encodeURIComponent(projectId)}&platform_type=yongxin_v2`}>
+                查看平台日志
+              </a>
+            </Button>
+            <div className="flex gap-2">
+              <Button type="button" variant="outline" onClick={() => setYongxinRepairOpen(false)}>取消</Button>
+              {yongxinRepairPreview ? <Button type="button" variant="outline" disabled={repairYongxinAttendance.isPending} onClick={() => setYongxinRepairPreview(null)}>返回修改</Button> : null}
+              {!yongxinRepairPreview ? <Button
+                type="button"
+                disabled={previewYongxinAttendanceRepair.isPending || !yongxinRepairStartDate || !yongxinRepairEndDate || yongxinRepairWorkerIds.length === 0}
+                className="bg-[#0f6b5d] text-white hover:bg-[#0b5148]"
+                onClick={async () => {
+                  if (yongxinRepairEndDate < yongxinRepairStartDate) {
+                    toast.error("结束日期不能早于开始日期");
+                    return;
+                  }
+                  try {
+                    const result = await previewYongxinAttendanceRepair.mutateAsync({ start_date: yongxinRepairStartDate, end_date: yongxinRepairEndDate, worker_ids: yongxinRepairWorkerIds });
+                    setYongxinRepairPreview(result);
+                  } catch (error) {
+                    toast.error(error instanceof Error ? error.message : "甬薪考勤补推预览失败");
+                  }
+                }}
+              >
+                {previewYongxinAttendanceRepair.isPending ? "生成预览中…" : <><Eye className="mr-2 size-4" />预览待补推数据</>}
+              </Button> : <Button type="button" disabled={repairYongxinAttendance.isPending || yongxinRepairPreview.records.length === 0} className="bg-[#0f6b5d] text-white hover:bg-[#0b5148]" onClick={async () => {
+                try {
+                  const result = await repairYongxinAttendance.mutateAsync({ start_date: yongxinRepairStartDate, end_date: yongxinRepairEndDate, worker_ids: yongxinRepairWorkerIds, attendance_ids: yongxinRepairPreview.records.map((record) => record.attendance_id) });
+                  toast.success(`已加入 ${result.queued_count} 条甬薪考勤补推任务${result.has_more ? "，完成后请继续补推下一批" : ""}`);
+                  setYongxinRepairOpen(false);
+                } catch (error) { toast.error(error instanceof Error ? error.message : "甬薪考勤补推失败"); }
+              }}>{repairYongxinAttendance.isPending ? "加入队列中…" : `确认补推 ${yongxinRepairPreview.record_count} 条`}</Button>}
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AdvancedExportDialog
         open={advancedExportOpen}
@@ -1942,6 +2094,9 @@ function ModuleFilters({
   teams,
   unitFilters,
   onUnitFiltersChange,
+  unitReportingSummary,
+  onRepairUnitReporting,
+  isRepairingUnitReporting,
   teamFilters,
   teamReportingSummary,
   onRepairTeamReporting,
@@ -1962,6 +2117,9 @@ function ModuleFilters({
   teams: Team[];
   unitFilters: UnitLedgerFilters;
   onUnitFiltersChange: (patch: Partial<UnitLedgerFilters>) => void;
+  unitReportingSummary: ConstructionTeamReportingSummary[];
+  onRepairUnitReporting: () => void;
+  isRepairingUnitReporting: boolean;
   teamFilters: TeamLedgerFilters;
   teamReportingSummary: ConstructionTeamReportingSummary[];
   onRepairTeamReporting: () => void;
@@ -1987,11 +2145,18 @@ function ModuleFilters({
 
   if (activeTab === "建设单位") {
     return (
-      <FilterGrid onSearch={onSearch} onReset={onReset}>
-        <FilterInput label="关键词" placeholder="单位名称、信用代码、负责人" value={unitFilters.keyword} onChange={(event) => onUnitFiltersChange({ keyword: event.target.value })} />
-        <FilterSelect label="单位类型" value={unitFilters.companyType} onValueChange={(companyType) => onUnitFiltersChange({ companyType })} options={selectOptionsFromField(unitFormFields, "company_type", "全部类型")} />
-        <FilterSelect label="计薪方式" value={unitFilters.salaryCalcType} onValueChange={(salaryCalcType) => onUnitFiltersChange({ salaryCalcType })} options={selectOptionsFromField(unitFormFields, "salary_calc_type", "全部计薪方式")} />
-      </FilterGrid>
+      <div className="grid gap-2 xl:grid-cols-[minmax(280px,0.8fr)_minmax(0,2.2fr)]">
+        <TeamReportingOverview
+          summary={unitReportingSummary}
+          onRepair={onRepairUnitReporting}
+          isRepairing={isRepairingUnitReporting}
+        />
+        <FilterGrid compact onSearch={onSearch} onReset={onReset}>
+          <FilterInput label="关键词" placeholder="单位名称、信用代码、负责人" value={unitFilters.keyword} onChange={(event) => onUnitFiltersChange({ keyword: event.target.value })} />
+          <FilterSelect label="单位类型" value={unitFilters.companyType} onValueChange={(companyType) => onUnitFiltersChange({ companyType })} options={selectOptionsFromField(unitFormFields, "company_type", "全部类型")} />
+          <FilterSelect label="计薪方式" value={unitFilters.salaryCalcType} onValueChange={(salaryCalcType) => onUnitFiltersChange({ salaryCalcType })} options={selectOptionsFromField(unitFormFields, "salary_calc_type", "全部计薪方式")} />
+        </FilterGrid>
+      </div>
     );
   }
 
@@ -2655,7 +2820,10 @@ function UnitsTab({
       empty="暂无参建单位"
       headers={editable ? ["单位名称", "单位类型", "统一社会信用代码", "负责人", "计薪方式", "人数", "操作"] : ["单位名称", "单位类型", "统一社会信用代码", "负责人", "计薪方式", "人数"]}
       rows={units.map((unit) => [
-        unit.name,
+        <div key={`${unit.id}-reporting`} className="min-w-[220px] space-y-1.5">
+          <div className="font-medium text-slate-800 dark:text-foreground">{unit.name}</div>
+          <EntityReportingPlatforms platforms={unit.reportingPlatforms} />
+        </div>,
         unit.type,
         unit.creditCode,
         `${unit.manager} / ${unit.phone}`,
@@ -2719,7 +2887,7 @@ function EntityReportingPlatforms({
   platforms,
   showLabel = true,
 }: {
-  platforms: Team["reportingPlatforms"];
+  platforms: ConstructionUnit["reportingPlatforms"] | Team["reportingPlatforms"];
   showLabel?: boolean;
 }) {
   if (!platforms?.length) {
@@ -3709,7 +3877,7 @@ function AttendanceTab({
       {viewMode === "list" ? (
         <DataTable
           empty="暂无考勤记录"
-          headers={["照片", "工人", "班组名称", "工种", "工人类型", "考勤天数", "进出", "考勤时间", "来源", "设备"]}
+          headers={["照片", "工人", "班组名称", "工种", "工人类型", "考勤天数", "进出", "考勤时间", "来源", "设备", "甬薪状态"]}
           rows={records.map((record) => [
             <AttendancePhoto key={`${record.id}-photo`} src={record.photoUrl} alt={`${record.worker} 考勤照片`} />,
             record.worker,
@@ -3721,9 +3889,10 @@ function AttendanceTab({
             record.time,
             record.generated ? <span key={`${record.id}-generated`} className="rounded border border-violet-200 bg-violet-50 px-2 py-1 text-xs font-medium text-violet-700 dark:border-violet-900 dark:bg-violet-950/40 dark:text-violet-300">生成</span> : "设备",
             record.device,
+            <YongxinAttendanceStatus key={`${record.id}-yongxin`} record={record} />,
           ])}
-          tableClassName="min-w-[1060px]"
-          cellClassNames={["w-16", "w-24", "w-28", "w-24", "w-24", "w-20 text-right", "w-20", "w-44", "w-20", "w-36"]}
+          tableClassName="min-w-[1220px]"
+          cellClassNames={["w-16", "w-24", "w-28", "w-24", "w-24", "w-20 text-right", "w-20", "w-44", "w-20", "w-36", "w-32"]}
           scrollX
           pagination={pagination}
         />
@@ -3731,6 +3900,61 @@ function AttendanceTab({
         <AttendanceCalendarTable rows={calendarRows} dayCount={dayCount} />
       )}
     </div>
+  );
+}
+
+function formatYongxinJobStatus(status: string) {
+  return ({
+    pending: "排队中",
+    processing: "处理中",
+    retry: "等待重试",
+    awaiting_result: "等待回执",
+    waiting_dependency: "等待前置数据",
+    waiting_data: "缺少资料",
+    waiting_media: "缺少图片",
+    success: "成功",
+    completed: "成功",
+    failed: "失败",
+    delivery_unknown: "结果待核对",
+    disabled: "任务已失效",
+  } as Record<string, string>)[status] ?? status;
+}
+
+function YongxinAttendanceStatus({ record }: { record: AttendanceRecord }) {
+  const reporting = record.yongxinReporting;
+  const status = reporting?.status ?? "not_configured";
+  const presentation: Record<string, { label: string; className: string }> = {
+    not_configured: { label: "未启用", className: "border-slate-200 bg-slate-50 text-slate-500" },
+    not_reported: { label: "未上报", className: "border-slate-300 bg-white text-slate-600" },
+    pending: { label: "排队中", className: "border-blue-200 bg-blue-50 text-blue-700" },
+    processing: { label: "处理中", className: "border-blue-200 bg-blue-50 text-blue-700" },
+    retry: { label: "等待重试", className: "border-amber-200 bg-amber-50 text-amber-700" },
+    awaiting_result: { label: "等待回执", className: "border-violet-200 bg-violet-50 text-violet-700" },
+    waiting_dependency: { label: "等待前置", className: "border-amber-200 bg-amber-50 text-amber-700" },
+    waiting_data: { label: "缺少资料", className: "border-orange-200 bg-orange-50 text-orange-700" },
+    waiting_media: { label: "缺少图片", className: "border-orange-200 bg-orange-50 text-orange-700" },
+    success: { label: "成功", className: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+    completed: { label: "成功", className: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+    failed: { label: "失败", className: "border-red-200 bg-red-50 text-red-700" },
+    delivery_unknown: { label: "结果待核对", className: "border-rose-200 bg-rose-50 text-rose-700" },
+    disabled: { label: "任务已失效", className: "border-slate-200 bg-slate-50 text-slate-500" },
+  };
+  const current = presentation[status] ?? { label: status, className: "border-slate-200 bg-slate-50 text-slate-600" };
+  const details = [
+    reporting?.message,
+    reporting?.externalRequestId ? `异步流水号：${reporting.externalRequestId}` : null,
+    reporting?.updatedAt ? `更新时间：${formatBeijingDateTime(reporting.updatedAt)}` : null,
+  ].filter(Boolean).join("\n");
+  const href = `/app/admin/platform-integrations?tab=logs&project_id=${encodeURIComponent(record.projectId)}&platform_type=yongxin_v2&keyword=${encodeURIComponent(record.id)}`;
+
+  return (
+    <a
+      href={href}
+      title={details || "点击查看该考勤的甬薪平台日志"}
+      className={cn("inline-flex rounded-md border px-2 py-1 text-xs font-semibold hover:underline", current.className)}
+    >
+      {current.label}
+    </a>
   );
 }
 
@@ -4382,6 +4606,12 @@ function currentPayrollMonth() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
 
+function lastDateOfMonth(month: string) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  const lastDay = new Date(year, monthNumber, 0).getDate();
+  return `${month}-${String(lastDay).padStart(2, "0")}`;
+}
+
 function formatPayrollMonth(value: string | null | undefined) {
   if (!value) return "";
   return value.slice(0, 7);
@@ -4659,6 +4889,7 @@ function apiUnitToDetail(unit: ApiConstructionUnit, workerCount = 0): Constructi
     phone: unit.manager_phone ?? "",
     workers: workerCount,
     salaryType: getFieldOptionLabel(unitFormFields, "salary_calc_type", unit.salary_calc_type),
+    reportingPlatforms: unit.reporting_platforms,
   };
 }
 
@@ -4734,6 +4965,15 @@ function apiAttendanceToDetail(
     photoUrl: normalizeAttendancePhoto(record.closeup_photo ?? record.photo_path ?? record.overall_photo),
     generated: record.is_generated,
     status: "有效",
+    yongxinReporting: record.yongxin_reporting ? {
+      enabled: record.yongxin_reporting.enabled,
+      jobId: record.yongxin_reporting.job_id,
+      status: record.yongxin_reporting.status,
+      message: record.yongxin_reporting.message,
+      externalRequestId: record.yongxin_reporting.external_request_id,
+      remoteState: record.yongxin_reporting.remote_state,
+      updatedAt: record.yongxin_reporting.updated_at,
+    } : undefined,
   };
 }
 

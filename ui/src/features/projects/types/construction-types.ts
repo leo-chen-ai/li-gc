@@ -178,6 +178,7 @@ export type ConstructionUnit = {
   salary_calc_type: number | null;
   quantity_unit_type: number | null;
   seal_photo: string | null;
+  reporting_platforms?: ConstructionEntityReportingPlatform[];
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -282,6 +283,15 @@ export type ConstructionAttendanceRecord = {
   closeup_photo: string | null;
   original_time: string | null;
   is_generated?: boolean;
+  yongxin_reporting?: {
+    enabled: boolean;
+    job_id: string | null;
+    status: string;
+    message: string | null;
+    external_request_id: string | null;
+    remote_state: string | null;
+    updated_at: string | null;
+  };
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -521,6 +531,10 @@ export type ConstructionResourceListResponse<T> = {
   page_size: number;
 };
 
+export type ConstructionUnitListResponse = ConstructionResourceListResponse<ConstructionUnit> & {
+  reporting_summary: ConstructionTeamReportingSummary[];
+};
+
 export type ConstructionTeamListResponse = ConstructionResourceListResponse<ConstructionTeam> & {
   reporting_summary: ConstructionTeamReportingSummary[];
 };
@@ -532,6 +546,43 @@ export type ConstructionWorkerListResponse = ConstructionResourceListResponse<Co
 export type ConstructionTeamReportingRepairResult = {
   attempted_count: number;
   reporting_summary: ConstructionTeamReportingSummary[];
+};
+
+export type YongxinAttendanceRepairPayload = {
+  start_date: string;
+  end_date: string;
+  worker_ids: string[];
+  attendance_ids?: string[];
+};
+
+export type YongxinAttendanceRepairPreviewRecord = {
+  attendance_id: string;
+  worker_id: string;
+  worker_name: string;
+  worker_identity: string | null;
+  team_name: string | null;
+  direction: number;
+  trigger_time: string;
+  current_status: string | null;
+  current_message: string | null;
+};
+
+export type YongxinAttendanceRepairPreviewResult = {
+  records: YongxinAttendanceRepairPreviewRecord[];
+  record_count: number;
+  worker_count: number;
+  batch_limit: number;
+  has_more: boolean;
+  start_date: string;
+  end_date: string;
+};
+
+export type YongxinAttendanceRepairResult = {
+  queued_count: number;
+  batch_limit: number;
+  has_more: boolean;
+  start_date: string;
+  end_date: string;
 };
 
 export type ConstructionContractTemplate = {
@@ -646,6 +697,7 @@ export type ConstructionModuleListFilters = {
   attendance_device_id?: string;
   status?: string;
   platform_type?: string;
+  operation?: string;
   action?: string;
   include_delete_actions?: string;
 };

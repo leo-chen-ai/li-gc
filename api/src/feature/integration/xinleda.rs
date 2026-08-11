@@ -131,6 +131,9 @@ pub struct XinledaResponse {
     pub status: u16,
     pub body: Value,
     pub duration_ms: i32,
+    pub request_url: String,
+    pub request_headers: Value,
+    pub request_body: Value,
 }
 
 impl XinledaResponse {
@@ -234,7 +237,14 @@ pub async fn call(
     let timestamp = chrono::Utc::now().timestamp_millis();
     let nonce = Uuid::new_v4().simple().to_string();
     let body = build_request_body(credentials, method, data, timestamp, &nonce)?;
-    send(client.post(credentials.endpoint(OPENAPI_PATH)?).json(&body)).await
+    let request_url = credentials.endpoint(OPENAPI_PATH)?;
+    send(
+        client.post(request_url.clone()).json(&body),
+        request_url.to_string(),
+        json!({"Content-Type": "application/json"}),
+        body,
+    )
+    .await
 }
 
 pub async fn upload_file(
@@ -259,10 +269,16 @@ pub async fn upload_file(
         .file_name(file_name.to_owned())
         .mime_str(content_type)
         .map_err(|error| XinledaError::Request(error.to_string()))?;
+    let request_url = url.to_string();
     send(
         client
             .post(url)
             .multipart(multipart::Form::new().part("files", part)),
+        request_url,
+        json!({"Content-Type": "multipart/form-data"}),
+        json!({
+            "files": format!("[BINARY_OMITTED:{file_name}]"),
+        }),
     )
     .await
 }
@@ -286,7 +302,12 @@ pub fn response_code(body: &Value) -> Option<i64> {
     body.get("code").and_then(value_i64)
 }
 
-async fn send(request: reqwest::RequestBuilder) -> Result<XinledaResponse, XinledaError> {
+async fn send(
+    request: reqwest::RequestBuilder,
+    request_url: String,
+    request_headers: Value,
+    request_body: Value,
+) -> Result<XinledaResponse, XinledaError> {
     let started = Instant::now();
     let response = request
         .send()
@@ -311,6 +332,9 @@ async fn send(request: reqwest::RequestBuilder) -> Result<XinledaResponse, Xinle
         status,
         body,
         duration_ms: started.elapsed().as_millis().min(i32::MAX as u128) as i32,
+        request_url,
+        request_headers,
+        request_body,
     })
 }
 

@@ -138,7 +138,7 @@ test("甬薪配置只保存接口地址和三项凭证", () => {
   const form = {
     ...createYongxinV2ConfigForm(),
     project_id: "local-project",
-    base_url: "https://apigx.91jtg.com/openapi/",
+    base_url: "https://apirs.91jtg.com/openapi/",
     project_code: "project-code",
     app_key: "app-key",
     app_secret: "1234567890abcdef",
@@ -146,7 +146,7 @@ test("甬薪配置只保存接口地址和三项凭证", () => {
 
   assert.equal(validateYongxinV2Config(form), null);
   assert.deepEqual(buildYongxinV2Config(form), {
-    base_url: "https://apigx.91jtg.com/openapi",
+    base_url: "https://apirs.91jtg.com/openapi",
     project_code: "project-code",
     app_key: "app-key",
     app_secret: "1234567890abcdef",

@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 use super::face_v203::{FacePersonPayload, build_delete_person, build_edit_person, command_topic};
 use super::publisher::publish_json;
+use super::qianyi::{self, DEVICE_TYPE as QIANYI_DEVICE_TYPE};
 
 // 厂家协议 personType: 0=白名单, 1=黑名单。本项目不使用黑名单。
 const FACE_PERSON_TYPE_WHITELIST: i32 = 0;
@@ -56,6 +57,7 @@ struct IssueDeviceSnapshot {
     device_type: Option<String>,
     online_status: String,
     last_heartbeat_at: Option<DateTime<Utc>>,
+    qianyi_subtopic: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -566,10 +568,11 @@ async fn fetch_issue_device(
             Option<String>,
             String,
             Option<DateTime<Utc>>,
+            Option<String>,
         ),
     >(
         r#"
-        SELECT id, project_id, device_name, serial_number, device_type, online_status, last_heartbeat_at
+        SELECT id, project_id, device_name, serial_number, device_type, online_status, last_heartbeat_at, qianyi_subtopic
         FROM construction_attendance_devices
         WHERE is_deleted = FALSE
           AND project_id = $1
@@ -590,6 +593,7 @@ async fn fetch_issue_device(
             device_type,
             online_status,
             last_heartbeat_at,
+            qianyi_subtopic,
         )| {
             serial_number
                 .filter(|value| !value.trim().is_empty())
@@ -601,6 +605,7 @@ async fn fetch_issue_device(
                     device_type,
                     online_status,
                     last_heartbeat_at,
+                    qianyi_subtopic,
                 })
         },
     )
@@ -621,10 +626,11 @@ async fn fetch_issue_device_by_serial(
             Option<String>,
             String,
             Option<DateTime<Utc>>,
+            Option<String>,
         ),
     >(
         r#"
-        SELECT id, project_id, device_name, serial_number, device_type, online_status, last_heartbeat_at
+        SELECT id, project_id, device_name, serial_number, device_type, online_status, last_heartbeat_at, qianyi_subtopic
         FROM construction_attendance_devices
         WHERE is_deleted = FALSE
           AND serial_number = $1
@@ -646,6 +652,7 @@ async fn fetch_issue_device_by_serial(
                 device_type,
                 online_status,
                 last_heartbeat_at,
+                qianyi_subtopic,
             )| IssueDeviceSnapshot {
                 id,
                 project_id,
@@ -654,6 +661,7 @@ async fn fetch_issue_device_by_serial(
                 device_type,
                 online_status,
                 last_heartbeat_at,
+                qianyi_subtopic,
             },
         )
     })
@@ -681,10 +689,29 @@ fn build_issue_mqtt_payload(
     worker: &IssueWorkerSnapshot,
     device: &IssueDeviceSnapshot,
 ) -> Result<(String, String, Value, &'static str), String> {
-    let message_id = format!("issue-{}", Uuid::new_v4());
+    let message_id = if device.device_type.as_deref() == Some(QIANYI_DEVICE_TYPE) {
+        qianyi::message_id()
+    } else {
+        format!("issue-{}", Uuid::new_v4())
+    };
     let custom_id = issue_worker_custom_id(worker);
-    let topic = command_topic(&device.serial_number);
+    let topic = if device.device_type.as_deref() == Some(QIANYI_DEVICE_TYPE) {
+        device
+            .qianyi_subtopic
+            .clone()
+            .ok_or_else(|| "芊熠设备尚未注册，未取得下行MQTT主题".to_string())?
+    } else {
+        command_topic(&device.serial_number)
+    };
     if action == "delete" {
+        if device.device_type.as_deref() == Some(QIANYI_DEVICE_TYPE) {
+            return Ok((
+                message_id.clone(),
+                topic,
+                qianyi::build_person_delete(&message_id, worker.id),
+                "person_delete",
+            ));
+        }
         return Ok((
             message_id.clone(),
             topic,
@@ -707,6 +734,20 @@ fn build_issue_mqtt_payload(
         .filter(|value| !value.is_empty())
         .ok_or_else(|| MISSING_FACE_PHOTO_MESSAGE.to_string())?
         .to_string();
+    if device.device_type.as_deref() == Some(QIANYI_DEVICE_TYPE) {
+        return Ok((
+            message_id.clone(),
+            topic,
+            qianyi::build_person_add(
+                &message_id,
+                worker.id,
+                &name,
+                worker.id_card.as_deref(),
+                &avatar,
+            ),
+            "person_add",
+        ));
+    }
     let person = FacePersonPayload {
         custom_id,
         name,
@@ -1002,6 +1043,7 @@ mod tests {
             device_type: Some("海厂家".to_string()),
             online_status: "online".to_string(),
             last_heartbeat_at: Some(Utc::now()),
+            qianyi_subtopic: None,
         };
 
         let (_, _, payload, operator) =
@@ -1037,6 +1079,7 @@ mod tests {
             device_type: Some("海厂家".to_string()),
             online_status: "online".to_string(),
             last_heartbeat_at: Some(Utc::now()),
+            qianyi_subtopic: None,
         };
 
         let (_, _, payload, operator) =
@@ -1073,6 +1116,7 @@ mod tests {
             device_type: Some("海厂家".to_string()),
             online_status: "online".to_string(),
             last_heartbeat_at: Some(Utc::now()),
+            qianyi_subtopic: None,
         };
 
         let error = build_issue_mqtt_payload("update", &worker, &device).unwrap_err();
@@ -1129,6 +1173,7 @@ mod tests {
             device_type: Some("海厂家".to_string()),
             online_status: "online".to_string(),
             last_heartbeat_at: Some(Utc::now()),
+            qianyi_subtopic: None,
         };
 
         assert!(!is_b_vendor_device(&device));
@@ -1136,5 +1181,38 @@ mod tests {
 
         device.device_type = Some(B_VENDOR_DEVICE_TYPE.to_string());
         assert!(is_b_vendor_device(&device));
+    }
+
+    #[test]
+    fn qianyi_issue_uses_registered_topic_and_protocol_payload() {
+        let worker_id = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        let worker = IssueWorkerSnapshot {
+            id: worker_id,
+            name: Some("张三".to_string()),
+            id_card: Some("330100199001011234".to_string()),
+            phone: None,
+            avatar: Some("https://example.test/face.jpg".to_string()),
+            is_deleted: false,
+            work_status: Some(1),
+            native: None,
+        };
+        let device = IssueDeviceSnapshot {
+            id: Uuid::new_v4(),
+            project_id: Uuid::new_v4(),
+            device_name: Some("芊熠测试机".to_string()),
+            serial_number: "QY-001".to_string(),
+            device_type: Some(QIANYI_DEVICE_TYPE.to_string()),
+            online_status: "online".to_string(),
+            last_heartbeat_at: Some(Utc::now()),
+            qianyi_subtopic: Some("device/face/QY-001".to_string()),
+        };
+
+        let (message_id, topic, payload, operator) =
+            build_issue_mqtt_payload("update", &worker, &device).unwrap();
+        assert_eq!(message_id.len(), 20);
+        assert_eq!(topic, "device/face/QY-001");
+        assert_eq!(operator, "person_add");
+        assert_eq!(payload["cmd"], "person_add");
+        assert_eq!(payload["personId"], "550e8400e29b41d4a716446655440000");
     }
 }

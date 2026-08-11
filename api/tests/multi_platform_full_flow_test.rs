@@ -164,23 +164,23 @@ async fn mock_receiver(
             }
         },
         MockKind::Yongxin => match path.as_str() {
-            "/project/V2/query" => json!({
+            "/project/v2/query" => json!({
                 "code": 0,
                 "msg": "mock accepted",
                 "data": {"projectCode": headers.get("projectCode").and_then(|v| v.to_str().ok())}
             }),
-            "/projectCorp/V2/add" => json!({"code": 0, "msg": "mock accepted", "data": null}),
-            "/team/V2/add" => json!({
+            "/projectCorp/v2/add" => json!({"code": 0, "msg": "mock accepted", "data": null}),
+            "/team/v2/add" => json!({
                 "code": 0,
                 "msg": "mock accepted",
                 "data": {"teamSysNo": format!("MOCK-TEAM-{id}")}
             }),
-            "/worker/V2/add" | "/entryExit/V2/add" | "/attend/V2/add" => json!({
+            "/worker/v2/add" | "/entryExit/v2/add" | "/attend/v2/add" => json!({
                 "code": 0,
                 "msg": "mock queued",
                 "data": {"requestSerialCode": format!("MOCK-ASYNC-{id}")}
             }),
-            "/asyncHandleResult/V2/query" => json!({
+            "/asyncHandleResult/v1/query" => json!({
                 "code": 0,
                 "msg": "mock completed",
                 "data": {
@@ -189,7 +189,7 @@ async fn mock_receiver(
                     "message": "mock completed"
                 }
             }),
-            "/sysFile/V2/uploadImg" => json!({
+            "/sysFile/v1/uploadImg" => json!({
                 "code": 0,
                 "msg": "mock accepted",
                 "data": format!("/mock/{id}.png")
@@ -268,7 +268,7 @@ async fn three_project_platform_matrix_pushes_every_supported_entity_without_cro
     let ningbo = MockServer::start(MockKind::Ningbo).await;
     let yongxin = MockServer::start_with_failures(
         MockKind::Yongxin,
-        HashMap::from([("/worker/V2/add".to_owned(), 1)]),
+        HashMap::from([("/worker/v2/add".to_owned(), 1)]),
     )
     .await;
     let (state, pool, _container) = common::build_test_state_with_pool().await;
@@ -336,16 +336,16 @@ async fn three_project_platform_matrix_pushes_every_supported_entity_without_cro
     assert_eq!(no_platform.attendance_ids.len(), 2);
 
     let yongxin_requests = yongxin.requests().await;
-    assert_path_count(&yongxin_requests, "/project/V2/query", 2);
-    assert_path_count(&yongxin_requests, "/projectCorp/V2/add", 4);
-    assert_path_count(&yongxin_requests, "/team/V2/add", 4);
-    assert_path_count(&yongxin_requests, "/worker/V2/add", 5);
-    assert_path_count(&yongxin_requests, "/entryExit/V2/add", 4);
-    assert_path_count(&yongxin_requests, "/attend/V2/add", 4);
+    assert_path_count(&yongxin_requests, "/project/v2/query", 2);
+    assert_path_count(&yongxin_requests, "/projectCorp/v2/add", 4);
+    assert_path_count(&yongxin_requests, "/team/v2/add", 4);
+    assert_path_count(&yongxin_requests, "/worker/v2/add", 5);
+    assert_path_count(&yongxin_requests, "/entryExit/v2/add", 4);
+    assert_path_count(&yongxin_requests, "/attend/v2/add", 4);
     // All seeded photos intentionally share the same bytes. The media cache is
     // scoped per platform binding, so each Yongxin project uploads it once.
-    assert_path_count(&yongxin_requests, "/sysFile/V2/uploadImg", 2);
-    assert_path_count(&yongxin_requests, "/asyncHandleResult/V2/query", 12);
+    assert_path_count(&yongxin_requests, "/sysFile/v1/uploadImg", 2);
+    assert_path_count(&yongxin_requests, "/asyncHandleResult/v1/query", 12);
     assert!(
         yongxin_requests
             .iter()
@@ -354,13 +354,18 @@ async fn three_project_platform_matrix_pushes_every_supported_entity_without_cro
 
     let project_codes = yongxin_requests
         .iter()
-        .filter(|request| request.path != "/sysFile/V2/uploadImg")
         .filter_map(|request| request.headers.get("projectcode"))
         .cloned()
         .collect::<Vec<_>>();
     assert!(project_codes.iter().any(|value| value == "YX-ONE"));
     assert!(project_codes.iter().any(|value| value == "YX-BOTH"));
     assert!(project_codes.iter().all(|value| value != "模拟-零配置"));
+    assert!(yongxin_requests.iter().all(|request| {
+        request.headers.contains_key("projectcode")
+            && request.headers.contains_key("appkey")
+            && request.headers.contains_key("timestamp")
+            && request.headers.contains_key("sign")
+    }));
     for identity_card in yongxin_only
         .identity_cards
         .iter()

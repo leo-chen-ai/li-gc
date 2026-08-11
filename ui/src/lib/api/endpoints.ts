@@ -28,6 +28,8 @@ export const API_ENDPOINTS = {
     PROJECT_OPTIONS: "/management/projects/options",
     PROJECT: (projectId: string) => `/management/projects/${projectId}`,
     PROJECT_UNITS: (projectId: string) => `/management/projects/${projectId}/units`,
+    PROJECT_UNITS_REPAIR_REPORTING: (projectId: string) =>
+      `/management/projects/${projectId}/units/reporting/repair`,
     PROJECT_UNIT: (projectId: string, unitId: string) =>
       `/management/projects/${projectId}/units/${unitId}`,
     PROJECT_TEAMS: (projectId: string) => `/management/projects/${projectId}/teams`,
@@ -46,6 +48,10 @@ export const API_ENDPOINTS = {
       `/management/projects/${projectId}/workers/${workerId}/contract-download`,
     PROJECT_ATTENDANCE: (projectId: string) =>
       `/management/projects/${projectId}/attendance-records`,
+    PROJECT_ATTENDANCE_YONGXIN_REPAIR: (projectId: string) =>
+      `/management/projects/${projectId}/attendance-records/yongxin-repair`,
+    PROJECT_ATTENDANCE_YONGXIN_REPAIR_PREVIEW: (projectId: string) =>
+      `/management/projects/${projectId}/attendance-records/yongxin-repair/preview`,
     PROJECT_ATTENDANCE_EXPORT: (projectId: string) =>
       `/management/projects/${projectId}/attendance-records/export`,
     PROJECT_ATTENDANCE_RECORD: (projectId: string, attendanceId: string) =>
@@ -92,6 +98,8 @@ export const API_ENDPOINTS = {
     PROJECT_OPTIONS: "/admin/projects/options",
     PROJECT: (id: string) => `/admin/projects/${id}`,
     PROJECT_UNITS: (projectId: string) => `/admin/projects/${projectId}/units`,
+    PROJECT_UNITS_REPAIR_REPORTING: (projectId: string) =>
+      `/admin/projects/${projectId}/units/reporting/repair`,
     PROJECT_UNIT: (projectId: string, unitId: string) =>
       `/admin/projects/${projectId}/units/${unitId}`,
     PROJECT_TEAMS: (projectId: string) => `/admin/projects/${projectId}/teams`,
@@ -108,6 +116,10 @@ export const API_ENDPOINTS = {
       `/admin/projects/${projectId}/workers/${workerId}`,
     PROJECT_ATTENDANCE: (projectId: string) =>
       `/admin/projects/${projectId}/attendance-records`,
+    PROJECT_ATTENDANCE_YONGXIN_REPAIR: (projectId: string) =>
+      `/admin/projects/${projectId}/attendance-records/yongxin-repair`,
+    PROJECT_ATTENDANCE_YONGXIN_REPAIR_PREVIEW: (projectId: string) =>
+      `/admin/projects/${projectId}/attendance-records/yongxin-repair/preview`,
     PROJECT_ATTENDANCE_EXPORT: (projectId: string) =>
       `/admin/projects/${projectId}/attendance-records/export`,
     PROJECT_ATTENDANCE_RECORD: (projectId: string, attendanceId: string) =>

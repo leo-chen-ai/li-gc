@@ -273,6 +273,19 @@ export function useDeleteUnitMutation(projectId: string) {
   });
 }
 
+export function useRepairUnitReportingMutation(projectId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => constructionProjectService.repairUnitReporting(projectId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: constructionProjectKeys.unitsRoot(projectId),
+      });
+    },
+  });
+}
+
 export function useProjectTeamsQuery(
   projectId: string,
   filters?: ConstructionResourceListFilters
@@ -526,6 +539,20 @@ export function useDeleteAttendanceMutation(projectId: string) {
         queryKey: constructionProjectKeys.attendanceRoot(projectId),
       });
     },
+  });
+}
+
+export function useRepairYongxinAttendanceMutation(projectId: string) {
+  return useMutation({
+    mutationFn: (payload: { start_date: string; end_date: string; worker_ids: string[]; attendance_ids: string[] }) =>
+      constructionProjectService.repairYongxinAttendance(projectId, payload),
+  });
+}
+
+export function usePreviewYongxinAttendanceRepairMutation(projectId: string) {
+  return useMutation({
+    mutationFn: (payload: { start_date: string; end_date: string; worker_ids: string[] }) =>
+      constructionProjectService.previewYongxinAttendanceRepair(projectId, payload),
   });
 }
 

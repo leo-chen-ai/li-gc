@@ -59,6 +59,7 @@ const directionOptions = [
 const deviceTypeOptions = [
   { label: "海厂家", value: "海厂家" },
   { label: "弹厂家", value: "弹厂家" },
+  { label: "芊熠厂家", value: "芊熠厂家" },
 ] as const;
 const HEARTBEAT_ONLINE_WINDOW_MS = 3 * 60 * 1000;
 const B_VENDOR_ONLINE_WINDOW_MS = 15 * 60 * 1000;

@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   Clock3,
   ClipboardCheck,
+  Copy,
   FileText,
   FolderKanban,
   Landmark,
@@ -105,6 +106,13 @@ import {
   validateXinledaConfig,
   validateYongxinV2Config,
 } from "@/features/projects/lib/platform-configs";
+import {
+  buildPlatformAttemptCurl,
+  formatPlatformLogJson,
+  platformLogAttempts,
+  platformLogBaseUrl,
+  type PlatformHttpAttempt,
+} from "@/features/projects/lib/platform-log-http";
 import {
   useAllWorkHourConfigsQuery,
   useConstructionOverviewQuery,
@@ -599,8 +607,17 @@ export function WorkHourConfigPage() {
 }
 
 export function PlatformIntegrationPage() {
-  const [tab, setTab] = useState<"configs" | "logs">("configs");
-  const [filters, setFilters] = useState<ConstructionModuleListFilters>({ page: 1, page_size: DEFAULT_PAGE_SIZE });
+  const initialSearch = new URLSearchParams(window.location.search);
+  const [tab, setTab] = useState<"configs" | "logs">(initialSearch.get("tab") === "logs" ? "logs" : "configs");
+  const [filters, setFilters] = useState<ConstructionModuleListFilters>({
+    page: 1,
+    page_size: DEFAULT_PAGE_SIZE,
+    project_id: initialSearch.get("project_id") || undefined,
+    platform_type: initialSearch.get("platform_type") || undefined,
+    operation: initialSearch.get("operation") || undefined,
+    status: initialSearch.get("status") || undefined,
+    keyword: initialSearch.get("keyword") || undefined,
+  });
   const tabControls = <PlatformTabControls tab={tab} setTab={setTab} />;
   return (
     <div className="space-y-4">
@@ -905,7 +922,11 @@ function PlatformLogPanel({ filters, setFilters, tabControls }: { filters: Const
       </div>
       <div className="grid gap-3 md:grid-cols-4"><MetricCell label="今日请求" value={summary?.today_request_count ?? 0} helper="API 交互量" /><MetricCell label="今日成功" value={summary?.today_success_count ?? 0} helper="成功条数" /><MetricCell label="今日失败" value={summary?.today_failure_count ?? 0} helper="失败条数" /><MetricCell label="日志条数" value={summary?.today_log_count ?? 0} helper="今日记录" /></div>
       <PlatformLogFilters filters={filters} setFilters={setFilters} platformOptions={platformOptions} />
-      <DataTable loading={query.isLoading} colSpan={9} headers={["平台", "项目", "操作", "方向", "状态", "请求/成功/失败", "消息", "时间", "操作"]}>
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+        <span>可按平台、项目、状态筛选；列表默认按最新请求时间倒序。</span>
+        <span>点击“详情”查看每次请求的完整 cURL 与平台响应。</span>
+      </div>
+      <DataTable loading={query.isLoading} colSpan={9} headers={["平台", "项目", "操作", "方向", "状态", "请求/成功/失败", "消息", "时间（最新优先）", "操作"]}>
         {rows.map((row) => (
           <TableRow key={row.id}><TableCell className="font-medium">{row.platform_name || "-"}</TableCell><TableCell className="max-w-[240px] truncate">{row.project_name || row.project_id}</TableCell><TableCell>{row.operation}</TableCell><TableCell>{row.direction}</TableCell><TableCell><PlatformStatusBadge status={row.status} /></TableCell><TableCell>{row.request_count}/{row.success_count}/{row.failure_count}</TableCell><TableCell className="max-w-[320px] truncate text-xs text-slate-500" title={row.message ?? undefined}>{row.message || "-"}</TableCell><TableCell>{formatDateTime(row.occurred_at)}</TableCell><TableCell className="text-right">{row.source === "system" ? <div className="inline-flex gap-1"><Button type="button" size="sm" variant="ghost" onClick={() => setDetailLog(row)}>详情</Button>{(platformLogPlatformCode(row.payload) === YONGXIN_V2_PLATFORM_TYPE || platformLogPlatformCode(row.payload) === XINLEDA_PLATFORM_TYPE) && (row.status === "failed" || row.status === "waiting_data" || row.status === "waiting_media") ? <Button type="button" size="sm" variant="outline" disabled={retryJob.isPending} onClick={() => void retry(row)}><RefreshCw className="mr-1 size-3" />重试</Button> : null}</div> : <RowActions onEdit={() => openEdit(row)} onDelete={() => void remove(row)} />}</TableCell></TableRow>
         ))}
@@ -914,11 +935,105 @@ function PlatformLogPanel({ filters, setFilters, tabControls }: { filters: Const
       <Dialog open={Boolean(detailLog)} onOpenChange={(open) => { if (!open) setDetailLog(null); }}>
         <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-4xl">
           <DialogHeader><DialogTitle>平台任务详情</DialogTitle><DialogDescription>{detailLog ? `${detailLog.platform_name ?? "平台"} · ${detailLog.operation} · ${formatDateTime(detailLog.occurred_at)}` : ""}</DialogDescription></DialogHeader>
-          {detailLog ? <div className="space-y-3"><div className="grid gap-3 rounded-lg border bg-slate-50 p-3 text-sm md:grid-cols-3"><div><span className="text-slate-500">状态：</span><PlatformStatusBadge status={detailLog.status} /></div><div><span className="text-slate-500">请求次数：</span>{detailLog.request_count}</div><div><span className="text-slate-500">消息：</span>{detailLog.message || "-"}</div></div><pre className="max-h-[55vh] overflow-auto rounded-lg bg-slate-950 p-4 text-xs leading-5 text-slate-100">{JSON.stringify(detailLog.payload ?? {}, null, 2)}</pre></div> : null}
+          {detailLog ? <PlatformLogDetail log={detailLog} /> : null}
         </DialogContent>
       </Dialog>
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}><DialogContent className="sm:max-w-4xl"><form onSubmit={submit}><DialogHeader><DialogTitle>{editing ? "编辑平台日志" : "新增平台日志"}</DialogTitle><DialogDescription>用于展示平台推送、上传等交互日志。</DialogDescription></DialogHeader><div className="mt-4 grid gap-4 md:grid-cols-2"><div className="space-y-2"><Label>项目</Label><ProjectSearchSelect value={form.project_id} onValueChange={(project_id) => setForm((current) => ({ ...current, project_id }))} /></div><div className="space-y-2"><Label>平台配置</Label><select className="h-10 w-full rounded-md border bg-background px-3" value={form.platform_config_id} onChange={(event) => { const selected = configsQuery.data?.items.find((item) => item.id === event.target.value); setForm((current) => ({ ...current, platform_config_id: event.target.value, platform_name: selected?.platform_name ?? current.platform_name })); }}><option value="">不关联配置</option>{(configsQuery.data?.items ?? []).map((config) => <option key={config.id} value={config.id}>{config.platform_name}</option>)}</select></div><TextField label="平台名称" value={form.platform_name} onChange={(platform_name) => setForm((current) => ({ ...current, platform_name }))} /><TextField label="操作" value={form.operation} onChange={(operation) => setForm((current) => ({ ...current, operation }))} /><TextField label="方向" value={form.direction} onChange={(direction) => setForm((current) => ({ ...current, direction }))} /><TextField label="状态" value={form.status} onChange={(status) => setForm((current) => ({ ...current, status }))} /><TextField label="请求数" value={form.request_count} onChange={(request_count) => setForm((current) => ({ ...current, request_count }))} /><TextField label="成功数" value={form.success_count} onChange={(success_count) => setForm((current) => ({ ...current, success_count }))} /><TextField label="失败数" value={form.failure_count} onChange={(failure_count) => setForm((current) => ({ ...current, failure_count }))} /><TextField label="消息" value={form.message} onChange={(message) => setForm((current) => ({ ...current, message }))} /><TextareaField className="md:col-span-2" label="Payload JSON" value={form.payload} onChange={(payload) => setForm((current) => ({ ...current, payload }))} rows={6} /></div><DialogFooter className="mt-5"><Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>取消</Button><Button type="submit" className="bg-[#0f6b5d] text-white hover:bg-[#0b5148]">保存</Button></DialogFooter></form></DialogContent></Dialog>
     </>
+  );
+}
+
+function PlatformLogDetail({ log }: { log: ConstructionPlatformLog }) {
+  const attempts = platformLogAttempts(log.payload);
+  const baseUrl = platformLogBaseUrl(log.payload);
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 rounded-lg border bg-slate-50 p-3 text-sm md:grid-cols-3">
+        <div><span className="text-slate-500">状态：</span><PlatformStatusBadge status={log.status} /></div>
+        <div><span className="text-slate-500">HTTP 尝试：</span>{attempts.length}</div>
+        <div><span className="text-slate-500">消息：</span>{log.message || "-"}</div>
+      </div>
+      {attempts.length > 0 ? (
+        <div className="space-y-4">
+          {attempts.map((attempt) => (
+            <PlatformAttemptDetail
+              key={`${log.id}-${attempt.attempt_no}`}
+              attempt={attempt}
+              baseUrl={baseUrl}
+            />
+          ))}
+        </div>
+      ) : (
+        <LogCodeBlock title="日志内容" value={formatPlatformLogJson(log.payload)} />
+      )}
+      <details className="rounded-lg border bg-white p-3">
+        <summary className="cursor-pointer text-sm font-medium text-slate-700">查看任务原始日志</summary>
+        <pre className="mt-3 max-h-[45vh] overflow-auto rounded-lg bg-slate-950 p-4 text-xs leading-5 text-slate-100">
+          {JSON.stringify(log.payload ?? {}, null, 2)}
+        </pre>
+      </details>
+    </div>
+  );
+}
+
+function PlatformAttemptDetail({
+  attempt,
+  baseUrl,
+}: {
+  attempt: PlatformHttpAttempt;
+  baseUrl: string;
+}) {
+  const curl = buildPlatformAttemptCurl(attempt, baseUrl);
+  return (
+    <section className="space-y-3 rounded-xl border bg-white p-4 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-semibold text-slate-900">第 {attempt.attempt_no} 次请求</span>
+          <PlatformStatusBadge status={attempt.status || (attempt.http_status && attempt.http_status < 400 ? "success" : "failed")} />
+          {attempt.http_status !== null ? <Badge variant="outline">HTTP {attempt.http_status}</Badge> : null}
+        </div>
+        <span className="text-xs text-slate-500">
+          {[attempt.created_at ? formatDateTime(attempt.created_at) : null, attempt.duration_ms !== null ? `${attempt.duration_ms} ms` : null].filter(Boolean).join(" · ")}
+        </span>
+      </div>
+      {attempt.error ? <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{attempt.error}</div> : null}
+      <LogCodeBlock title="完整 cURL" value={curl} copyLabel="cURL" />
+      <div className="grid gap-3 xl:grid-cols-2">
+        <LogCodeBlock title="请求体" value={formatPlatformLogJson(attempt.request)} copyLabel="请求体" />
+        <LogCodeBlock title="平台返回" value={formatPlatformLogJson(attempt.response)} copyLabel="平台返回" />
+      </div>
+    </section>
+  );
+}
+
+function LogCodeBlock({
+  title,
+  value,
+  copyLabel = title,
+}: {
+  title: string;
+  value: string;
+  copyLabel?: string;
+}) {
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success(`${copyLabel}已复制`);
+    } catch {
+      toast.error(`${copyLabel}复制失败`);
+    }
+  };
+  return (
+    <div className="min-w-0 overflow-hidden rounded-lg border bg-slate-950">
+      <div className="flex items-center justify-between border-b border-white/10 px-3 py-2 text-xs text-slate-300">
+        <span>{title}</span>
+        <Button type="button" size="sm" variant="ghost" onClick={() => void copy()} className="h-7 text-slate-200 hover:bg-white/10 hover:text-white">
+          <Copy className="mr-1 size-3" />复制
+        </Button>
+      </div>
+      <pre className="max-h-[360px] overflow-auto whitespace-pre-wrap break-all p-3 text-xs leading-5 text-slate-100">{value}</pre>
+    </div>
   );
 }
 
@@ -1094,13 +1209,13 @@ function PlatformLogFilters({
   platformOptions: ReadonlyArray<{ value: string; label: string }>;
 }) {
   return (
-    <div className="grid gap-3 rounded-lg border bg-[#f8faf9] p-3 lg:grid-cols-[minmax(240px,1fr)_minmax(220px,0.8fr)_minmax(180px,0.6fr)_minmax(180px,0.6fr)_auto]">
+    <div className="grid gap-3 rounded-lg border bg-[#f8faf9] p-3 xl:grid-cols-[minmax(240px,1fr)_minmax(220px,0.8fr)_minmax(150px,0.55fr)_minmax(170px,0.65fr)_minmax(170px,0.6fr)_auto]">
       <div className="relative">
         <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           value={filters.keyword ?? ""}
           onChange={(event) => setFilters((current) => ({ ...current, keyword: event.target.value, page: 1 }))}
-          placeholder="搜索项目、平台、操作、消息"
+          placeholder="搜索项目、平台、操作、工人、身份证、异步流水号"
           className="pl-9"
         />
       </div>
@@ -1120,6 +1235,26 @@ function PlatformLogFilters({
         {platformOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
       </select>
       <select
+        aria-label="操作类型"
+        className="h-10 w-full rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-[#0f6b5d]/20"
+        value={filters.operation ?? ""}
+        onChange={(event) => setFilters((current) => ({ ...current, operation: event.target.value || undefined, page: 1 }))}
+      >
+        <option value="">全部操作</option>
+        <option value="项目配置校验">项目配置校验</option>
+        <option value="项目基本信息同步">项目基本信息同步</option>
+        <option value="参建单位同步">参建单位同步</option>
+        <option value="班组同步">班组同步</option>
+        <option value="人员同步">人员同步</option>
+        <option value="人员进退场同步">人员进退场同步</option>
+        <option value="设备考勤同步">设备考勤同步</option>
+        <option value="企业保证金同步">企业保证金同步</option>
+        <option value="班组新增">班组新增</option>
+        <option value="工人新增">工人新增</option>
+        <option value="工人编辑">工人编辑</option>
+        <option value="工人退场">工人退场</option>
+      </select>
+      <select
         aria-label="任务状态"
         className="h-10 w-full rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-[#0f6b5d]/20"
         value={filters.status ?? ""}
@@ -1136,7 +1271,10 @@ function PlatformLogFilters({
         <option value="success">成功</option>
         <option value="failed">失败</option>
         <option value="delivery_unknown">结果待核对</option>
-        <option value="disabled">平台已停用</option>
+        <option value="disabled">任务已失效</option>
+        <option value="conflict">接口冲突</option>
+        <option value="transport_error">网络异常</option>
+        <option value="dry_run">模拟请求</option>
       </select>
       <Button variant="outline" onClick={() => setFilters((current) => ({ page: 1, page_size: current.page_size ?? DEFAULT_PAGE_SIZE }))}>重置</Button>
     </div>

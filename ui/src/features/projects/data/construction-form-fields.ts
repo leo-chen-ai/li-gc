@@ -37,6 +37,9 @@ export type ConstructionFormField = {
   searchable?: boolean;
   managementTeamType?: boolean;
   wide?: boolean;
+  regionNameKey?: string;
+  regionStreetKey?: string;
+  regionRequireDistrict?: boolean;
 };
 
 export type ConstructionPayloadValue = string | number | boolean | JsonValue | null;
@@ -512,8 +515,18 @@ export const unitFormFields: ConstructionFormField[] = [
   { key: "company_credit_code", label: "统一社会信用代码", valueType: "string", section: "基础信息" },
   { key: "company_type", label: "单位类型", valueType: "number", control: "select", required: true, section: "基础信息", options: companyTypeOptions },
   { key: "register_date", label: "注册日期", valueType: "date", required: true, section: "基础信息" },
-  { key: "register_area", label: "注册区域", valueType: "string", required: true, section: "基础信息" },
-  { key: "register_area_list", label: "注册区域名称", valueType: "string", required: true, section: "基础信息" },
+  {
+    key: "register_area",
+    label: "注册区域",
+    valueType: "string",
+    control: "region",
+    required: true,
+    regionNameKey: "register_area_list",
+    regionRequireDistrict: true,
+    section: "基础信息",
+    wide: true,
+  },
+  { key: "register_area_list", label: "注册区域名称", valueType: "string", required: true, section: "基础信息", hidden: true },
   { key: "company_address", label: "单位地址", valueType: "string", required: true, section: "基础信息", wide: true },
   { key: "company_phone", label: "单位电话", valueType: "string", required: true, section: "基础信息" },
   { key: "manager_name", label: "负责人", valueType: "string", required: true, section: "负责人" },
@@ -657,6 +670,10 @@ export function buildPayloadFromForm(
 
     if (field.required && rawValue.length === 0) {
       throw new Error(`请填写${field.label}`);
+    }
+
+    if (field.regionRequireDistrict && rawValue.length > 0 && !/^\d{6}$/.test(rawValue)) {
+      throw new Error(`请选择${field.label}的省、市和区县`);
     }
 
     if (field.valueType === "boolean") {

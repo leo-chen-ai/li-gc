@@ -45,6 +45,7 @@ import type {
   ConstructionTeamPayload,
   ConstructionTeamReportingRepairResult,
   ConstructionUnit,
+  ConstructionUnitListResponse,
   ConstructionUnitPayload,
   ConstructionWageBatch,
   ConstructionWageBatchPayload,
@@ -57,6 +58,9 @@ import type {
   ConstructionWorker,
   ConstructionWorkerListResponse,
   ConstructionWorkerPayload,
+  YongxinAttendanceRepairPayload,
+  YongxinAttendanceRepairPreviewResult,
+  YongxinAttendanceRepairResult,
   JsonValue,
 } from "../types/construction-types";
 
@@ -208,8 +212,8 @@ export const constructionProjectService = {
   listUnits: async (
     projectId: string,
     filters?: ConstructionResourceListFilters
-  ): Promise<ConstructionResourceListResponse<ConstructionUnit>> => {
-    const response = await apiClient.get<ApiResponse<ConstructionResourceListResponse<ConstructionUnit>>>(
+  ): Promise<ConstructionUnitListResponse> => {
+    const response = await apiClient.get<ApiResponse<ConstructionUnitListResponse>>(
       API_ENDPOINTS.MANAGEMENT.PROJECT_UNITS(projectId),
       { params: filters }
     );
@@ -259,6 +263,16 @@ export const constructionProjectService = {
     await apiClient.delete<ApiResponse<void>>(
       API_ENDPOINTS.MANAGEMENT.PROJECT_UNIT(projectId, unitId)
     );
+  },
+
+  repairUnitReporting: async (
+    projectId: string
+  ): Promise<ConstructionTeamReportingRepairResult> => {
+    const response = await apiClient.post<ApiResponse<ConstructionTeamReportingRepairResult>>(
+      API_ENDPOINTS.MANAGEMENT.PROJECT_UNITS_REPAIR_REPORTING(projectId)
+    );
+
+    return unwrapData(response.data, "修正参建单位上报失败");
   },
 
   listTeams: async (
@@ -468,6 +482,30 @@ export const constructionProjectService = {
     collectAllPages((filters) =>
       constructionProjectService.listAttendance(projectId, filters)
     ),
+
+  repairYongxinAttendance: async (
+    projectId: string,
+    payload: YongxinAttendanceRepairPayload
+  ): Promise<YongxinAttendanceRepairResult> => {
+    const response = await apiClient.post<ApiResponse<YongxinAttendanceRepairResult>>(
+      API_ENDPOINTS.MANAGEMENT.PROJECT_ATTENDANCE_YONGXIN_REPAIR(projectId),
+      payload
+    );
+
+    return unwrapData(response.data, "甬薪考勤补推失败");
+  },
+
+  previewYongxinAttendanceRepair: async (
+    projectId: string,
+    payload: YongxinAttendanceRepairPayload
+  ): Promise<YongxinAttendanceRepairPreviewResult> => {
+    const response = await apiClient.post<ApiResponse<YongxinAttendanceRepairPreviewResult>>(
+      API_ENDPOINTS.MANAGEMENT.PROJECT_ATTENDANCE_YONGXIN_REPAIR_PREVIEW(projectId),
+      payload
+    );
+
+    return unwrapData(response.data, "甬薪考勤补推预览失败");
+  },
 
   exportAttendanceAdvanced: async (
     projectId: string,

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildDefaultFormState,
+  buildPayloadFromForm,
   getFieldsBySection,
   inferNativePlace,
   inferNativePlaceFromAddress,
@@ -55,6 +57,39 @@ test("unit form hides legacy timer settings and keeps date picker registration d
   assert.equal(keys.includes("timer_set_b"), false);
   assert.equal(keys.includes("timer_set_c"), false);
   assert.equal(registerDate?.valueType, "date");
+});
+
+test("unit registration area uses a required district cascading selector", () => {
+  const registerArea = unitFormFields.find((field) => field.key === "register_area");
+  const registerAreaName = unitFormFields.find((field) => field.key === "register_area_list");
+
+  assert.equal(registerArea?.control, "region");
+  assert.equal(registerArea?.required, true);
+  assert.equal(registerArea?.regionRequireDistrict, true);
+  assert.equal(registerArea?.regionNameKey, "register_area_list");
+  assert.equal(registerAreaName?.hidden, true);
+});
+
+test("unit registration area payload accepts only a six digit district code", () => {
+  const state = buildDefaultFormState(unitFormFields, {
+    company_name: "测试单位",
+    company_type: "1",
+    register_date: "2026-08-11",
+    register_area: "330106",
+    register_area_list: "浙江省/杭州市/西湖区",
+    company_address: "测试地址",
+    company_phone: "0571-12345678",
+    manager_name: "测试负责人",
+    manager_phone: "13800000000",
+    manager_id_card: "330106199001010000",
+    legal_person_name: "测试法人",
+  });
+
+  assert.equal(buildPayloadFromForm(unitFormFields, state).register_area, "330106");
+  assert.throws(
+    () => buildPayloadFromForm(unitFormFields, { ...state, register_area: "3301" }),
+    /请选择注册区域的省、市和区县/
+  );
 });
 
 test("team leader is selected from project workers", () => {

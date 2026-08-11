@@ -805,6 +805,28 @@ async fn admin_can_crud_platform_configs_and_logs_with_today_summary() {
     .await
     .expect("insert system integration job");
 
+    sqlx::query(
+        r#"
+        INSERT INTO integration_attempts (
+            job_id, project_id, attempt_no, transport, request_method, request_url,
+            request_headers, request_body, response_status, response_body,
+            duration_ms, status, error_message
+        )
+        VALUES (
+            $1, $2, 1, 'http', 'POST', 'https://example.test/api/team/add',
+            '{"Content-Type":"application/json","appKey":"demo-app-key","timestamp":"1786427000000","sign":"demo-sign"}'::jsonb,
+            '{"TeamName":"石工"}'::jsonb, 400,
+            '{"code":4001,"message":"班组名称不能重复"}'::jsonb,
+            88, 'failed', '班组名称不能重复'
+        )
+        "#,
+    )
+    .bind(system_job_id)
+    .bind(Uuid::parse_str(&project_id).expect("valid project id"))
+    .execute(&pool)
+    .await
+    .expect("insert system integration attempt");
+
     let (status, body) = get_authed(
         app.clone(),
         &format!("/api/v1/admin/platform-logs?project_id={project_id}"),
@@ -815,6 +837,7 @@ async fn admin_can_crud_platform_configs_and_logs_with_today_summary() {
     assert_eq!(body["data"]["summary"]["today_request_count"], 17);
     assert_eq!(body["data"]["summary"]["today_failure_count"], 2);
     assert_eq!(body["data"]["total"], 2);
+    assert_eq!(body["data"]["items"][0]["id"], system_job_id.to_string());
     let system_log = body["data"]["items"]
         .as_array()
         .expect("platform log items")
@@ -824,6 +847,39 @@ async fn admin_can_crud_platform_configs_and_logs_with_today_summary() {
     assert_eq!(system_log["source"], "system");
     assert_eq!(system_log["operation"], "班组新增");
     assert_eq!(system_log["message"], "班组名称不能重复");
+    assert_eq!(system_log["payload"]["attempts"][0]["method"], "POST");
+    assert_eq!(
+        system_log["payload"]["attempts"][0]["url"],
+        "https://example.test/api/team/add"
+    );
+    assert_eq!(
+        system_log["payload"]["attempts"][0]["headers"]["Content-Type"],
+        "application/json"
+    );
+    assert_eq!(
+        system_log["payload"]["attempts"][0]["headers"]["appKey"],
+        "demo-app-key"
+    );
+    assert_eq!(
+        system_log["payload"]["attempts"][0]["headers"]["sign"],
+        "demo-sign"
+    );
+    assert_eq!(
+        system_log["payload"]["attempts"][0]["response"]["code"],
+        4001
+    );
+
+    let (status, body) = get_authed(
+        app.clone(),
+        &format!(
+            "/api/v1/admin/platform-logs?project_id={project_id}&platform_type=real_name&keyword=%E7%8F%AD%E7%BB%84%E5%90%8D%E7%A7%B0"
+        ),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["total"], 1);
+    assert_eq!(body["data"]["items"][0]["id"], system_job_id.to_string());
 
     let (status, body) = delete_authed(
         app.clone(),

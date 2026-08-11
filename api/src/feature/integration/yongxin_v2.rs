@@ -15,14 +15,14 @@ pub const PLATFORM_CODE: &str = "yongxin_v2";
 pub const PLATFORM_NAME: &str = "甬薪";
 const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 
-pub const PROJECT_QUERY_PATH: &str = "project/V2/query";
-pub const UNIT_ADD_PATH: &str = "projectCorp/V2/add";
-pub const TEAM_ADD_PATH: &str = "team/V2/add";
-pub const WORKER_ADD_PATH: &str = "worker/V2/add";
-pub const ENTRY_EXIT_ADD_PATH: &str = "entryExit/V2/add";
-pub const ATTENDANCE_ADD_PATH: &str = "attend/V2/add";
-pub const ASYNC_RESULT_PATH: &str = "asyncHandleResult/V2/query";
-pub const IMAGE_UPLOAD_PATH: &str = "sysFile/V2/uploadImg";
+pub const PROJECT_QUERY_PATH: &str = "project/v2/query";
+pub const UNIT_ADD_PATH: &str = "projectCorp/v2/add";
+pub const TEAM_ADD_PATH: &str = "team/v2/add";
+pub const WORKER_ADD_PATH: &str = "worker/v2/add";
+pub const ENTRY_EXIT_ADD_PATH: &str = "entryExit/v2/add";
+pub const ATTENDANCE_ADD_PATH: &str = "attend/v2/add";
+pub const ASYNC_RESULT_PATH: &str = "asyncHandleResult/v1/query";
+pub const IMAGE_UPLOAD_PATH: &str = "sysFile/v1/uploadImg";
 
 #[derive(Debug, Error)]
 pub enum YongxinError {
@@ -114,6 +114,9 @@ pub struct YongxinResponse {
     pub status: u16,
     pub body: Value,
     pub duration_ms: i32,
+    pub request_url: String,
+    pub request_headers: Value,
+    pub request_body: Value,
 }
 
 impl YongxinResponse {
@@ -179,17 +182,22 @@ pub async fn post_json(
     payload: &Value,
 ) -> Result<YongxinResponse, YongxinError> {
     let timestamp = chrono::Utc::now().timestamp_millis();
+    let request_url = credentials.endpoint(path)?;
+    let (sign, request_headers) = signed_request_headers(credentials, timestamp);
     let request = client
-        .post(credentials.endpoint(path)?)
+        .post(request_url.clone())
         .header("projectCode", &credentials.project_code)
         .header("appKey", &credentials.app_key)
         .header("timestamp", timestamp.to_string())
-        .header(
-            "sign",
-            signature(&credentials.app_key, &credentials.app_secret, timestamp),
-        )
+        .header("sign", sign)
         .json(payload);
-    send(request).await
+    send(
+        request,
+        request_url.to_string(),
+        request_headers,
+        payload.clone(),
+    )
+    .await
 }
 
 pub async fn upload_image(
@@ -198,18 +206,52 @@ pub async fn upload_image(
     file_base64: &str,
     file_type: &str,
 ) -> Result<YongxinResponse, YongxinError> {
+    let timestamp = chrono::Utc::now().timestamp_millis();
+    let (sign, request_headers) = signed_request_headers(credentials, timestamp);
     let payload = serde_json::json!({
         "appKey": credentials.app_key,
         "fileBase": file_base64,
         "fileType": file_type,
     });
+    let request_url = credentials.endpoint(IMAGE_UPLOAD_PATH)?;
     let request = client
-        .post(credentials.endpoint(IMAGE_UPLOAD_PATH)?)
+        .post(request_url.clone())
+        .header("projectCode", &credentials.project_code)
+        .header("appKey", &credentials.app_key)
+        .header("timestamp", timestamp.to_string())
+        .header("sign", sign)
         .json(&payload);
-    send(request).await
+    send(
+        request,
+        request_url.to_string(),
+        request_headers,
+        serde_json::json!({
+            "appKey": credentials.app_key,
+            "fileBase": format!("[BINARY_OMITTED:{} chars]", file_base64.len()),
+            "fileType": file_type,
+        }),
+    )
+    .await
 }
 
-async fn send(request: reqwest::RequestBuilder) -> Result<YongxinResponse, YongxinError> {
+fn signed_request_headers(credentials: &YongxinCredentials, timestamp: i64) -> (String, Value) {
+    let sign = signature(&credentials.app_key, &credentials.app_secret, timestamp);
+    let headers = serde_json::json!({
+        "Content-Type": "application/json",
+        "projectCode": credentials.project_code,
+        "appKey": credentials.app_key,
+        "timestamp": timestamp.to_string(),
+        "sign": sign,
+    });
+    (sign, headers)
+}
+
+async fn send(
+    request: reqwest::RequestBuilder,
+    request_url: String,
+    request_headers: Value,
+    request_body: Value,
+) -> Result<YongxinResponse, YongxinError> {
     let started = Instant::now();
     let response = request
         .send()
@@ -235,6 +277,9 @@ async fn send(request: reqwest::RequestBuilder) -> Result<YongxinResponse, Yongx
         status,
         body,
         duration_ms: i32::try_from(started.elapsed().as_millis()).unwrap_or(i32::MAX),
+        request_url,
+        request_headers,
+        request_body,
     })
 }
 
@@ -328,5 +373,22 @@ mod tests {
         }))
         .unwrap();
         assert!(!credentials.is_dry_run());
+    }
+
+    #[test]
+    fn signed_headers_include_project_credentials_for_every_endpoint() {
+        let credentials = YongxinCredentials::from_config(&serde_json::json!({
+            "base_url": "https://example.com/open/",
+            "project_code": "PROJECT-001",
+            "app_key": "APP-001",
+            "app_secret": "1234567890abcdef"
+        }))
+        .unwrap();
+        let (sign, headers) = signed_request_headers(&credentials, 123);
+
+        assert_eq!(headers["projectCode"], "PROJECT-001");
+        assert_eq!(headers["appKey"], "APP-001");
+        assert_eq!(headers["timestamp"], "123");
+        assert_eq!(headers["sign"], sign);
     }
 }

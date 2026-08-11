@@ -11,6 +11,7 @@ use crate::state::AppState;
 
 use super::face_v203::command_topic;
 use super::publisher::publish_json;
+use super::qianyi::DEVICE_TYPE as QIANYI_DEVICE_TYPE;
 
 const RETRY_INTERVAL: Duration = Duration::from_secs(30);
 const RETRY_BATCH_SIZE: i64 = 20;
@@ -204,7 +205,7 @@ async fn retry_issue_report(
         .await;
     };
 
-    let topic = command_topic(serial_number);
+    let topic = retry_topic(pool, report.attendance_device_id, serial_number).await?;
     let next_retry_count = report.retry_count + 1;
     let result = publish_json(broker_url, &topic, payload).await;
     let delay = retry_delay_seconds(next_retry_count);
@@ -251,6 +252,29 @@ async fn retry_issue_report(
     }
 
     Ok(())
+}
+
+async fn retry_topic(
+    pool: &PgPool,
+    attendance_device_id: Option<Uuid>,
+    serial_number: &str,
+) -> Result<String, String> {
+    let Some(attendance_device_id) = attendance_device_id else {
+        return Ok(command_topic(serial_number));
+    };
+    let row = sqlx::query_as::<_, (String, Option<String>)>(
+        "SELECT device_type, qianyi_subtopic FROM construction_attendance_devices WHERE id = $1 AND is_deleted = FALSE",
+    )
+    .bind(attendance_device_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| error.to_string())?;
+    match row {
+        Some((device_type, subtopic)) if device_type == QIANYI_DEVICE_TYPE => subtopic
+            .filter(|topic| !topic.trim().is_empty())
+            .ok_or_else(|| "芊熠设备未注册，无法重试下发".to_string()),
+        _ => Ok(command_topic(serial_number)),
+    }
 }
 
 async fn update_retry_success(

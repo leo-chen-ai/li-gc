@@ -130,6 +130,10 @@ pub fn admin_routes() -> Router<AppState> {
             get(construction::handler::list_units).post(construction::handler::create_unit),
         )
         .route(
+            "/projects/{project_id}/units/reporting/repair",
+            post(construction::handler::repair_unit_reporting),
+        )
+        .route(
             "/projects/{project_id}/units/{unit_id}",
             get(construction::handler::get_unit)
                 .put(construction::handler::update_unit)
@@ -183,6 +187,14 @@ pub fn admin_routes() -> Router<AppState> {
             "/projects/{project_id}/attendance-records",
             get(construction::handler::list_attendance)
                 .post(construction::handler::create_attendance),
+        )
+        .route(
+            "/projects/{project_id}/attendance-records/yongxin-repair",
+            post(construction::handler::repair_yongxin_attendance_reporting),
+        )
+        .route(
+            "/projects/{project_id}/attendance-records/yongxin-repair/preview",
+            post(construction::handler::preview_yongxin_attendance_reporting),
         )
         .route(
             "/projects/{project_id}/attendance-records/export",
@@ -484,6 +496,10 @@ pub fn management_routes(state: AppState) -> Router<AppState> {
             get(construction::handler::list_units).post(construction::handler::create_unit),
         )
         .route(
+            "/projects/{project_id}/units/reporting/repair",
+            post(construction::handler::repair_unit_reporting),
+        )
+        .route(
             "/projects/{project_id}/units/{unit_id}",
             get(construction::handler::get_unit)
                 .put(construction::handler::update_unit)
@@ -532,6 +548,14 @@ pub fn management_routes(state: AppState) -> Router<AppState> {
             "/projects/{project_id}/attendance-records",
             get(construction::handler::list_attendance)
                 .post(construction::handler::create_attendance),
+        )
+        .route(
+            "/projects/{project_id}/attendance-records/yongxin-repair",
+            post(construction::handler::repair_yongxin_attendance_reporting),
+        )
+        .route(
+            "/projects/{project_id}/attendance-records/yongxin-repair/preview",
+            post(construction::handler::preview_yongxin_attendance_reporting),
         )
         .route(
             "/projects/{project_id}/attendance-records/export",

@@ -262,6 +262,29 @@ pub struct AttendanceGeneratorCommitRequest {
     records: Vec<GeneratedAttendancePreviewRecord>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct YongxinAttendanceRepairRequest {
+    pub start_date: String,
+    pub end_date: String,
+    #[serde(default)]
+    pub worker_ids: Vec<Uuid>,
+    #[serde(default)]
+    pub attendance_ids: Vec<Uuid>,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+struct YongxinAttendanceRepairPreviewRow {
+    attendance_id: Uuid,
+    worker_id: Uuid,
+    worker_name: String,
+    worker_identity: Option<String>,
+    team_name: Option<String>,
+    direction: i16,
+    trigger_time: chrono::DateTime<chrono::Utc>,
+    current_status: Option<String>,
+    current_message: Option<String>,
+}
+
 const ATTENDANCE_DEVICE_COLUMNS: &[ColumnSpec] = &[
     column("device_type", ColumnKind::Text),
     column("serial_number", ColumnKind::Text),
@@ -739,6 +762,7 @@ struct ModuleListParams {
     attendance_device_id: Option<Uuid>,
     status: Option<String>,
     platform_type: Option<String>,
+    operation: Option<String>,
     action: Option<String>,
     include_delete_actions: bool,
 }
@@ -982,6 +1006,7 @@ fn module_list_params(uri: &Uri) -> Result<ModuleListParams, ApiError> {
     let mut attendance_device_id = None;
     let mut status = None;
     let mut platform_type = None;
+    let mut operation = None;
     let mut action = None;
     let mut include_delete_actions = false;
 
@@ -1020,6 +1045,9 @@ fn module_list_params(uri: &Uri) -> Result<ModuleListParams, ApiError> {
                 "platform_type" if !trimmed.is_empty() && trimmed != "all" => {
                     platform_type = Some(trimmed.to_owned());
                 }
+                "operation" if !trimmed.is_empty() && trimmed != "all" => {
+                    operation = Some(trimmed.to_owned());
+                }
                 "action" if !trimmed.is_empty() && trimmed != "all" => {
                     if trimmed == "delete" {
                         include_delete_actions = true;
@@ -1043,6 +1071,7 @@ fn module_list_params(uri: &Uri) -> Result<ModuleListParams, ApiError> {
         attendance_device_id,
         status,
         platform_type,
+        operation,
         action,
         include_delete_actions,
     })
@@ -2819,14 +2848,102 @@ pub async fn list_units(
 ) -> ApiResult<Value> {
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     let params = resource_list_params(&uri)?;
-    list_rows_page(
-        state.db.pool(),
-        "construction_units",
-        &[("project_id", project_id)],
-        &[],
-        &params,
+    list_unit_rows_page(state.db.pool(), project_id, &params).await
+}
+
+pub async fn repair_unit_reporting(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Path(project_id): Path<Uuid>,
+) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+
+    let mut repair_guard = state.db.pool().begin().await.map_err(db_error)?;
+    let lock_acquired =
+        sqlx::query_scalar::<_, bool>("SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0))")
+            .bind(format!("unit-reporting-repair:{project_id}"))
+            .fetch_one(&mut *repair_guard)
+            .await
+            .map_err(db_error)?;
+    if !lock_acquired {
+        return Err(invalid_input("当前项目的参建单位上报正在修正，请稍后刷新"));
+    }
+
+    let has_enabled_platform = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM construction_platform_configs
+            WHERE project_id = $1
+              AND is_deleted = FALSE
+              AND is_enabled = TRUE
+              AND platform_type IN ('yongxin_v2', 'xinleda')
+        )
+        "#,
     )
+    .bind(project_id)
+    .fetch_one(state.db.pool())
     .await
+    .map_err(db_error)?;
+    if !has_enabled_platform {
+        return Err(invalid_input("当前项目未启用支持参建单位同步的上报平台"));
+    }
+
+    let unit_ids = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT unit.id
+        FROM construction_units unit
+        JOIN construction_platform_configs config
+          ON config.project_id = unit.project_id
+         AND config.is_deleted = FALSE
+         AND config.is_enabled = TRUE
+         AND config.platform_type IN ('yongxin_v2', 'xinleda')
+        LEFT JOIN LATERAL (
+            SELECT job.id, job.status
+            FROM integration_jobs job
+            LEFT JOIN integration_project_bindings binding
+              ON binding.id = job.binding_id
+            WHERE job.project_id = unit.project_id
+              AND job.entity_type IN ('unit', 'construction_unit')
+              AND job.local_entity_id = unit.id
+              AND job.operation = 'unit.sync'
+              AND platform_job_matches_config(job.binding_id, job.platform_code, binding.platform_config_id, config.id, config.project_id, config.platform_type)
+            ORDER BY job.updated_at DESC, job.id DESC
+            LIMIT 1
+        ) latest_job ON TRUE
+        WHERE unit.project_id = $1
+          AND unit.is_deleted = FALSE
+        GROUP BY unit.id
+        HAVING BOOL_OR(
+                   latest_job.id IS NULL
+                   OR latest_job.status NOT IN ('success', 'completed', 'delivery_unknown')
+               )
+           AND NOT COALESCE(BOOL_OR(latest_job.status = 'delivery_unknown'), FALSE)
+        ORDER BY MIN(unit.created_at), unit.id
+        LIMIT 20
+        "#,
+    )
+    .bind(project_id)
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(db_error)?;
+
+    for unit_id in &unit_ids {
+        crate::feature::integration::outbox_worker::enqueue_unit_sync(
+            state.db.pool(),
+            project_id,
+            *unit_id,
+        )
+        .await
+        .map_err(db_error)?;
+    }
+
+    let reporting_summary = unit_reporting_summary(state.db.pool(), project_id).await?;
+    repair_guard.commit().await.map_err(db_error)?;
+    Ok(ApiSuccess::default().with_data(serde_json::json!({
+        "attempted_count": unit_ids.len(),
+        "reporting_summary": reporting_summary,
+    })))
 }
 
 pub async fn get_unit(
@@ -3863,7 +3980,10 @@ pub async fn repair_worker_reporting(
             WHERE project_id = $1
               AND is_deleted = FALSE
               AND is_enabled = TRUE
-              AND (platform_type = 'ningbo_housing' OR platform_name = '市住建')
+              AND (
+                    platform_type IN ('ningbo_housing', 'yongxin_v2', 'xinleda')
+                    OR platform_name = '市住建'
+                  )
         )
         "#,
     )
@@ -3872,7 +3992,7 @@ pub async fn repair_worker_reporting(
     .await
     .map_err(db_error)?;
     if !has_enabled_platform {
-        return Err(invalid_input("当前项目未启用市住建上报配置"));
+        return Err(invalid_input("当前项目未启用支持工人同步的上报平台"));
     }
 
     let worker_ids = sqlx::query_scalar::<_, Uuid>(
@@ -3900,6 +4020,17 @@ pub async fn repair_worker_reporting(
         ) active_mapping ON TRUE
         WHERE worker.project_id = $1
           AND worker.is_deleted = FALSE
+          AND EXISTS (
+                SELECT 1
+                FROM construction_platform_configs config
+                WHERE config.project_id = worker.project_id
+                  AND config.is_deleted = FALSE
+                  AND config.is_enabled = TRUE
+                  AND (
+                        config.platform_type = 'ningbo_housing'
+                        OR config.platform_name = '市住建'
+                      )
+              )
           AND COALESCE(worker.worker_type, 1) <> 1001
           AND COALESCE(worker.work_type, 0) <> 1001
           AND (
@@ -3927,11 +4058,357 @@ pub async fn repair_worker_reporting(
         .await
         .map_err(db_error)?;
     }
+
+    let platform_repairs = sqlx::query_as::<_, (Uuid, Uuid, String, Option<String>)>(
+        r#"
+        SELECT
+            worker.id,
+            config.id,
+            config.platform_type,
+            latest_job.operation
+        FROM construction_platform_configs config
+        JOIN construction_workers worker
+          ON worker.project_id = config.project_id
+         AND worker.is_deleted = FALSE
+        LEFT JOIN LATERAL (
+            SELECT job.id, job.status, job.operation, job.updated_at
+            FROM integration_jobs job
+            LEFT JOIN integration_project_bindings binding
+              ON binding.id = job.binding_id
+            WHERE job.project_id = worker.project_id
+              AND job.entity_type IN ('worker', 'construction_worker')
+              AND job.local_entity_id = worker.id
+              AND platform_job_matches_config(
+                    job.binding_id,
+                    job.platform_code,
+                    binding.platform_config_id,
+                    config.id,
+                    config.project_id,
+                    config.platform_type
+                  )
+            ORDER BY job.updated_at DESC, job.id DESC
+            LIMIT 1
+        ) latest_job ON TRUE
+        WHERE config.project_id = $1
+          AND config.is_deleted = FALSE
+          AND config.is_enabled = TRUE
+          AND config.platform_type IN ('yongxin_v2', 'xinleda')
+          AND NOT (
+                config.platform_type <> 'xinleda'
+                AND (worker.worker_type = 1001 OR worker.work_type = 1001)
+              )
+          AND (
+                latest_job.id IS NULL
+                OR latest_job.status NOT IN (
+                    'success', 'completed', 'delivery_unknown',
+                    'pending', 'processing', 'retry', 'awaiting_result',
+                    'waiting_dependency', 'waiting_media'
+                )
+              )
+        ORDER BY latest_job.updated_at NULLS FIRST, config.created_at, worker.created_at, worker.id
+        LIMIT 20
+        "#,
+    )
+    .bind(project_id)
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(db_error)?;
+
+    for (worker_id, config_id, platform_type, latest_operation) in &platform_repairs {
+        let repair_entry_exit =
+            platform_type == "yongxin_v2" && latest_operation.as_deref() == Some("entry_exit.sync");
+        crate::feature::integration::outbox_worker::enqueue_worker_platform_repair(
+            state.db.pool(),
+            project_id,
+            *worker_id,
+            *config_id,
+            repair_entry_exit,
+        )
+        .await
+        .map_err(db_error)?;
+    }
     let reporting_summary = worker_reporting_summary(state.db.pool(), project_id).await?;
     repair_guard.commit().await.map_err(db_error)?;
     Ok(ApiSuccess::default().with_data(serde_json::json!({
-        "attempted_count": worker_ids.len(),
+        "attempted_count": worker_ids.len() + platform_repairs.len(),
         "reporting_summary": reporting_summary,
+    })))
+}
+
+fn parse_yongxin_repair_dates(
+    body: &YongxinAttendanceRepairRequest,
+) -> Result<(chrono::NaiveDate, chrono::NaiveDate), ApiError> {
+    let start_date = chrono::NaiveDate::parse_from_str(body.start_date.trim(), "%Y-%m-%d")
+        .map_err(|_| invalid_column_value("start_date", "YYYY-MM-DD"))?;
+    let end_date = chrono::NaiveDate::parse_from_str(body.end_date.trim(), "%Y-%m-%d")
+        .map_err(|_| invalid_column_value("end_date", "YYYY-MM-DD"))?;
+    if end_date < start_date {
+        return Err(invalid_input("结束日期不能早于开始日期"));
+    }
+    if (end_date - start_date).num_days() > 31 {
+        return Err(invalid_input("单次补推最多选择 32 天"));
+    }
+    if body.worker_ids.is_empty() {
+        return Err(invalid_input("请至少选择一名工人"));
+    }
+    if body.worker_ids.len() > 500 {
+        return Err(invalid_input("单次最多选择 500 名工人"));
+    }
+    Ok((start_date, end_date))
+}
+
+fn ensure_system_admin(auth_user: &AuthUser) -> Result<(), ApiError> {
+    if auth_user.roles.contains(&Role::Admin) {
+        Ok(())
+    } else {
+        Err(ApiError::default()
+            .with_code(StatusCode::FORBIDDEN)
+            .with_message("仅系统管理员可执行甬薪考勤补推"))
+    }
+}
+
+pub async fn preview_yongxin_attendance_reporting(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Path(project_id): Path<Uuid>,
+    Json(body): Json<YongxinAttendanceRepairRequest>,
+) -> ApiResult<Value> {
+    ensure_system_admin(&auth_user)?;
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+    let (start_date, end_date) = parse_yongxin_repair_dates(&body)?;
+
+    let has_enabled_platform = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS (
+            SELECT 1 FROM construction_platform_configs config
+            WHERE config.project_id = $1
+              AND config.is_deleted = FALSE
+              AND config.is_enabled = TRUE
+              AND config.platform_type = 'yongxin_v2'
+              AND COALESCE(config.config #>> '{modules,sync_attendance}', config.config ->> 'sync_attendance', 'true')::boolean = TRUE
+        )
+        "#,
+    )
+    .bind(project_id)
+    .fetch_one(state.db.pool())
+    .await
+    .map_err(db_error)?;
+    if !has_enabled_platform {
+        return Err(invalid_input("当前项目未启用甬薪考勤同步"));
+    }
+
+    let records = sqlx::query_as::<_, YongxinAttendanceRepairPreviewRow>(
+        r#"
+        SELECT DISTINCT ON (record.id)
+            record.id AS attendance_id,
+            worker.id AS worker_id,
+            COALESCE(worker.name, '未命名工人') AS worker_name,
+            worker.id_card AS worker_identity,
+            team.name AS team_name,
+            record.direction,
+            record.trigger_time,
+            latest_job.status AS current_status,
+            latest_job.last_error AS current_message
+        FROM construction_attendance_records record
+        JOIN construction_workers worker
+          ON worker.id = record.worker_id
+         AND worker.is_deleted = FALSE
+        LEFT JOIN construction_teams team
+          ON team.id = worker.team_id
+         AND team.is_deleted = FALSE
+        JOIN construction_platform_configs config
+          ON config.project_id = record.project_id
+         AND config.is_deleted = FALSE
+         AND config.is_enabled = TRUE
+         AND config.platform_type = 'yongxin_v2'
+         AND COALESCE(
+               config.config #>> '{modules,sync_attendance}',
+               config.config ->> 'sync_attendance',
+               'true'
+             )::boolean = TRUE
+        LEFT JOIN LATERAL (
+            SELECT job.id, job.status, job.last_error
+            FROM integration_jobs job
+            LEFT JOIN integration_project_bindings binding ON binding.id = job.binding_id
+            WHERE job.project_id = record.project_id
+              AND job.entity_type = 'attendance'
+              AND job.local_entity_id = record.id
+              AND job.operation = 'attendance.sync'
+              AND platform_job_matches_config(
+                    job.binding_id, job.platform_code, binding.platform_config_id,
+                    config.id, config.project_id, config.platform_type
+                  )
+            ORDER BY job.updated_at DESC, job.id DESC
+            LIMIT 1
+        ) latest_job ON TRUE
+        WHERE record.project_id = $1
+          AND record.is_deleted = FALSE
+          AND worker.id = ANY($2)
+          AND (record.trigger_time AT TIME ZONE 'Asia/Shanghai')::date BETWEEN $3 AND $4
+          AND COALESCE(worker.worker_type, 0) <> 1001
+          AND COALESCE(worker.work_type, 0) <> 1001
+          AND (
+                latest_job.id IS NULL
+                OR latest_job.status IN ('failed', 'waiting_data', 'waiting_media', 'disabled')
+              )
+        ORDER BY record.id, record.trigger_time
+        LIMIT 500
+        "#,
+    )
+    .bind(project_id)
+    .bind(&body.worker_ids)
+    .bind(start_date)
+    .bind(end_date)
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(db_error)?;
+
+    Ok(ApiSuccess::default().with_data(serde_json::json!({
+        "records": records,
+        "record_count": records.len(),
+        "worker_count": records.iter().map(|record| record.worker_id).collect::<std::collections::HashSet<_>>().len(),
+        "batch_limit": 500,
+        "has_more": records.len() == 500,
+        "start_date": start_date,
+        "end_date": end_date,
+    })))
+}
+
+pub async fn repair_yongxin_attendance_reporting(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Path(project_id): Path<Uuid>,
+    Json(body): Json<YongxinAttendanceRepairRequest>,
+) -> ApiResult<Value> {
+    ensure_system_admin(&auth_user)?;
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+
+    let (start_date, end_date) = parse_yongxin_repair_dates(&body)?;
+    if body.attendance_ids.is_empty() {
+        return Err(invalid_input("请先预览并选择需要补推的考勤记录"));
+    }
+    if body.attendance_ids.len() > 500 {
+        return Err(invalid_input("单次最多补推 500 条考勤"));
+    }
+
+    let mut repair_guard = state.db.pool().begin().await.map_err(db_error)?;
+    let lock_acquired =
+        sqlx::query_scalar::<_, bool>("SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0))")
+            .bind(format!("yongxin-attendance-repair:{project_id}"))
+            .fetch_one(&mut *repair_guard)
+            .await
+            .map_err(db_error)?;
+    if !lock_acquired {
+        return Err(invalid_input("当前项目的甬薪考勤正在补推，请稍后再试"));
+    }
+
+    let has_enabled_platform = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM construction_platform_configs config
+            WHERE config.project_id = $1
+              AND config.is_deleted = FALSE
+              AND config.is_enabled = TRUE
+              AND config.platform_type = 'yongxin_v2'
+              AND COALESCE(
+                    config.config #>> '{modules,sync_attendance}',
+                    config.config ->> 'sync_attendance',
+                    'true'
+                  )::boolean = TRUE
+        )
+        "#,
+    )
+    .bind(project_id)
+    .fetch_one(&mut *repair_guard)
+    .await
+    .map_err(db_error)?;
+    if !has_enabled_platform {
+        return Err(invalid_input("当前项目未启用甬薪考勤同步"));
+    }
+
+    let targets = sqlx::query_as::<_, (Uuid, Uuid)>(
+        r#"
+        SELECT record.id, config.id
+        FROM construction_attendance_records record
+        JOIN construction_workers worker
+          ON worker.id = record.worker_id
+         AND worker.is_deleted = FALSE
+        JOIN construction_platform_configs config
+          ON config.project_id = record.project_id
+         AND config.is_deleted = FALSE
+         AND config.is_enabled = TRUE
+         AND config.platform_type = 'yongxin_v2'
+         AND COALESCE(
+               config.config #>> '{modules,sync_attendance}',
+               config.config ->> 'sync_attendance',
+               'true'
+             )::boolean = TRUE
+        LEFT JOIN LATERAL (
+            SELECT job.id, job.status
+            FROM integration_jobs job
+            LEFT JOIN integration_project_bindings binding
+              ON binding.id = job.binding_id
+            WHERE job.project_id = record.project_id
+              AND job.entity_type = 'attendance'
+              AND job.local_entity_id = record.id
+              AND job.operation = 'attendance.sync'
+              AND platform_job_matches_config(
+                    job.binding_id,
+                    job.platform_code,
+                    binding.platform_config_id,
+                    config.id,
+                    config.project_id,
+                    config.platform_type
+                  )
+            ORDER BY job.updated_at DESC, job.id DESC
+            LIMIT 1
+        ) latest_job ON TRUE
+        WHERE record.project_id = $1
+          AND record.is_deleted = FALSE
+          AND record.id = ANY($4)
+          AND worker.id = ANY($5)
+          AND (record.trigger_time AT TIME ZONE 'Asia/Shanghai')::date BETWEEN $2 AND $3
+          AND COALESCE(worker.worker_type, 0) <> 1001
+          AND COALESCE(worker.work_type, 0) <> 1001
+          AND (
+                latest_job.id IS NULL
+                OR latest_job.status IN (
+                    'failed', 'waiting_data', 'waiting_media', 'disabled'
+                )
+              )
+        ORDER BY record.trigger_time, record.id, config.created_at, config.id
+        LIMIT 500
+        "#,
+    )
+    .bind(project_id)
+    .bind(start_date)
+    .bind(end_date)
+    .bind(&body.attendance_ids)
+    .bind(&body.worker_ids)
+    .fetch_all(&mut *repair_guard)
+    .await
+    .map_err(db_error)?;
+
+    for (attendance_id, config_id) in &targets {
+        crate::feature::integration::outbox_worker::enqueue_attendance_platform_repair(
+            state.db.pool(),
+            project_id,
+            *attendance_id,
+            *config_id,
+            auth_user.user_id,
+        )
+        .await
+        .map_err(db_error)?;
+    }
+
+    repair_guard.commit().await.map_err(db_error)?;
+    Ok(ApiSuccess::default().with_data(serde_json::json!({
+        "queued_count": targets.len(),
+        "batch_limit": 500,
+        "has_more": targets.len() == 500,
+        "start_date": start_date,
+        "end_date": end_date,
     })))
 }
 
@@ -6700,7 +7177,20 @@ FROM (
     SELECT
         to_jsonb(r) || jsonb_build_object(
             'overall_photo', COALESCE(r.overall_photo, overall_photo.photo_data),
-            'closeup_photo', COALESCE(r.closeup_photo, closeup_photo.photo_data)
+            'closeup_photo', COALESCE(r.closeup_photo, closeup_photo.photo_data),
+            'yongxin_reporting', jsonb_build_object(
+                'enabled', yongxin_config.enabled,
+                'job_id', yongxin_job.id,
+                'status', CASE
+                    WHEN yongxin_job.id IS NULL AND NOT yongxin_config.enabled THEN 'not_configured'
+                    WHEN yongxin_job.id IS NULL THEN 'not_reported'
+                    ELSE yongxin_job.status
+                END,
+                'message', yongxin_job.last_error,
+                'external_request_id', yongxin_job.external_request_id,
+                'remote_state', yongxin_job.remote_state,
+                'updated_at', yongxin_job.updated_at
+            )
         ) AS row_json,
         r.created_at
     FROM construction_attendance_records r
@@ -6720,6 +7210,38 @@ FROM (
         ORDER BY photo.created_at DESC, photo.id DESC
         LIMIT 1
     ) closeup_photo ON TRUE
+    LEFT JOIN LATERAL (
+        SELECT EXISTS (
+            SELECT 1
+            FROM construction_platform_configs config
+            WHERE config.project_id = r.project_id
+              AND config.platform_type = 'yongxin_v2'
+              AND config.is_deleted = FALSE
+              AND config.is_enabled = TRUE
+              AND COALESCE(
+                    config.config #>> '{modules,sync_attendance}',
+                    config.config ->> 'sync_attendance',
+                    'true'
+                  )::boolean = TRUE
+        ) AS enabled
+    ) yongxin_config ON TRUE
+    LEFT JOIN LATERAL (
+        SELECT
+            job.id,
+            job.status,
+            job.last_error,
+            job.external_request_id,
+            job.remote_state,
+            job.updated_at
+        FROM integration_jobs job
+        WHERE job.project_id = r.project_id
+          AND job.entity_type = 'attendance'
+          AND job.local_entity_id = r.id
+          AND job.operation = 'attendance.sync'
+          AND job.platform_code = 'yongxin_v2'
+        ORDER BY job.updated_at DESC, job.id DESC
+        LIMIT 1
+    ) yongxin_job ON TRUE
     WHERE r.is_deleted = FALSE
       AND r.project_id =
 "#,
@@ -8995,6 +9517,7 @@ async fn list_unified_platform_logs(
                 log.created_at,
                 log.updated_at,
                 log.deleted_at,
+                ARRAY[]::text[] AS attempt_statuses,
                 'manual'::text AS source
             FROM construction_platform_logs log
             LEFT JOIN construction_projects project
@@ -9060,8 +9583,12 @@ async fn list_unified_platform_logs(
                 jsonb_build_object(
                     'source', 'integration_job',
                     'platform_code', job.platform_code,
+                    'base_url', COALESCE(binding.base_url, config.config ->> 'base_url'),
                     'entity_type', job.entity_type,
                     'local_entity_id', job.local_entity_id,
+                    'entity_name', COALESCE(job_worker.name, attendance_worker.name),
+                    'entity_identity', COALESCE(job_worker.id_card, attendance_worker.id_card),
+                    'job_request', job.request_payload,
                     'external_request_id', job.external_request_id,
                     'remote_state', job.remote_state,
                     'response', job.response_payload,
@@ -9072,6 +9599,7 @@ async fn list_unified_platform_logs(
                                 'attempt_no', attempt.attempt_no,
                                 'method', attempt.request_method,
                                 'url', attempt.request_url,
+                                'headers', attempt.request_headers,
                                 'request', attempt.request_body,
                                 'http_status', attempt.response_status,
                                 'response', attempt.response_body,
@@ -9091,6 +9619,12 @@ async fn list_unified_platform_logs(
                 job.created_at,
                 job.updated_at,
                 NULL::timestamptz AS deleted_at,
+                ARRAY(
+                    SELECT DISTINCT attempt.status
+                    FROM integration_attempts attempt
+                    WHERE attempt.job_id = job.id
+                      AND attempt.status IS NOT NULL
+                ) AS attempt_statuses,
                 'system'::text AS source
             FROM integration_jobs job
             LEFT JOIN construction_projects project
@@ -9105,6 +9639,17 @@ async fn list_unified_platform_logs(
             LEFT JOIN construction_platform_configs config
               ON config.id = binding.platform_config_id
              AND config.is_deleted = FALSE
+            LEFT JOIN construction_workers job_worker
+              ON job.entity_type IN ('worker', 'construction_worker')
+             AND job_worker.id = job.local_entity_id
+             AND job_worker.is_deleted = FALSE
+            LEFT JOIN construction_attendance_records attendance_record
+              ON job.entity_type = 'attendance'
+             AND attendance_record.id = job.local_entity_id
+             AND attendance_record.is_deleted = FALSE
+            LEFT JOIN construction_workers attendance_worker
+              ON attendance_worker.id = attendance_record.worker_id
+             AND attendance_worker.is_deleted = FALSE
             WHERE TRUE
         ), filtered_logs AS (
             SELECT *
@@ -9117,12 +9662,22 @@ async fn list_unified_platform_logs(
         query.push(" AND log.project_id = ").push_bind(project_id);
     }
     if let Some(status) = &params.status {
-        query.push(" AND log.status = ").push_bind(status.clone());
+        query
+            .push(" AND (log.status = ")
+            .push_bind(status.clone())
+            .push(" OR ")
+            .push_bind(status.clone())
+            .push(" = ANY(log.attempt_statuses))");
     }
     if let Some(platform_type) = &params.platform_type {
         query
             .push(" AND log.platform_type = ")
             .push_bind(platform_type.clone());
+    }
+    if let Some(operation) = &params.operation {
+        query
+            .push(" AND log.operation = ")
+            .push_bind(operation.clone());
     }
     if !params.keyword.is_empty() {
         let pattern = format!("%{}%", params.keyword);
@@ -9134,6 +9689,8 @@ async fn list_unified_platform_logs(
             .push(" OR COALESCE(log.operation, '') ILIKE ")
             .push_bind(pattern.clone())
             .push(" OR COALESCE(log.message, '') ILIKE ")
+            .push_bind(pattern.clone())
+            .push(" OR COALESCE(log.payload::text, '') ILIKE ")
             .push_bind(pattern)
             .push(")");
     }
@@ -12517,6 +13074,176 @@ async fn list_rows_page(
     })))
 }
 
+async fn list_unit_rows_page(
+    pool: &sqlx::PgPool,
+    project_id: Uuid,
+    params: &ResourceListParams,
+) -> ApiResult<Value> {
+    let where_uuid_columns = [("project_id", project_id)];
+    let total = count_rows(pool, "construction_units", &where_uuid_columns, &[], params).await?;
+    let offset = (params.page - 1) * params.page_size;
+    let mut query = QueryBuilder::<Postgres>::new(
+        r#"
+        SELECT COALESCE(jsonb_agg(to_jsonb(row_data) ORDER BY row_data.created_at DESC), '[]'::jsonb)
+        FROM (
+            SELECT
+                r.*,
+                COALESCE((
+                    SELECT jsonb_agg(
+                        jsonb_build_object(
+                            'platform_name', config.platform_name,
+                            'platform_type', config.platform_type,
+                            'is_enabled', config.is_enabled,
+                            'status', CASE
+                                WHEN latest_job.id IS NULL THEN 'not_reported'
+                                WHEN latest_job.status IN ('success', 'completed') THEN 'success'
+                                WHEN latest_job.status IN ('pending', 'processing', 'retry', 'awaiting_result', 'waiting_dependency', 'waiting_media') THEN 'pending'
+                                ELSE 'failed'
+                            END,
+                            'failure_reason', CASE
+                                WHEN latest_job.id IS NOT NULL
+                                     AND latest_job.status NOT IN ('success', 'completed', 'pending', 'processing', 'retry', 'awaiting_result', 'waiting_dependency', 'waiting_media')
+                                    THEN COALESCE(
+                                        NULLIF(latest_job.last_error, ''),
+                                        latest_job.response_payload ->> 'message',
+                                        latest_job.response_payload ->> 'msg',
+                                        '上报未完成，请检查平台日志'
+                                    )
+                                ELSE NULL
+                            END,
+                            'reported_at', latest_job.updated_at
+                        )
+                        ORDER BY config.created_at, config.platform_name
+                    )
+                    FROM construction_platform_configs config
+                    LEFT JOIN LATERAL (
+                        SELECT
+                            job.id,
+                            job.status,
+                            job.last_error,
+                            job.response_payload,
+                            job.updated_at
+                        FROM integration_jobs job
+                        LEFT JOIN integration_project_bindings binding
+                          ON binding.id = job.binding_id
+                        WHERE job.project_id = r.project_id
+                          AND job.entity_type IN ('unit', 'construction_unit')
+                          AND job.local_entity_id = r.id
+                          AND job.operation = 'unit.sync'
+                          AND platform_job_matches_config(job.binding_id, job.platform_code, binding.platform_config_id, config.id, config.project_id, config.platform_type)
+                        ORDER BY job.updated_at DESC, job.id DESC
+                        LIMIT 1
+                    ) latest_job ON TRUE
+                    WHERE config.project_id = r.project_id
+                      AND config.is_deleted = FALSE
+                      AND config.is_enabled = TRUE
+                      AND config.platform_type IN ('yongxin_v2', 'xinleda')
+                ), '[]'::jsonb) AS reporting_platforms
+            FROM construction_units r
+            WHERE r.is_deleted = FALSE
+        "#,
+    );
+    push_uuid_filters(&mut query, &where_uuid_columns);
+    push_resource_filters(&mut query, "construction_units", params);
+    query
+        .push(" ORDER BY r.created_at DESC LIMIT ")
+        .push_bind(params.page_size)
+        .push(" OFFSET ")
+        .push_bind(offset)
+        .push(") row_data");
+
+    let items = query
+        .build_query_scalar::<Value>()
+        .fetch_one(pool)
+        .await
+        .map_err(db_error)?;
+    let reporting_summary = unit_reporting_summary(pool, project_id).await?;
+
+    Ok(ApiSuccess::default().with_data(serde_json::json!({
+        "items": items,
+        "total": total,
+        "page": params.page,
+        "page_size": params.page_size,
+        "reporting_summary": reporting_summary,
+    })))
+}
+
+async fn unit_reporting_summary(pool: &sqlx::PgPool, project_id: Uuid) -> Result<Value, ApiError> {
+    sqlx::query_scalar::<_, Value>(
+        r#"
+        WITH unit_platform_statuses AS (
+            SELECT
+                config.id AS platform_config_id,
+                config.platform_name,
+                config.platform_type,
+                config.created_at AS platform_created_at,
+                unit.id AS unit_id,
+                CASE
+                    WHEN unit.id IS NULL OR latest_job.id IS NULL THEN 'not_reported'
+                    WHEN latest_job.status IN ('success', 'completed') THEN 'success'
+                    WHEN latest_job.status IN ('pending', 'processing', 'retry', 'awaiting_result', 'waiting_dependency', 'waiting_media') THEN 'pending'
+                    ELSE 'failed'
+                END AS reporting_status
+            FROM construction_platform_configs config
+            LEFT JOIN construction_units unit
+              ON unit.project_id = config.project_id
+             AND unit.is_deleted = FALSE
+            LEFT JOIN LATERAL (
+                SELECT job.id, job.status
+                FROM integration_jobs job
+                LEFT JOIN integration_project_bindings binding
+                  ON binding.id = job.binding_id
+                WHERE job.project_id = config.project_id
+                  AND job.entity_type IN ('unit', 'construction_unit')
+                  AND job.local_entity_id = unit.id
+                  AND job.operation = 'unit.sync'
+                  AND platform_job_matches_config(job.binding_id, job.platform_code, binding.platform_config_id, config.id, config.project_id, config.platform_type)
+                ORDER BY job.updated_at DESC, job.id DESC
+                LIMIT 1
+            ) latest_job ON TRUE
+            WHERE config.project_id = $1
+              AND config.is_deleted = FALSE
+              AND config.is_enabled = TRUE
+              AND config.platform_type IN ('yongxin_v2', 'xinleda')
+        ), platform_summary AS (
+            SELECT
+                platform_config_id,
+                platform_name,
+                platform_type,
+                platform_created_at,
+                COUNT(*) FILTER (WHERE unit_id IS NOT NULL)::int AS total_count,
+                COUNT(*) FILTER (WHERE unit_id IS NOT NULL AND reporting_status = 'success')::int AS success_count,
+                COUNT(*) FILTER (WHERE unit_id IS NOT NULL AND reporting_status = 'failed')::int AS failure_count,
+                COUNT(*) FILTER (WHERE unit_id IS NOT NULL AND reporting_status = 'pending')::int AS pending_count,
+                COUNT(*) FILTER (WHERE unit_id IS NOT NULL AND reporting_status = 'not_reported')::int AS not_reported_count
+            FROM unit_platform_statuses
+            GROUP BY platform_config_id, platform_name, platform_type, platform_created_at
+        )
+        SELECT COALESCE(
+            jsonb_agg(
+                jsonb_build_object(
+                    'platform_name', platform_name,
+                    'platform_type', platform_type,
+                    'total_count', total_count,
+                    'success_count', success_count,
+                    'failure_count', failure_count,
+                    'pending_count', pending_count,
+                    'not_reported_count', not_reported_count,
+                    'ignored_count', 0
+                )
+                ORDER BY platform_created_at, platform_name
+            ),
+            '[]'::jsonb
+        )
+        FROM platform_summary
+        "#,
+    )
+    .bind(project_id)
+    .fetch_one(pool)
+    .await
+    .map_err(db_error)
+}
+
 async fn list_team_rows_page(
     pool: &sqlx::PgPool,
     project_id: Uuid,
@@ -13070,7 +13797,9 @@ async fn check_worker_phone_id_card_unique(
         }
         let count = query.fetch_one(pool).await.map_err(db_error)?;
         if count > 0 {
-            return Err(invalid_input("该身份证号在当前项目中已存在，不允许重复录入"));
+            return Err(invalid_input(
+                "该身份证号在当前项目中已存在，不允许重复录入",
+            ));
         }
     }
 
@@ -13612,13 +14341,15 @@ mod tests {
 
     #[test]
     fn module_list_params_accepts_platform_type_filter() {
-        let uri: Uri = "/api/v1/admin/platform-logs?platform_type=ningbo_housing"
-            .parse()
-            .expect("valid uri");
+        let uri: Uri =
+            "/api/v1/admin/platform-logs?platform_type=ningbo_housing&operation=attendance.sync"
+                .parse()
+                .expect("valid uri");
 
         let params = module_list_params(&uri).expect("valid params");
 
         assert_eq!(params.platform_type.as_deref(), Some("ningbo_housing"));
+        assert_eq!(params.operation.as_deref(), Some("attendance.sync"));
     }
 
     #[test]

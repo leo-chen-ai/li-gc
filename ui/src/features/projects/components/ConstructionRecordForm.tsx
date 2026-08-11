@@ -117,7 +117,7 @@ function RecordFormField({
         {field.required ? <span className="ml-0.5 text-red-500">*</span> : null}
       </span>
       {field.control === "region" ? (
-        <RegionField value={value} state={state} onChange={onChange} onBulkChange={onBulkChange} />
+        <RegionField field={field} value={value} state={state} onChange={onChange} onBulkChange={onBulkChange} />
       ) : field.control === "nativePlace" ? (
         <NativePlaceField value={value} onChange={onChange} />
       ) : field.control === "upload" ? (
@@ -290,19 +290,25 @@ function SearchableSelect({
 }
 
 function RegionField({
+  field,
   value,
   state,
   onChange,
   onBulkChange,
 }: {
+  field: ConstructionFormField;
   value: string;
   state: ConstructionFormState;
   onChange: (value: string) => void;
   onBulkChange?: (values: Record<string, string>) => void;
 }) {
+  const nameKey = field.regionNameKey ?? "address_code_list";
+  const streetKey = field.regionStreetKey ?? (field.key === "address_code" ? "street" : undefined);
+  const addressNamePath = state[nameKey];
+  const streetName = streetKey ? state[streetKey] : undefined;
   const path = useMemo(
-    () => findRegionPath(value, state.address_code_list, state.street),
-    [state.address_code_list, state.street, value]
+    () => findRegionPath(value, addressNamePath, streetName),
+    [addressNamePath, streetName, value]
   );
   const province = path[0];
   const city = path[1];
@@ -316,12 +322,16 @@ function RegionField({
     const names = nextPath.slice(0, 3).map((node) => node.name);
     const nextDistrict = nextPath[2];
     const nextStreet = nextPath[3];
-    onChange(nextDistrict?.code ?? nextPath.at(-1)?.code ?? "");
-    onBulkChange?.({
-      address_code: nextDistrict?.code ?? nextPath.at(-1)?.code ?? "",
-      address_code_list: names.join("/"),
-      street: nextStreet?.name ?? "",
-    });
+    const nextCode = field.regionRequireDistrict
+      ? nextDistrict?.code ?? ""
+      : nextDistrict?.code ?? nextPath.at(-1)?.code ?? "";
+    const changes: Record<string, string> = {
+      [field.key]: nextCode,
+      [nameKey]: names.join("/"),
+    };
+    if (streetKey) changes[streetKey] = nextStreet?.name ?? "";
+    onChange(nextCode);
+    onBulkChange?.(changes);
   };
 
   const selectProvince = (code: string) => {
@@ -350,7 +360,7 @@ function RegionField({
 
   return (
     <div className="rounded-md border border-slate-200 bg-white p-3 dark:border-border dark:bg-background">
-      <div className="grid gap-2 md:grid-cols-4">
+      <div className={cn("grid gap-2", streetKey ? "md:grid-cols-4" : "md:grid-cols-3")}>
         <RegionSelect
           label="省"
           value={province?.code ?? ""}
@@ -374,18 +384,20 @@ function RegionField({
           disabled={!city}
           onChange={selectDistrict}
         />
-        <RegionSelect
-          label="街道"
-          value={street?.code ?? ""}
-          placeholder="选择街道"
-          options={streets}
-          disabled={!district}
-          onChange={selectStreet}
-        />
+        {streetKey ? (
+          <RegionSelect
+            label="街道"
+            value={street?.code ?? ""}
+            placeholder="选择街道"
+            options={streets}
+            disabled={!district}
+            onChange={selectStreet}
+          />
+        ) : null}
       </div>
-      {state.address_code_list ? (
+      {addressNamePath ? (
         <div className="mt-2 min-h-4 text-xs text-slate-500 dark:text-muted-foreground">
-          {`${state.address_code_list}${state.street ? ` / ${state.street}` : ""}`}
+          {`${addressNamePath}${streetName ? ` / ${streetName}` : ""}`}
         </div>
       ) : null}
     </div>
