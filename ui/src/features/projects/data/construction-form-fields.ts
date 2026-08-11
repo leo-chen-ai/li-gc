@@ -34,6 +34,7 @@ export type ConstructionFormField = {
   inputMode?: "numeric" | "decimal";
   options?: ConstructionFormOption[];
   optionsSource?: "units" | "teams" | "workers";
+  searchable?: boolean;
   managementTeamType?: boolean;
   wide?: boolean;
 };
@@ -509,16 +510,16 @@ export const projectFormFields: ConstructionFormField[] = [
 export const unitFormFields: ConstructionFormField[] = [
   { key: "company_name", label: "单位名称", valueType: "string", required: true, section: "基础信息" },
   { key: "company_credit_code", label: "统一社会信用代码", valueType: "string", section: "基础信息" },
-  { key: "company_type", label: "单位类型", valueType: "number", control: "select", section: "基础信息", options: companyTypeOptions },
-  { key: "register_date", label: "注册日期", valueType: "date", section: "基础信息" },
-  { key: "register_area", label: "注册区域", valueType: "string", section: "基础信息" },
-  { key: "register_area_list", label: "注册区域名称", valueType: "string", section: "基础信息" },
-  { key: "company_address", label: "单位地址", valueType: "string", section: "基础信息", wide: true },
-  { key: "company_phone", label: "单位电话", valueType: "string", section: "基础信息" },
-  { key: "manager_name", label: "负责人", valueType: "string", section: "负责人" },
-  { key: "manager_phone", label: "负责人手机号", valueType: "string", section: "负责人" },
-  { key: "manager_id_card", label: "负责人身份证", valueType: "string", section: "负责人" },
-  { key: "legal_person_name", label: "法人姓名", valueType: "string", section: "负责人" },
+  { key: "company_type", label: "单位类型", valueType: "number", control: "select", required: true, section: "基础信息", options: companyTypeOptions },
+  { key: "register_date", label: "注册日期", valueType: "date", required: true, section: "基础信息" },
+  { key: "register_area", label: "注册区域", valueType: "string", required: true, section: "基础信息" },
+  { key: "register_area_list", label: "注册区域名称", valueType: "string", required: true, section: "基础信息" },
+  { key: "company_address", label: "单位地址", valueType: "string", required: true, section: "基础信息", wide: true },
+  { key: "company_phone", label: "单位电话", valueType: "string", required: true, section: "基础信息" },
+  { key: "manager_name", label: "负责人", valueType: "string", required: true, section: "负责人" },
+  { key: "manager_phone", label: "负责人手机号", valueType: "string", required: true, section: "负责人" },
+  { key: "manager_id_card", label: "负责人身份证", valueType: "string", required: true, section: "负责人" },
+  { key: "legal_person_name", label: "法人姓名", valueType: "string", required: true, section: "负责人" },
   { key: "legal_person_id_card", label: "法人身份证", valueType: "string", section: "负责人" },
   { key: "contract_amount", label: "合同金额", valueType: "number", section: "合同计薪", ...moneyInput },
   { key: "salary_calc_type", label: "计薪方式", valueType: "number", control: "select", section: "合同计薪", options: unitSalaryCalcTypeOptions },
@@ -538,7 +539,7 @@ export const teamFormFields: ConstructionFormField[] = [
   { key: "attendance_start_time", label: "考勤开始时间", valueType: "string", defaultValue: "06:00", section: "结算考勤" },
   { key: "attendance_end_time", label: "考勤结束时间", valueType: "string", defaultValue: "18:00", section: "结算考勤" },
   { key: "attendance_is_next_day", label: "考勤跨天", valueType: "boolean", control: "select", defaultValue: "false", section: "结算考勤", options: yesNoOptions },
-  { key: "leader_id", label: "班组长", valueType: "string", control: "select", section: "班组长", optionsSource: "workers" },
+  { key: "leader_id", label: "班组长", valueType: "string", control: "select", searchable: true, section: "班组长", optionsSource: "workers" },
   { key: "leader_name", label: "班组长姓名", valueType: "string", section: "班组长", hidden: true },
   { key: "leader_phone", label: "班组长手机号", valueType: "string", section: "班组长", hidden: true },
   { key: "leader_id_card", label: "班组长身份证", valueType: "string", section: "班组长", hidden: true },

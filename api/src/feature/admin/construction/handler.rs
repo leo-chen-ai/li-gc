@@ -4344,6 +4344,7 @@ pub async fn create_worker(
 ) -> ApiResult<Value> {
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     let body = normalize_worker_body(body, true)?;
+    check_worker_phone_id_card_unique(state.db.pool(), project_id, None, &body).await?;
     let response = create_row(
         state.db.pool(),
         "construction_workers",
@@ -6362,6 +6363,7 @@ pub async fn update_worker(
     let before_issue_fields =
         fetch_worker_issue_fields(state.db.pool(), project_id, worker_id).await?;
     let body = normalize_worker_body(body, false)?;
+    check_worker_phone_id_card_unique(state.db.pool(), project_id, Some(worker_id), &body).await?;
     let response = update_row(
         state.db.pool(),
         "construction_workers",
@@ -13013,6 +13015,66 @@ fn normalize_worker_body(body: Value, default_entry_time: bool) -> Result<Value,
     }
 
     Ok(Value::Object(object))
+}
+
+async fn check_worker_phone_id_card_unique(
+    pool: &sqlx::PgPool,
+    project_id: Uuid,
+    exclude_worker_id: Option<Uuid>,
+    body: &Value,
+) -> Result<(), ApiError> {
+    let phone = body
+        .get("phone")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let id_card = body
+        .get("id_card")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    if let Some(phone) = phone {
+        let mut query = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM construction_workers WHERE project_id = $1 AND phone = $2 AND is_deleted = FALSE",
+        )
+        .bind(project_id)
+        .bind(phone);
+        if let Some(wid) = exclude_worker_id {
+            query = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM construction_workers WHERE project_id = $1 AND phone = $2 AND is_deleted = FALSE AND id != $3",
+            )
+            .bind(project_id)
+            .bind(phone)
+            .bind(wid);
+        }
+        let count = query.fetch_one(pool).await.map_err(db_error)?;
+        if count > 0 {
+            return Err(invalid_input("该手机号在当前项目中已存在，不允许重复录入"));
+        }
+    }
+
+    if let Some(id_card) = id_card {
+        let mut query = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM construction_workers WHERE project_id = $1 AND id_card = $2 AND is_deleted = FALSE",
+        )
+        .bind(project_id)
+        .bind(id_card);
+        if let Some(wid) = exclude_worker_id {
+            query = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM construction_workers WHERE project_id = $1 AND id_card = $2 AND is_deleted = FALSE AND id != $3",
+            )
+            .bind(project_id)
+            .bind(id_card)
+            .bind(wid);
+        }
+        let count = query.fetch_one(pool).await.map_err(db_error)?;
+        if count > 0 {
+            return Err(invalid_input("该身份证号在当前项目中已存在，不允许重复录入"));
+        }
+    }
+
+    Ok(())
 }
 
 fn validate_worker_phone(object: &serde_json::Map<String, Value>) -> Result<(), ApiError> {

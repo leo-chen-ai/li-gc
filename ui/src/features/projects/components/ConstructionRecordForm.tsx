@@ -122,6 +122,13 @@ function RecordFormField({
         <NativePlaceField value={value} onChange={onChange} />
       ) : field.control === "upload" ? (
         <UploadField field={field} value={value} onChange={onChange} onBulkChange={onBulkChange} uploadContext={uploadContext} />
+      ) : field.control === "select" && field.searchable ? (
+        <SearchableSelect
+          value={value}
+          options={fieldOptions}
+          required={field.required}
+          onChange={onChange}
+        />
       ) : field.control === "select" ? (
         <select
           value={value}
@@ -203,6 +210,82 @@ function NativePlaceField({
         ))}
       </select>
     </div>
+  );
+}
+
+// 可搜索下拉选择：使用 <datalist> + <input>，允许输入关键字过滤选项
+function SearchableSelect({
+  value,
+  options,
+  required,
+  onChange,
+}: {
+  value: string;
+  options: ConstructionFormOption[];
+  required?: boolean;
+  onChange: (value: string) => void;
+}) {
+  const [listId] = useState(() => `searchable-${globalThis.crypto?.randomUUID?.().slice(0, 8) ?? "list"}`);
+  const selectedLabel = options.find((opt) => opt.value === value)?.label ?? "";
+  const [inputValue, setInputValue] = useState(selectedLabel);
+  const [lastSyncedValue, setLastSyncedValue] = useState(value);
+  const [focused, setFocused] = useState(false);
+
+  // 外部 value 变化时同步输入框显示（不在 focus 时干扰用户输入）
+  if (value !== lastSyncedValue && !focused) {
+    setLastSyncedValue(value);
+    setInputValue(selectedLabel);
+  }
+
+  const filteredOptions = useMemo(() => {
+    const q = inputValue.trim().toLowerCase();
+    if (!q) return options;
+    return options.filter((opt) => opt.label.toLowerCase().includes(q) || opt.value.toLowerCase().includes(q));
+  }, [options, inputValue]);
+
+  const handleInput = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const text = event.target.value;
+    setInputValue(text);
+    const match = options.find((opt) => opt.label === text);
+    if (match) {
+      onChange(match.value);
+    } else if (!text) {
+      onChange("");
+    }
+  };
+
+  const handleBlur = () => {
+    setFocused(false);
+    const match = options.find((opt) => opt.label === inputValue);
+    if (match) {
+      onChange(match.value);
+    } else {
+      setInputValue(options.find((opt) => opt.value === value)?.label ?? "");
+    }
+  };
+
+  return (
+    <>
+      <input
+        type="text"
+        list={listId}
+        value={inputValue}
+        required={required}
+        placeholder="输入关键字搜索"
+        onChange={handleInput}
+        onFocus={() => setFocused(true)}
+        onBlur={handleBlur}
+        className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm outline-none focus:border-[#0f6b5d] focus:ring-2 focus:ring-[#0f6b5d]/15 dark:border-border dark:bg-background"
+      />
+      <datalist id={listId}>
+        <option value="">请选择</option>
+        {filteredOptions.map((option) => (
+          <option key={option.value} value={option.label}>
+            {option.label}
+          </option>
+        ))}
+      </datalist>
+    </>
   );
 }
 

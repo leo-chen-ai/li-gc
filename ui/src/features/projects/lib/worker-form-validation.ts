@@ -13,7 +13,13 @@ function toNumber(value: unknown) {
   return undefined;
 }
 
-export function validateWorkerCreatePayload(payload: ConstructionWorkerPayload) {
+type ExistingWorker = { id?: string; phone?: string | null; id_card?: string | null };
+
+export function validateWorkerCreatePayload(
+  payload: ConstructionWorkerPayload,
+  existingWorkers?: ExistingWorker[],
+  excludeWorkerId?: string,
+) {
   if (isBlank(payload.avatar)) {
     throw new Error("请上传照片");
   }
@@ -36,6 +42,21 @@ export function validateWorkerCreatePayload(payload: ConstructionWorkerPayload) 
 
   if (isBlank(payload.phone)) {
     throw new Error("请填写手机号");
+  }
+
+  // 同一项目内手机号/身份证号不允许重复
+  if (existingWorkers && existingWorkers.length > 0) {
+    const phone = typeof payload.phone === "string" ? payload.phone.trim() : "";
+    const idCard = typeof payload.id_card === "string" ? payload.id_card.trim() : "";
+    for (const w of existingWorkers) {
+      if (excludeWorkerId && w.id === excludeWorkerId) continue;
+      if (phone && w.phone && w.phone.trim() === phone) {
+        throw new Error("该手机号在当前项目中已存在，不允许重复录入");
+      }
+      if (idCard && w.id_card && w.id_card.trim() === idCard) {
+        throw new Error("该身份证号在当前项目中已存在，不允许重复录入");
+      }
+    }
   }
 
   const workerType = toNumber(payload.worker_type);

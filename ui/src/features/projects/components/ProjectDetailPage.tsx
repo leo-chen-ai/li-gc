@@ -1010,7 +1010,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       }
       if (activeTab === "项目工人") {
         const payload = buildPayloadFromForm(workerFormFields, formState) as ConstructionWorkerPayload;
-        validateWorkerCreatePayload(payload);
+        validateWorkerCreatePayload(payload, rawWorkers, editingId ?? undefined);
         if (dialogMode === "edit" && editingId) {
           await updateWorker.mutateAsync({ workerId: editingId, payload });
         } else {

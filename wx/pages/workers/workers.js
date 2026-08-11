@@ -463,6 +463,22 @@ Page({
       return;
     }
 
+    // 同一项目内手机号/身份证号不允许重复
+    const editId = this.data.editId;
+    const phone = (payload.phone || "").toString().trim();
+    const idCard = (payload.id_card || "").toString().trim();
+    for (const w of this.data.workers) {
+      if (w.id === editId) continue;
+      if (phone && w.phone && w.phone.trim() === phone) {
+        wx.showToast({ title: "该手机号在当前项目中已存在", icon: "none" });
+        return;
+      }
+      if (idCard && w.id_card && w.id_card.trim() === idCard) {
+        wx.showToast({ title: "该身份证号在当前项目中已存在", icon: "none" });
+        return;
+      }
+    }
+
     this.setData({ saving: true });
     try {
       await updateResource(this.data.project.id, "workers", this.data.editId, payload);
