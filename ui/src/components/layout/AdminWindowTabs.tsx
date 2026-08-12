@@ -78,10 +78,16 @@ function getWindowTitle(path: string) {
 function readStoredWindowsSnapshot(path: string, version: number) {
   void path;
   void version;
-  return readAdminWindowState().windows.map((item) => ({
-    path: normalizeAdminPath(item.path),
-    title: item.title || getWindowTitle(item.path),
-  }));
+  return readAdminWindowState().windows
+    .filter((item) => getAdminWindowPathname(item.path) !== "/app/admin/attendance-alerts")
+    .map((item) => {
+      const normalizedPath = normalizeAdminPath(item.path);
+      const pathname = getAdminWindowPathname(normalizedPath);
+      return {
+        path: normalizedPath,
+        title: staticTitles[pathname] || item.title || getWindowTitle(normalizedPath),
+      };
+    });
 }
 
 function mergeCurrentWindow(windows: AdminWindow[], currentPath: string) {
@@ -93,7 +99,7 @@ function mergeCurrentWindow(windows: AdminWindow[], currentPath: string) {
   );
   const nextWindow = {
     path: currentPath,
-    title: existing?.title || getWindowTitle(currentPath),
+    title: staticTitles[currentBasePath] || existing?.title || getWindowTitle(currentPath),
   };
   return existing
     ? windows.map((item) =>

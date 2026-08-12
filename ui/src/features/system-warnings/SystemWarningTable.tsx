@@ -17,9 +17,10 @@ export function SystemWarningTable({ rows, loading }: { rows: SystemWarning[]; l
       <Table>
         <TableHeader>
           <TableRow className="bg-slate-50/80 dark:bg-muted/40">
-            <TableHead className="w-[170px]">预警类型</TableHead>
-            <TableHead>项目</TableHead>
-            <TableHead>预警内容</TableHead>
+            <TableHead className="w-[160px]">预警类型</TableHead>
+            <TableHead className="w-[280px]">项目</TableHead>
+            <TableHead className="w-[200px]">预警对象</TableHead>
+            <TableHead>异常情况</TableHead>
             <TableHead className="w-[170px]">发生时间</TableHead>
             <TableHead className="w-[90px]">状态</TableHead>
           </TableRow>
@@ -42,14 +43,14 @@ export function SystemWarningTable({ rows, loading }: { rows: SystemWarning[]; l
                     {warningTypeLabel(row.warning_type)}
                   </div>
                 </TableCell>
-                <TableCell className="font-medium">{row.project_name || "未命名项目"}</TableCell>
+                <TableCell className="font-medium leading-5">{row.project_name || "未命名项目"}</TableCell>
                 <TableCell>
-                  <div>{row.message}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    {row.warning_type === "device_offline"
-                      ? [row.device_name, row.serial_number].filter(Boolean).join(" · ") || "未命名考勤机"
-                      : [row.worker_name, row.team_name].filter(Boolean).join(" · ")}
-                  </div>
+                  <div className="font-medium text-slate-900 dark:text-foreground">{warningTarget(row)}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">{warningTargetDetail(row)}</div>
+                </TableCell>
+                <TableCell>
+                  <div className="font-medium text-slate-800 dark:text-foreground">{warningDescription(row)}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">{warningSuggestion(row)}</div>
                 </TableCell>
                 <TableCell>
                   <span className="inline-flex items-center gap-1 text-sm text-muted-foreground">
@@ -73,11 +74,35 @@ export function SystemWarningTable({ rows, loading }: { rows: SystemWarning[]; l
 }
 
 function EmptyRow({ text }: { text: string }) {
-  return <TableRow><TableCell colSpan={5} className="h-36 text-center text-muted-foreground"><AlertTriangle className="mx-auto mb-2 size-5" />{text}</TableCell></TableRow>;
+  return <TableRow><TableCell colSpan={6} className="h-36 text-center text-muted-foreground"><AlertTriangle className="mx-auto mb-2 size-5" />{text}</TableCell></TableRow>;
 }
 
 function warningTypeLabel(type: SystemWarning["warning_type"]) {
   return type === "device_offline" ? "考勤机离线" : "管理班组未考勤";
+}
+
+function warningTarget(row: SystemWarning) {
+  return row.warning_type === "device_offline"
+    ? row.device_name || "未命名考勤机"
+    : row.worker_name || "未命名人员";
+}
+
+function warningTargetDetail(row: SystemWarning) {
+  return row.warning_type === "device_offline"
+    ? row.serial_number ? `设备编号：${row.serial_number}` : "暂无设备编号"
+    : row.team_name || "管理班组";
+}
+
+function warningDescription(row: SystemWarning) {
+  return row.warning_type === "device_offline"
+    ? "连续离线已超过 30 分钟"
+    : "截至今日 14:00 仍无考勤记录";
+}
+
+function warningSuggestion(row: SystemWarning) {
+  return row.warning_type === "device_offline"
+    ? row.resolved_at ? `已于 ${formatDateTime(row.resolved_at)} 恢复在线` : "请检查设备供电和网络连接"
+    : "请核实人员当天到岗及打卡情况";
 }
 
 function formatDateTime(value: string) {
