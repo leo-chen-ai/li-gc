@@ -14,6 +14,7 @@ import { AppSidebar } from "@/components/layout/AppSidebar";
 import { AdminWindowTabs } from "@/components/layout/AdminWindowTabs";
 import { useAuthUser } from "@/stores/use-auth-store";
 import {
+  canAccessSystemWarnings,
   getDefaultAdminPath,
   getMenuKeysForUserRole,
   type MenuPermissionKey,
@@ -66,8 +67,15 @@ function AdminContent() {
           currentRolePermissions ? [currentRolePermissions] : []
         )
   );
+  const canUseSystemWarnings = canAccessSystemWarnings(user?.role);
+  if (canUseSystemWarnings) {
+    allowedMenus.add("admin_overview");
+    allowedMenus.add("system_warnings");
+  }
   const unreadCount = notifications.filter((n) => n.unread).length;
   const scopedUserPages = [
+    { path: "/app/admin/warnings", menuKey: "system_warnings" },
+    { path: "/app/admin", menuKey: "admin_overview" },
     { path: "/app/admin/projects", menuKey: "projects" },
     { path: "/app/admin/data-reporting", menuKey: "data_reporting" },
     { path: "/app/admin/attendance-devices", menuKey: "attendance_devices" },
@@ -82,11 +90,18 @@ function AdminContent() {
     { path: "/app/admin/personnel-workers", menuKey: "personnel_workers" },
   ] satisfies Array<{ path: string; menuKey: MenuPermissionKey }>;
   const currentScopedPage = scopedUserPages.find(
-    ({ path }) => location.pathname === path || location.pathname.startsWith(`${path}/`)
+    ({ path }) =>
+      location.pathname === path ||
+      (path !== "/app/admin" && location.pathname.startsWith(`${path}/`))
   );
   const canUseScopedPage = Boolean(
     currentScopedPage && allowedMenus.has(currentScopedPage.menuKey)
   );
+  const isUniversalPage = canUseSystemWarnings && (
+    location.pathname === "/app/admin" ||
+    location.pathname === "/app/admin/" ||
+    location.pathname === "/app/admin/warnings" ||
+    location.pathname.startsWith("/app/admin/warnings/"));
   const firstAllowedScopedPage = scopedUserPages.find(({ menuKey }) =>
     allowedMenus.has(menuKey)
   );
@@ -95,11 +110,11 @@ function AdminContent() {
   // Note: Authenticated guard is handled by app.tsx 
 
   // Redirect standard users to their workspace
-  if (isCustomRole && arePermissionsLoading) {
+  if (isCustomRole && arePermissionsLoading && !isUniversalPage) {
     return null;
   }
 
-  if (isCustomRole && isPermissionsError) {
+  if (isCustomRole && isPermissionsError && !isUniversalPage) {
     return (
       <div className="flex min-h-screen items-center justify-center p-6 text-sm text-muted-foreground">
         无法读取当前角色权限，请刷新页面后重试。

@@ -52,6 +52,7 @@ import { Route as AppAdminSupplementalAttendanceRouteImport } from './routes/app
 import { Route as AppAdminUploadsRouteImport } from './routes/app/admin/uploads'
 import { Route as AppAdminUsersRouteImport } from './routes/app/admin/users'
 import { Route as AppAdminVideoMonitoringRouteImport } from './routes/app/admin/video-monitoring'
+import { Route as AppAdminWarningsRouteImport } from './routes/app/admin/warnings'
 import { Route as AppAdminWorkHourConfigsRouteImport } from './routes/app/admin/work-hour-configs'
 import { Route as AppSettingsIndexRouteImport } from './routes/app/settings/index'
 import { Route as AppSettingsProfileRouteImport } from './routes/app/settings/profile'
@@ -302,6 +303,11 @@ const AppAdminVideoMonitoringRoute = AppAdminVideoMonitoringRouteImport.update({
   path: '/video-monitoring',
   getParentRoute: () => AppAdminRoute,
 } as any)
+const AppAdminWarningsRoute = AppAdminWarningsRouteImport.update({
+  id: '/warnings',
+  path: '/warnings',
+  getParentRoute: () => AppAdminRoute,
+} as any)
 const AppAdminWorkHourConfigsRoute = AppAdminWorkHourConfigsRouteImport.update({
   id: '/work-hour-configs',
   path: '/work-hour-configs',
@@ -389,6 +395,7 @@ export interface FileRoutesByFullPath {
   '/app/admin/uploads': typeof AppAdminUploadsRoute
   '/app/admin/users': typeof AppAdminUsersRoute
   '/app/admin/video-monitoring': typeof AppAdminVideoMonitoringRoute
+  '/app/admin/warnings': typeof AppAdminWarningsRoute
   '/app/admin/work-hour-configs': typeof AppAdminWorkHourConfigsRoute
   '/app/settings/profile': typeof AppSettingsProfileRoute
   '/app/settings/security': typeof AppSettingsSecurityRoute
@@ -439,6 +446,7 @@ export interface FileRoutesByTo {
   '/app/admin/uploads': typeof AppAdminUploadsRoute
   '/app/admin/users': typeof AppAdminUsersRoute
   '/app/admin/video-monitoring': typeof AppAdminVideoMonitoringRoute
+  '/app/admin/warnings': typeof AppAdminWarningsRoute
   '/app/admin/work-hour-configs': typeof AppAdminWorkHourConfigsRoute
   '/app/settings/profile': typeof AppSettingsProfileRoute
   '/app/settings/security': typeof AppSettingsSecurityRoute
@@ -493,6 +501,7 @@ export interface FileRoutesById {
   '/app/admin/uploads': typeof AppAdminUploadsRoute
   '/app/admin/users': typeof AppAdminUsersRoute
   '/app/admin/video-monitoring': typeof AppAdminVideoMonitoringRoute
+  '/app/admin/warnings': typeof AppAdminWarningsRoute
   '/app/admin/work-hour-configs': typeof AppAdminWorkHourConfigsRoute
   '/app/settings/profile': typeof AppSettingsProfileRoute
   '/app/settings/security': typeof AppSettingsSecurityRoute
@@ -548,6 +557,7 @@ export interface FileRouteTypes {
     | '/app/admin/uploads'
     | '/app/admin/users'
     | '/app/admin/video-monitoring'
+    | '/app/admin/warnings'
     | '/app/admin/work-hour-configs'
     | '/app/settings/profile'
     | '/app/settings/security'
@@ -598,6 +608,7 @@ export interface FileRouteTypes {
     | '/app/admin/uploads'
     | '/app/admin/users'
     | '/app/admin/video-monitoring'
+    | '/app/admin/warnings'
     | '/app/admin/work-hour-configs'
     | '/app/settings/profile'
     | '/app/settings/security'
@@ -651,6 +662,7 @@ export interface FileRouteTypes {
     | '/app/admin/uploads'
     | '/app/admin/users'
     | '/app/admin/video-monitoring'
+    | '/app/admin/warnings'
     | '/app/admin/work-hour-configs'
     | '/app/settings/profile'
     | '/app/settings/security'
@@ -970,6 +982,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdminVideoMonitoringRouteImport
       parentRoute: typeof AppAdminRoute
     }
+    '/app/admin/warnings': {
+      id: '/app/admin/warnings'
+      path: '/warnings'
+      fullPath: '/app/admin/warnings'
+      preLoaderRoute: typeof AppAdminWarningsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
     '/app/admin/work-hour-configs': {
       id: '/app/admin/work-hour-configs'
       path: '/work-hour-configs'
@@ -1106,6 +1125,7 @@ interface AppAdminRouteChildren {
   AppAdminUploadsRoute: typeof AppAdminUploadsRoute
   AppAdminUsersRoute: typeof AppAdminUsersRoute
   AppAdminVideoMonitoringRoute: typeof AppAdminVideoMonitoringRoute
+  AppAdminWarningsRoute: typeof AppAdminWarningsRoute
   AppAdminWorkHourConfigsRoute: typeof AppAdminWorkHourConfigsRoute
   AppAdminIndexRoute: typeof AppAdminIndexRoute
 }
@@ -1149,6 +1169,7 @@ const AppAdminRouteChildren: AppAdminRouteChildren = {
   AppAdminUploadsRoute: AppAdminUploadsRoute,
   AppAdminUsersRoute: AppAdminUsersRoute,
   AppAdminVideoMonitoringRoute: AppAdminVideoMonitoringRoute,
+  AppAdminWarningsRoute: AppAdminWarningsRoute,
   AppAdminWorkHourConfigsRoute: AppAdminWorkHourConfigsRoute,
   AppAdminIndexRoute: AppAdminIndexRoute,
 }

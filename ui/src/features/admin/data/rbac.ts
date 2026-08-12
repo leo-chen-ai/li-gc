@@ -1,5 +1,6 @@
 export type MenuPermissionKey =
   | "admin_overview"
+  | "system_warnings"
   | "projects"
   | "data_reporting"
   | "enterprise_customers"
@@ -52,10 +53,17 @@ export interface RoleMenuConfig {
 export const menuPermissions: MenuPermission[] = [
   {
     key: "admin_overview",
-    name: "首页总览",
+    name: "首页",
     group: "工作台",
     path: "/app/admin",
-    description: "查看项目、人员、考勤、工资和平台对接总览",
+    description: "查看有权限项目的最新预警",
+  },
+  {
+    key: "system_warnings",
+    name: "预警管理",
+    group: "工作台",
+    path: "/app/admin/warnings",
+    description: "查看考勤机离线和管理班组人员未考勤明细",
   },
   {
     key: "projects",
@@ -310,6 +318,7 @@ export function getMenuKeysForUserRole(
 ): MenuPermissionKey[] {
   const adminDefaults: MenuPermissionKey[] = [
     "admin_overview",
+    "system_warnings",
     "projects",
     "data_reporting",
     "enterprise_customers",
@@ -360,6 +369,8 @@ export function getMenuKeysForUserRole(
   }
 
   return [
+    "admin_overview",
+    "system_warnings",
     "projects",
     "attendance_devices",
     "attendance_device_issue_reports",
@@ -372,6 +383,10 @@ export function getDefaultAdminPath(menuKeys: Iterable<MenuPermissionKey>): stri
   return (
     menuPermissions.find((menu) => allowedMenus.has(menu.key))?.path ?? "/app/admin"
   );
+}
+
+export function canAccessSystemWarnings(role?: string): boolean {
+  return role !== "shujubaosong";
 }
 
 function isMenuPermissionKey(key: string): key is MenuPermissionKey {

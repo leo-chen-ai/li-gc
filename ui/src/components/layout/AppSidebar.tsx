@@ -47,6 +47,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import {
+  canAccessSystemWarnings,
   getDefaultAdminPath,
   getMenuKeysForUserRole,
   type MenuPermissionKey,
@@ -82,12 +83,17 @@ export function AppSidebar() {
       ? []
       : getMenuKeysForUserRole(user?.role, roleConfigs)
   );
+  if (canAccessSystemWarnings(user?.role)) {
+    allowedMenus.add("admin_overview");
+    allowedMenus.add("system_warnings");
+  }
 
   const sections: SidebarSection[] = [
     {
       title: "工作台",
       items: [
-        { key: "admin_overview", title: "首页总览", href: "/app/admin", icon: BarChart3, enabled: isAdmin },
+        { key: "admin_overview", title: "首页", href: "/app/admin", icon: BarChart3, enabled: true },
+        { key: "system_warnings", title: "预警管理", href: "/app/admin/warnings", icon: ShieldAlert, enabled: true },
       ],
     },
     {
@@ -105,7 +111,6 @@ export function AppSidebar() {
         { key: "platform_integrations", title: "平台对接管理", href: "/app/admin/platform-integrations", icon: Link2, enabled: isAdmin },
         { key: "attendance_devices", title: "考勤机绑定", href: "/app/admin/attendance-devices", icon: Fingerprint, enabled: true },
         { key: "attendance_device_issue_reports", title: "考勤机人员下发报告", href: "/app/admin/attendance-device-issue-reports", icon: FileClock, enabled: true },
-        { key: "attendance_alerts", title: "考勤预警", href: "/app/admin/attendance-alerts", icon: ShieldAlert, enabled: isAdmin },
         { key: "supplemental_attendance", title: "考勤托管", href: "/app/admin/supplemental-attendance", icon: CalendarClock, enabled: true },
         { key: "environment_monitoring", title: "环境检测", href: "/app/admin/environment-monitoring", icon: Leaf, enabled: isAdmin },
         { key: "video_monitoring", title: "视频监控", href: "/app/admin/video-monitoring", icon: Camera, enabled: isAdmin },

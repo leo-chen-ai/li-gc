@@ -15,7 +15,7 @@ use crate::{
 
 use super::{
     attendance_alert, construction, enterprise, log, registration_lead, report_forwarding, role,
-    stats, supplemental_attendance, upload, user,
+    stats, supplemental_attendance, system_warning, upload, user,
 };
 
 fn report_forward_routes() -> Router<AppState> {
@@ -471,6 +471,7 @@ pub fn management_routes(state: AppState) -> Router<AppState> {
             "/role-permissions",
             get(role::handler::current_role_permissions),
         )
+        .route("/warnings", get(system_warning::list_warnings))
         .route(
             "/supplemental-attendance/records",
             get(supplemental_attendance::list_records)

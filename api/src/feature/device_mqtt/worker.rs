@@ -292,7 +292,10 @@ async fn update_device_status(
             last_seen_at = NOW(),
             last_heartbeat_at = NOW(),
             last_online_at = CASE WHEN $2 = 'online' THEN NOW() ELSE last_online_at END,
-            last_offline_at = CASE WHEN $2 = 'offline' THEN NOW() ELSE last_offline_at END,
+            last_offline_at = CASE
+                WHEN $2 = 'offline' AND online_status <> 'offline' THEN NOW()
+                ELSE last_offline_at
+            END,
             last_mqtt_topic = $3,
             last_mqtt_payload = $4,
             updated_at = NOW()
@@ -304,7 +307,10 @@ async fn update_device_status(
         SET online_status = $2,
             last_seen_at = NOW(),
             last_online_at = CASE WHEN $2 = 'online' THEN NOW() ELSE last_online_at END,
-            last_offline_at = CASE WHEN $2 = 'offline' THEN NOW() ELSE last_offline_at END,
+            last_offline_at = CASE
+                WHEN $2 = 'offline' AND online_status <> 'offline' THEN NOW()
+                ELSE last_offline_at
+            END,
             last_mqtt_topic = $3,
             last_mqtt_payload = $4,
             updated_at = NOW()

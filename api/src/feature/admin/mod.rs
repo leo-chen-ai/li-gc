@@ -11,6 +11,7 @@ pub mod role;
 pub mod routes;
 pub mod stats;
 pub mod supplemental_attendance;
+pub mod system_warning;
 pub mod upload;
 pub mod user;
 

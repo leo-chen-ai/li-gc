@@ -371,7 +371,10 @@ async fn update_presence(
            SET online_status = CASE WHEN $2 THEN 'online' ELSE 'offline' END,
                last_seen_at = NOW(), last_heartbeat_at = CASE WHEN $2 THEN NOW() ELSE last_heartbeat_at END,
                last_online_at = CASE WHEN $2 THEN NOW() ELSE last_online_at END,
-               last_offline_at = CASE WHEN $2 THEN last_offline_at ELSE NOW() END,
+               last_offline_at = CASE
+                   WHEN NOT $2 AND online_status <> 'offline' THEN NOW()
+                   ELSE last_offline_at
+               END,
                last_mqtt_topic = $3, last_mqtt_payload = $4, updated_at = NOW()
            WHERE id = $1"#,
     )

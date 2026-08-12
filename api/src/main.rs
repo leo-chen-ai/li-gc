@@ -48,8 +48,8 @@ async fn main() -> eyre::Result<()> {
         })
         .unwrap_or(true);
     if background_workers_enabled {
-        // Attendance alert scheduler (daily 14:00 Asia/Shanghai).
-        quax::feature::admin::attendance_alert::spawn_attendance_alert_scheduler(state.clone());
+        // Homepage warnings: device offline and management-team attendance.
+        quax::feature::admin::system_warning::spawn_system_warning_scheduler(state.clone());
         // Managed attendance scheduler (generate next month on the last day of each month).
         quax::feature::admin::managed_attendance_scheduler::spawn_managed_attendance_scheduler(
             state.clone(),

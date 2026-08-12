@@ -2,10 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  canAccessSystemWarnings,
   getDefaultAdminPath,
   getMenuKeysForUserRole,
   menuPermissions,
 } from "./rbac.ts";
+
+test("data reporting role cannot access homepage warnings", () => {
+  assert.equal(canAccessSystemWarnings("shujubaosong"), false);
+  assert.equal(canAccessSystemWarnings("user"), true);
+  assert.equal(canAccessSystemWarnings("hlyl01"), true);
+});
 
 test("admin default menus include every configured menu permission", () => {
   const adminKeys = new Set(getMenuKeysForUserRole("admin"));
@@ -17,6 +24,8 @@ test("admin default menus include every configured menu permission", () => {
 
 test("standard users receive scoped management menus by default", () => {
   assert.deepEqual(getMenuKeysForUserRole("user"), [
+    "admin_overview",
+    "system_warnings",
     "projects",
     "attendance_devices",
     "attendance_device_issue_reports",
