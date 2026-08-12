@@ -93,7 +93,6 @@ export function AppSidebar() {
       title: "工作台",
       items: [
         { key: "admin_overview", title: "首页", href: "/app/admin", icon: BarChart3, enabled: true },
-        { key: "system_warnings", title: "预警管理", href: "/app/admin/warnings", icon: ShieldAlert, enabled: true },
       ],
     },
     {
@@ -105,6 +104,7 @@ export function AppSidebar() {
     {
       title: "劳务管理",
       items: [
+        { key: "system_warnings", title: "预警管理", href: "/app/admin/warnings", icon: ShieldAlert, enabled: true },
         { key: "projects", title: "项目列表", href: "/app/admin/projects", icon: Building2, enabled: true },
         { key: "contract_templates", title: "劳务分包合同模板", href: "/app/admin/contract-templates", icon: FileText, enabled: isAdmin },
         { key: "work_hour_configs", title: "工时配置", href: "/app/admin/work-hour-configs", icon: Clock3, enabled: isAdmin },

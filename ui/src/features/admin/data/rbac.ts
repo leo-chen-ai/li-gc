@@ -61,7 +61,7 @@ export const menuPermissions: MenuPermission[] = [
   {
     key: "system_warnings",
     name: "预警管理",
-    group: "工作台",
+    group: "劳务管理",
     path: "/app/admin/warnings",
     description: "查看考勤机离线和管理班组人员未考勤明细",
   },
