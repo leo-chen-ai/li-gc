@@ -2915,7 +2915,7 @@ function EntityReportingPlatforms({
           : isFailed
             ? `失败${platform.failure_reason ? `：${platform.failure_reason}` : ""}`
             : isIgnored
-                ? "已跳过（项目管理部不推送）"
+                ? "已跳过（市平台无法获取工人ID）"
                 : "未传";
 
         return (

@@ -4093,10 +4093,6 @@ pub async fn repair_worker_reporting(
           AND config.is_deleted = FALSE
           AND config.is_enabled = TRUE
           AND config.platform_type IN ('yongxin_v2', 'xinleda')
-          AND NOT (
-                config.platform_type <> 'xinleda'
-                AND (worker.worker_type = 1001 OR worker.work_type = 1001)
-              )
           AND (
                 latest_job.id IS NULL
                 OR latest_job.status NOT IN (
@@ -4255,8 +4251,6 @@ pub async fn preview_yongxin_attendance_reporting(
           AND record.is_deleted = FALSE
           AND worker.id = ANY($2)
           AND (record.trigger_time AT TIME ZONE 'Asia/Shanghai')::date BETWEEN $3 AND $4
-          AND COALESCE(worker.worker_type, 0) <> 1001
-          AND COALESCE(worker.work_type, 0) <> 1001
           AND (
                 latest_job.id IS NULL
                 OR latest_job.status IN ('failed', 'waiting_data', 'waiting_media', 'disabled')
@@ -4379,8 +4373,6 @@ pub async fn repair_yongxin_attendance_reporting(
           AND record.id = ANY($4)
           AND worker.id = ANY($5)
           AND (record.trigger_time AT TIME ZONE 'Asia/Shanghai')::date BETWEEN $2 AND $3
-          AND COALESCE(worker.worker_type, 0) <> 1001
-          AND COALESCE(worker.work_type, 0) <> 1001
           AND (
                 latest_job.id IS NULL
                 OR latest_job.status IN (
@@ -6587,7 +6579,7 @@ async fn list_workers_page(
                             'platform_type', config.platform_type,
                             'is_enabled', config.is_enabled,
                             'status', CASE
-                                WHEN config.platform_type <> 'xinleda'
+                                WHEN (config.platform_type = 'ningbo_housing' OR config.platform_name = '市住建')
                                      AND (r.worker_type = 1001 OR r.work_type = 1001) THEN 'ignored'
                                 WHEN latest_job.id IS NULL THEN 'not_reported'
                                 WHEN latest_job.status IN ('success', 'completed') THEN 'success'
@@ -6703,7 +6695,7 @@ async fn worker_reporting_summary(
                 config.created_at AS platform_created_at,
                 worker.id AS worker_id,
                 CASE
-                    WHEN config.platform_type <> 'xinleda'
+                    WHEN (config.platform_type = 'ningbo_housing' OR config.platform_name = '市住建')
                          AND (worker.worker_type = 1001 OR worker.work_type = 1001) THEN 'ignored'
                     WHEN worker.id IS NULL OR latest_job.id IS NULL THEN 'not_reported'
                     WHEN latest_job.status IN ('success', 'completed') THEN 'success'
