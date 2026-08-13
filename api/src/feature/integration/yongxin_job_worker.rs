@@ -240,6 +240,7 @@ async fn execute_unit_sync(
     let unit_id = local_id(job)?;
     let operation = event_operation(job);
     if operation == "delete" {
+        deactivate_mapping(state.db.pool(), job.binding_id, "unit", unit_id).await?;
         return complete_skipped(state.db.pool(), job.id, "文档未提供参建单位删除接口").await;
     }
     if mapping_external(state.db.pool(), job.binding_id, "unit", unit_id)
@@ -1204,6 +1205,35 @@ async fn upsert_mapping(
     external_parent_id: Option<&str>,
     payload: &Value,
 ) -> Result<(), JobIssue> {
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| JobIssue::Retryable(error.to_string()))?;
+    if entity_type == "unit" {
+        sqlx::query(
+            r#"
+            UPDATE integration_entity_mappings mapping
+            SET is_deleted = TRUE, deleted_at = NOW(), updated_at = NOW()
+            WHERE mapping.binding_id = $1
+              AND mapping.entity_type = 'unit'
+              AND mapping.external_entity_id = $2
+              AND mapping.local_entity_id <> $3
+              AND mapping.is_deleted = FALSE
+              AND NOT EXISTS (
+                    SELECT 1
+                    FROM construction_units unit
+                    WHERE unit.id = mapping.local_entity_id
+                      AND unit.is_deleted = FALSE
+                )
+            "#,
+        )
+        .bind(job.binding_id)
+        .bind(external_id)
+        .bind(local_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|error| JobIssue::Retryable(error.to_string()))?;
+    }
     sqlx::query(
         r#"
         INSERT INTO integration_entity_mappings (
@@ -1228,6 +1258,35 @@ async fn upsert_mapping(
     .bind(external_id)
     .bind(external_parent_id)
     .bind(payload)
+    .execute(&mut *transaction)
+    .await
+    .map_err(|error| JobIssue::Retryable(error.to_string()))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| JobIssue::Retryable(error.to_string()))?;
+    Ok(())
+}
+
+async fn deactivate_mapping(
+    pool: &PgPool,
+    binding_id: Uuid,
+    entity_type: &str,
+    local_id: Uuid,
+) -> Result<(), JobIssue> {
+    sqlx::query(
+        r#"
+        UPDATE integration_entity_mappings
+        SET is_deleted = TRUE, deleted_at = NOW(), updated_at = NOW()
+        WHERE binding_id = $1
+          AND entity_type = $2
+          AND local_entity_id = $3
+          AND is_deleted = FALSE
+        "#,
+    )
+    .bind(binding_id)
+    .bind(entity_type)
+    .bind(local_id)
     .execute(pool)
     .await
     .map_err(|error| JobIssue::Retryable(error.to_string()))?;
