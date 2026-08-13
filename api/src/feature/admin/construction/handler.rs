@@ -13739,6 +13739,11 @@ fn normalize_worker_body(body: Value, default_entry_time: bool) -> Result<Value,
     object.insert("auth_status".to_owned(), Value::Number(2.into()));
     object.insert("auth_fail_reason".to_owned(), Value::Null);
 
+    if default_entry_time && is_blank_json_value(object.get("native_place")) {
+        // 新录入人员未填写籍贯时统一保存浙江宁波行政区划码，供各上报平台使用。
+        object.insert("native_place".to_owned(), Value::Number(330200.into()));
+    }
+
     if default_entry_time && is_blank_json_value(object.get("entry_time")) {
         object.insert(
             "entry_time".to_owned(),
@@ -14243,6 +14248,19 @@ mod tests {
     #[test]
     fn worker_update_cannot_clear_required_phone() {
         assert!(normalize_worker_body(serde_json::json!({ "phone": "" }), false).is_err());
+    }
+
+    #[test]
+    fn worker_create_defaults_missing_native_place_to_ningbo() {
+        let normalized = normalize_worker_body(
+            serde_json::json!({ "phone": "13800000000", "work_type": 1 }),
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            normalized.get("native_place").and_then(Value::as_i64),
+            Some(330200)
+        );
     }
 
     #[test]

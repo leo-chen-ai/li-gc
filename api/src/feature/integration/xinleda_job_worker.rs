@@ -1618,7 +1618,8 @@ fn native_place_code(value: Option<i64>) -> Result<i64, JobIssue> {
             65 => 34,
             _ => 27,
         }),
-        _ => Err(JobIssue::WaitingData("籍贯无法映射到薪乐达字典".to_owned())),
+        // 籍贯缺失或历史值不在字典中时，按业务约定默认浙江宁波（平台字典 27）。
+        _ => Ok(27),
     }
 }
 
@@ -1649,6 +1650,8 @@ mod tests {
         );
         assert_eq!(work_type_code(Some(1)).unwrap(), "020");
         assert_eq!(native_place_code(Some(330200)).unwrap(), 27);
+        assert_eq!(native_place_code(None).unwrap(), 27);
+        assert_eq!(native_place_code(Some(0)).unwrap(), 27);
         assert_eq!(nation_code(Some("汉族"), &json!({})), 1);
         assert_eq!(company_type(Some(1)).unwrap(), 2);
         assert_eq!(company_type(Some(2)).unwrap(), 6);

@@ -1770,7 +1770,8 @@ fn native_place_code(value: Option<i64>) -> Result<&'static str, JobIssue> {
         64 => "32",
         54 => "33",
         65 => "34",
-        _ => return Err(JobIssue::WaitingData("籍贯无法映射到甬薪字典".to_owned())),
+        // 籍贯缺失或历史值不在字典中时，按业务约定默认浙江宁波（甬薪省份字典 27）。
+        _ => "27",
     };
     Ok(code)
 }
@@ -1851,5 +1852,7 @@ mod tests {
         assert_eq!(work_type_code(Some(38)).unwrap(), "390");
         assert_eq!(company_type_code(Some(1)).unwrap(), "009");
         assert_eq!(native_place_code(Some(330200)).unwrap(), "27");
+        assert_eq!(native_place_code(None).unwrap(), "27");
+        assert_eq!(native_place_code(Some(0)).unwrap(), "27");
     }
 }
