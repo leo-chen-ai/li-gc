@@ -1350,6 +1350,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
             ) : (
               <ModuleFilters
                 activeTab={activeTab}
+                showReportingPlatforms={isSystemAdmin}
                 units={units}
                 teams={projectTeams}
                 unitFilters={unitFilters}
@@ -1386,6 +1387,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
               audit={overviewAudit}
               faceIssueSummary={faceIssueSummary}
               reportingPlatforms={projectQuery.data?.reporting_platforms}
+              showReportingPlatforms={isSystemAdmin}
             />
           )}
           {activeTab === "建设单位" && (
@@ -1401,6 +1403,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
               onEdit={openEditDialog}
               onDelete={handleDeleteRecord}
               editable
+              showReportingPlatforms={isSystemAdmin}
             />
           )}
           {activeTab === "班组信息" && (
@@ -1416,6 +1419,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
               onEdit={openEditDialog}
               onDelete={handleDeleteRecord}
               editable
+              showReportingPlatforms={isSystemAdmin}
             />
           )}
           {activeTab === "项目工人" && (
@@ -1441,6 +1445,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
               onEdit={openEditDialog}
               onDelete={handleDeleteRecord}
               editable
+              showReportingPlatforms={isSystemAdmin}
             />
           )}
           {activeTab === "考勤记录" && (
@@ -2090,6 +2095,7 @@ function ProjectUnavailableState({
 
 function ModuleFilters({
   activeTab,
+  showReportingPlatforms,
   units,
   teams,
   unitFilters,
@@ -2113,6 +2119,7 @@ function ModuleFilters({
   onReset,
 }: {
   activeTab: DetailTab;
+  showReportingPlatforms: boolean;
   units: ConstructionUnit[];
   teams: Team[];
   unitFilters: UnitLedgerFilters;
@@ -2145,12 +2152,8 @@ function ModuleFilters({
 
   if (activeTab === "建设单位") {
     return (
-      <div className="grid gap-2 xl:grid-cols-[minmax(280px,0.8fr)_minmax(0,2.2fr)]">
-        <TeamReportingOverview
-          summary={unitReportingSummary}
-          onRepair={onRepairUnitReporting}
-          isRepairing={isRepairingUnitReporting}
-        />
+      <div className={cn("grid gap-2", showReportingPlatforms && "xl:grid-cols-[minmax(280px,0.8fr)_minmax(0,2.2fr)]")}>
+        {showReportingPlatforms ? <TeamReportingOverview summary={unitReportingSummary} onRepair={onRepairUnitReporting} isRepairing={isRepairingUnitReporting} /> : null}
         <FilterGrid compact onSearch={onSearch} onReset={onReset}>
           <FilterInput label="关键词" placeholder="单位名称、信用代码、负责人" value={unitFilters.keyword} onChange={(event) => onUnitFiltersChange({ keyword: event.target.value })} />
           <FilterSelect label="单位类型" value={unitFilters.companyType} onValueChange={(companyType) => onUnitFiltersChange({ companyType })} options={selectOptionsFromField(unitFormFields, "company_type", "全部类型")} />
@@ -2162,12 +2165,8 @@ function ModuleFilters({
 
   if (activeTab === "班组信息") {
     return (
-      <div className="grid gap-2 xl:grid-cols-[minmax(280px,0.8fr)_minmax(0,2.2fr)]">
-        <TeamReportingOverview
-          summary={teamReportingSummary}
-          onRepair={onRepairTeamReporting}
-          isRepairing={isRepairingTeamReporting}
-        />
+      <div className={cn("grid gap-2", showReportingPlatforms && "xl:grid-cols-[minmax(280px,0.8fr)_minmax(0,2.2fr)]")}>
+        {showReportingPlatforms ? <TeamReportingOverview summary={teamReportingSummary} onRepair={onRepairTeamReporting} isRepairing={isRepairingTeamReporting} /> : null}
         <FilterGrid compact onSearch={onSearch} onReset={onReset}>
           <FilterInput label="关键词" placeholder="班组名称、班组长" value={teamFilters.keyword} onChange={(event) => onTeamFiltersChange({ keyword: event.target.value })} />
           <FilterSelect label="参建单位" value={teamFilters.unitId} onValueChange={(unitId) => onTeamFiltersChange({ unitId })} options={[{ label: "全部单位", value: "all" }, ...units.map((unit) => ({ label: unit.name, value: unit.id }))]} />
@@ -2189,12 +2188,8 @@ function ModuleFilters({
 
   if (activeTab === "项目工人") {
     return (
-      <div className="grid gap-2 xl:grid-cols-[minmax(280px,0.8fr)_minmax(0,2.2fr)]">
-        <TeamReportingOverview
-          summary={workerReportingSummary}
-          onRepair={onRepairWorkerReporting}
-          isRepairing={isRepairingWorkerReporting}
-        />
+      <div className={cn("grid gap-2", showReportingPlatforms && "xl:grid-cols-[minmax(280px,0.8fr)_minmax(0,2.2fr)]")}>
+        {showReportingPlatforms ? <TeamReportingOverview summary={workerReportingSummary} onRepair={onRepairWorkerReporting} isRepairing={isRepairingWorkerReporting} /> : null}
         <FilterGrid compact onSearch={onSearch} onReset={onReset}>
           <FilterInput label="关键词" placeholder="姓名、身份证、手机号" value={workerFilters.keyword} onChange={(event) => onWorkerFiltersChange({ keyword: event.target.value })} />
           <FilterSelect label="所属班组" value={workerFilters.teamId} onValueChange={(teamId) => onWorkerFiltersChange({ teamId })} options={[{ label: "全部班组", value: "all" }, ...teams.map((team) => ({ label: `${team.unitName} / ${team.name}`, value: team.id }))]} />
@@ -2648,6 +2643,7 @@ function ProjectInfoTab({
   audit,
   faceIssueSummary,
   reportingPlatforms,
+  showReportingPlatforms,
 }: {
   project: Project;
   unitCount: number;
@@ -2656,6 +2652,7 @@ function ProjectInfoTab({
   audit: ProjectOverviewAudit | null;
   faceIssueSummary: FaceIssueSummary;
   reportingPlatforms: ConstructionProject["reporting_platforms"];
+  showReportingPlatforms: boolean;
 }) {
   const items = [
     ["项目名称", formatProjectTitle(project.name), project.name],
@@ -2703,14 +2700,18 @@ function ProjectInfoTab({
           ))}
         </div>
         <div className="rounded-lg border border-slate-200 bg-[#fbfcfc] p-3 dark:border-border dark:bg-card">
-          <div className="flex items-center gap-2 text-sm font-medium">
-            <Upload className="size-4 text-[#0f6b5d]" />
-            上报平台
-          </div>
-          <div className="mt-2 rounded-md border border-slate-200 bg-white px-3 py-2 dark:border-border dark:bg-background">
-            <ProjectReportingPlatforms platforms={reportingPlatforms} />
-          </div>
-          <div className="my-3 border-t border-slate-200 dark:border-border" />
+          {showReportingPlatforms ? (
+            <>
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <Upload className="size-4 text-[#0f6b5d]" />
+                上报平台
+              </div>
+              <div className="mt-2 rounded-md border border-slate-200 bg-white px-3 py-2 dark:border-border dark:bg-background">
+                <ProjectReportingPlatforms platforms={reportingPlatforms} />
+              </div>
+              <div className="my-3 border-t border-slate-200 dark:border-border" />
+            </>
+          ) : null}
           <div className="flex items-center gap-2 text-sm font-medium">
             <Building2 className="size-4 text-[#0f6b5d]" />
             项目核对重点
@@ -2808,12 +2809,14 @@ function UnitsTab({
   editable,
   onEdit,
   onDelete,
+  showReportingPlatforms,
 }: {
   units: ConstructionUnit[];
   pagination: TablePaginationConfig;
   editable: boolean;
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
+  showReportingPlatforms: boolean;
 }) {
   return (
     <DataTable
@@ -2822,7 +2825,7 @@ function UnitsTab({
       rows={units.map((unit) => [
         <div key={`${unit.id}-reporting`} className="min-w-[220px] space-y-1.5">
           <div className="font-medium text-slate-800 dark:text-foreground">{unit.name}</div>
-          <EntityReportingPlatforms platforms={unit.reportingPlatforms} />
+          {showReportingPlatforms ? <EntityReportingPlatforms platforms={unit.reportingPlatforms} /> : null}
         </div>,
         unit.type,
         unit.creditCode,
@@ -2842,12 +2845,14 @@ function TeamsTab({
   editable,
   onEdit,
   onDelete,
+  showReportingPlatforms,
 }: {
   teams: Team[];
   pagination: TablePaginationConfig;
   editable: boolean;
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
+  showReportingPlatforms: boolean;
 }) {
   return (
     <DataTable
@@ -2867,7 +2872,7 @@ function TeamsTab({
         </span>,
         <div key={`${team.id}-reporting`} className="min-w-[220px] space-y-1.5">
           <div className="font-medium text-slate-800 dark:text-foreground">{team.name}</div>
-          <EntityReportingPlatforms platforms={team.reportingPlatforms} />
+          {showReportingPlatforms ? <EntityReportingPlatforms platforms={team.reportingPlatforms} /> : null}
         </div>,
         team.unitName,
         team.type,
@@ -2951,6 +2956,7 @@ function WorkersTab({
   editable,
   onEdit,
   onDelete,
+  showReportingPlatforms,
 }: {
   projectId: string;
   units: ConstructionUnit[];
@@ -2967,6 +2973,7 @@ function WorkersTab({
   editable: boolean;
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
+  showReportingPlatforms: boolean;
 }) {
   const workerTree = buildWorkerTree(units, teams, treeWorkers);
   const selectedKey = getWorkerTreeSelectionKey(selection);
@@ -3208,10 +3215,14 @@ function WorkersTab({
         </div>
         <DataTable
           empty="暂无工人"
-          headers={editable ? ["上报平台", "头像", "姓名", "手机号", "班组", "工种", "下发成功", "状态", "进场日期", "操作"] : ["上报平台", "头像", "姓名", "手机号", "班组", "工种", "下发成功", "状态", "进场日期"]}
-          tableClassName={editable ? "min-w-[980px]" : "min-w-[900px]"}
+          headers={[
+            ...(showReportingPlatforms ? ["上报平台"] : []),
+            "头像", "姓名", "手机号", "班组", "工种", "下发成功", "状态", "进场日期",
+            ...(editable ? ["操作"] : []),
+          ]}
+          tableClassName={showReportingPlatforms ? (editable ? "min-w-[980px]" : "min-w-[900px]") : (editable ? "min-w-[830px]" : "min-w-[750px]")}
           cellClassNames={[
-            "w-[150px]",
+            ...(showReportingPlatforms ? ["w-[150px]"] : []),
             "w-14",
             "w-20",
             "w-28",
@@ -3224,9 +3235,7 @@ function WorkersTab({
           ]}
           scrollX
           rows={scopedWorkers.map((worker) => [
-            <div key={`${worker.id}-reporting`} className="max-w-[150px]">
-              <EntityReportingPlatforms platforms={worker.reportingPlatforms} showLabel={false} />
-            </div>,
+            ...(showReportingPlatforms ? [<div key={`${worker.id}-reporting`} className="max-w-[150px]"><EntityReportingPlatforms platforms={worker.reportingPlatforms} showLabel={false} /></div>] : []),
             <WorkerAvatar key={`${worker.id}-avatar`} src={worker.avatar} name={worker.name} />,
             <button
               key={`${worker.id}-name`}
