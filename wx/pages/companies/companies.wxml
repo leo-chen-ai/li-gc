@@ -124,6 +124,20 @@
               </view>
             </view>
           </block>
+          <block wx:elif="{{item.control === 'region'}}">
+            <view class="region-pickers">
+              <picker range="{{item.regionProvinceNames}}" value="{{item.regionProvinceIndex}}" data-key="{{item.key}}" bindchange="onRegionProvinceChange">
+                <view class="select-value {{item.regionProvinceLabel ? '' : 'placeholder'}}">{{item.regionProvinceLabel || '选择省'}}</view>
+              </picker>
+              <picker range="{{item.regionCityNames}}" value="{{item.regionCityIndex}}" data-key="{{item.key}}" data-province-index="{{item.regionProvinceIndex}}" disabled="{{!item.regionProvinceLabel}}" bindchange="onRegionCityChange">
+                <view class="select-value {{item.regionCityLabel ? '' : 'placeholder'}}">{{item.regionCityLabel || '选择市'}}</view>
+              </picker>
+              <picker range="{{item.regionDistrictNames}}" value="{{item.regionDistrictIndex}}" data-key="{{item.key}}" data-province-index="{{item.regionProvinceIndex}}" data-city-index="{{item.regionCityIndex}}" disabled="{{!item.regionCityLabel}}" bindchange="onRegionDistrictChange">
+                <view class="select-value {{item.regionDistrictLabel ? '' : 'placeholder'}}">{{item.regionDistrictLabel || '选择区县'}}</view>
+              </picker>
+            </view>
+            <view class="region-name-path" wx:if="{{item.regionNamePath}}">{{item.regionNamePath}}</view>
+          </block>
           <block wx:elif="{{item.control === 'select'}}">
             <picker range="{{item.options}}" range-key="label" value="{{item.optionIndex}}" data-key="{{item.key}}" bindchange="onPickerChange">
               <view class="select-value {{item.valueLabel ? '' : 'placeholder'}}">{{item.displayValue}}</view>

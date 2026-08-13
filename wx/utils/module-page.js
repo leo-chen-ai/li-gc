@@ -15,6 +15,7 @@ const {
   previewUploadedFile,
   uploadForField,
 } = require("./form-utils.js");
+const regions3Level = require("./china-regions-3level.js");
 
 const resourceByModule = {
   teams: "teams",
@@ -355,8 +356,52 @@ function createModulePage(fixedModuleKey) {
     this.updateFormValue(key, option && option.value || "");
   },
 
-    updateFormValue(key, value) {
-    const form = applyDerivedFormValues(this.data.moduleKey, { ...this.data.form, [key]: value }, key, this.data.lookups);
+    onRegionProvinceChange(event) {
+    const idx = Number(event.detail.value);
+    const province = regions3Level[idx];
+    if (!province) return;
+    const key = event.currentTarget.dataset.key;
+    const field = this.data.module.fields.find((item) => item.key === key);
+    if (!field) return;
+    const nameKey = field.regionNameKey || "address_code_list";
+    const nextCode = field.regionRequireDistrict ? "" : `${province.code}0000`;
+    this.updateFormValue(key, nextCode, { [nameKey]: province.name });
+  },
+
+    onRegionCityChange(event) {
+    const provIdx = Number(event.currentTarget.dataset.provinceIndex);
+    const province = regions3Level[provIdx];
+    if (!province) return;
+    const cityIdx = Number(event.detail.value);
+    const city = (province.children || [])[cityIdx];
+    if (!city) return;
+    const key = event.currentTarget.dataset.key;
+    const field = this.data.module.fields.find((item) => item.key === key);
+    if (!field) return;
+    const nameKey = field.regionNameKey || "address_code_list";
+    const nextCode = field.regionRequireDistrict ? "" : `${city.code}00`;
+    this.updateFormValue(key, nextCode, { [nameKey]: `${province.name}/${city.name}` });
+  },
+
+    onRegionDistrictChange(event) {
+    const provIdx = Number(event.currentTarget.dataset.provinceIndex);
+    const province = regions3Level[provIdx];
+    if (!province) return;
+    const cityIdx = Number(event.currentTarget.dataset.cityIndex);
+    const city = (province.children || [])[cityIdx];
+    if (!city) return;
+    const distIdx = Number(event.detail.value);
+    const district = (city.children || [])[distIdx];
+    if (!district) return;
+    const key = event.currentTarget.dataset.key;
+    const field = this.data.module.fields.find((item) => item.key === key);
+    if (!field) return;
+    const nameKey = field.regionNameKey || "address_code_list";
+    this.updateFormValue(key, district.code, { [nameKey]: `${province.name}/${city.name}/${district.name}` });
+  },
+
+    updateFormValue(key, value, extras = {}) {
+    const form = applyDerivedFormValues(this.data.moduleKey, { ...this.data.form, [key]: value, ...extras }, key, this.data.lookups);
     this.setData({
       form,
       formFields: buildFormFields(this.data.module.fields, form, this.data.lookups),

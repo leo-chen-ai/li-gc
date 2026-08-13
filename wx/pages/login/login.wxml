@@ -59,6 +59,19 @@
       <button class="login-button-native" loading="{{loading}}" disabled="{{loading}}" bind:tap="submitLogin">登录</button>
     </view>
 
+    <view class="agreement-block">
+      <view class="agreement-check-wrap" bind:tap="toggleAgreement">
+        <view class="agreement-checkbox {{agreedToTerms ? 'agreement-checkbox-active' : ''}}">
+          <view wx:if="{{agreedToTerms}}" class="agreement-checkmark"></view>
+        </view>
+        <view class="agreement-text-wrap">
+          <text class="agreement-text">我已阅读并同意</text>
+          <text class="agreement-link" catchtap="openAgreement">《用户服务协议》</text>
+          <text class="agreement-text">和</text>
+          <text class="agreement-link" catchtap="openPrivacy">《隐私政策》</text>
+        </view>
+      </view>
+    </view>
 
     <view class="support-footer">宁波山淮科技有限公司 技术支持</view>
   </view>

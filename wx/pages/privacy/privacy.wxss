@@ -1,0 +1,95 @@
+.doc-page {
+  box-sizing: border-box;
+  min-height: 100vh;
+  background: #f2f5f8;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  height: 96rpx;
+  padding: 0 28rpx;
+  background: #ffffff;
+  border-bottom: 1rpx solid #eef2f5;
+}
+
+.topbar-title {
+  flex: 1;
+  text-align: center;
+  color: #1a2b30;
+  font-size: 32rpx;
+  font-weight: 700;
+}
+
+.back-button {
+  width: 72rpx;
+  height: 72rpx;
+  color: #2e3e44;
+  font-size: 48rpx;
+  line-height: 72rpx;
+  text-align: center;
+  border-radius: 50%;
+  background: #eef8f6;
+}
+
+.topbar-spacer {
+  width: 72rpx;
+}
+
+.doc-content {
+  box-sizing: border-box;
+  height: calc(100vh - 96rpx);
+  padding: 40rpx 48rpx 80rpx;
+}
+
+.doc-title {
+  margin-bottom: 20rpx;
+  color: #142629;
+  font-size: 36rpx;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.doc-meta {
+  margin-bottom: 14rpx;
+  color: #7e8d94;
+  font-size: 24rpx;
+  line-height: 1.6;
+}
+
+.section {
+  margin-top: 48rpx;
+}
+
+.section-title {
+  margin-bottom: 20rpx;
+  padding-bottom: 14rpx;
+  color: #142629;
+  font-size: 30rpx;
+  font-weight: 700;
+  border-bottom: 2rpx solid #d8e4eb;
+}
+
+.section-text {
+  margin-bottom: 20rpx;
+  color: #3e4e55;
+  font-size: 28rpx;
+  line-height: 1.8;
+  text-align: justify;
+}
+
+.list-item {
+  margin-bottom: 16rpx;
+  color: #3e4e55;
+  font-size: 28rpx;
+  line-height: 1.8;
+  padding-left: 8rpx;
+}
+
+.list-item strong {
+  color: #1a2b30;
+  font-weight: 700;
+}

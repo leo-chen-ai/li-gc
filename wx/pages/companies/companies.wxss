@@ -654,3 +654,19 @@
   font-size: 23rpx;
   font-weight: 800;
 }
+
+.region-pickers {
+  display: flex;
+  gap: 14rpx;
+}
+
+.region-pickers picker {
+  flex: 1;
+  min-width: 0;
+}
+
+.region-name-path {
+  margin-top: 10rpx;
+  font-size: 24rpx;
+  color: #6b7a80;
+}

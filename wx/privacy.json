@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "store": false,
+  "setting": {
+    "url": ""
+  },
+  "desc": "山淮筑小程序收集手机号用于实名考勤管理",
+  "collect": {
+    "InfoType.PhoneNumber": "用于实名入职登记、工人信息查询及账号关联"
+  }
+}

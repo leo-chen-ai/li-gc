@@ -1,6 +1,7 @@
 const { resolveAssetUrl } = require("../config/api.js");
 const { uploadConstructionFile } = require("./construction-api.js");
 const { provinces, nativePlaceParts } = require("./china-regions.js");
+const regions3Level = require("./china-regions-3level.js");
 
 function buildDefaultForm(fields, record = {}, overrides = {}) {
   return fields.reduce((form, field) => {
@@ -35,6 +36,7 @@ function buildFormFields(fields, form, lookups = {}) {
         placeholder: field.placeholder || "请输入",
         inputType: field.valueType === "number" ? "number" : "text",
         ...(field.control === "nativePlace" ? buildNativePlaceField(value) : null),
+        ...(field.control === "region" ? buildRegionField(field, form) : null),
       };
     });
 }
@@ -50,6 +52,63 @@ function buildNativePlaceField(value) {
     nativeCityNames: cities.map((item) => item.name),
     nativeCityIndex: city ? cities.indexOf(city) : 0,
     nativeCityLabel: city ? city.name : "",
+  };
+}
+
+// 注册区域省/市/区县三级 picker 渲染数据；存储值为 6 位区划码
+function buildRegionField(field, form) {
+  const nameKey = field.regionNameKey || "address_code_list";
+  const code = String(form[field.key] || "").trim();
+  const namePath = String(form[nameKey] || "").trim();
+
+  let regionProvinceIndex = -1;
+  let regionCityIndex = -1;
+  let regionDistrictIndex = -1;
+
+  if (/^\d{6}$/.test(code)) {
+    const provCode = code.slice(0, 2);
+    const cityCode = code.slice(0, 4);
+    regionProvinceIndex = regions3Level.findIndex((p) => p.code === provCode);
+    if (regionProvinceIndex >= 0) {
+      const province = regions3Level[regionProvinceIndex];
+      regionCityIndex = (province.children || []).findIndex((c) => c.code === cityCode);
+      if (regionCityIndex >= 0) {
+        const city = province.children[regionCityIndex];
+        regionDistrictIndex = (city.children || []).findIndex((d) => d.code === code);
+      }
+    }
+  } else if (namePath) {
+    const parts = namePath.split("/").filter(Boolean);
+    if (parts[0]) {
+      regionProvinceIndex = regions3Level.findIndex((p) => p.name === parts[0]);
+      if (regionProvinceIndex >= 0 && parts[1]) {
+        const province = regions3Level[regionProvinceIndex];
+        regionCityIndex = (province.children || []).findIndex((c) => c.name === parts[1]);
+        if (regionCityIndex >= 0 && parts[2]) {
+          const city = province.children[regionCityIndex];
+          regionDistrictIndex = (city.children || []).findIndex((d) => d.name === parts[2]);
+        }
+      }
+    }
+  }
+
+  const regionProvinceNames = regions3Level.map((p) => p.name);
+  const province = regionProvinceIndex >= 0 ? regions3Level[regionProvinceIndex] : null;
+  const regionCityNames = province ? (province.children || []).map((c) => c.name) : [];
+  const city = province && regionCityIndex >= 0 ? province.children[regionCityIndex] : null;
+  const regionDistrictNames = city ? (city.children || []).map((d) => d.name) : [];
+
+  return {
+    regionProvinceNames,
+    regionProvinceIndex: Math.max(0, regionProvinceIndex),
+    regionProvinceLabel: province ? province.name : "",
+    regionCityNames,
+    regionCityIndex: Math.max(0, regionCityIndex),
+    regionCityLabel: city ? city.name : "",
+    regionDistrictNames,
+    regionDistrictIndex: Math.max(0, regionDistrictIndex),
+    regionDistrictLabel: city && regionDistrictIndex >= 0 ? (city.children || [])[regionDistrictIndex]?.name || "" : "",
+    regionNamePath: namePath,
   };
 }
 
@@ -93,6 +152,10 @@ function buildPayloadFromForm(fields, form) {
 
     if (field.required && !textValue) {
       throw new Error(`请填写${field.label}`);
+    }
+
+    if (field.regionRequireDistrict && textValue && !/^\d{6}$/.test(textValue)) {
+      throw new Error(`请选择${field.label}的省、市和区县`);
     }
 
     if (!textValue) {

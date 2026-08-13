@@ -1,0 +1,93 @@
+<view class="doc-page">
+  <view class="topbar">
+    <view class="back-button" bind:tap="goBack">‹</view>
+    <view class="topbar-title">用户服务协议</view>
+    <view class="topbar-spacer"></view>
+  </view>
+
+  <scroll-view class="doc-content" scroll-y="true">
+    <view class="doc-title">山淮筑用户服务协议</view>
+    <view class="doc-meta">更新日期：2025年1月1日 ｜ 生效日期：2025年1月1日</view>
+    <view class="doc-meta">运营主体：宁波山淮科技有限公司</view>
+
+    <view class="section">
+      <view class="section-title">一、总则</view>
+      <view class="section-text">
+        欢迎您使用"山淮筑"微信小程序（以下简称"本小程序"）。本《用户服务协议》（以下简称"本协议"）是您与宁波山淮科技有限公司（以下简称"我们"或"本公司"）之间关于使用本小程序所订立的协议。请您在使用本小程序前，仔细阅读并充分理解本协议的全部内容。您使用本小程序即视为您已阅读并同意接受本协议的约束。
+      </view>
+    </view>
+
+    <view class="section">
+      <view class="section-title">二、服务内容</view>
+      <view class="section-text">本小程序为您提供以下服务：</view>
+      <view class="list-item">1. <strong>实名考勤管理</strong>：为建筑施工项目提供人员实名入场登记、考勤打卡记录、班组管理等功能；</view>
+      <view class="list-item">2. <strong>人员管理</strong>：管理人员信息、工种分配、项目授权等；</view>
+      <view class="list-item">3. <strong>考勤机联动</strong>：与人脸考勤机设备数据同步，实现自动考勤记录；</view>
+      <view class="list-item">4. <strong>项目数据查看</strong>：查看项目参建单位、工人花名册、考勤统计等报表；</view>
+      <view class="list-item">5. 我们保留随时修改、暂停或终止部分或全部服务的权利，并将以适当方式通知用户。</view>
+    </view>
+
+    <view class="section">
+      <view class="section-title">三、账号注册与管理</view>
+      <view class="list-item">1. 您的账号由项目管理员统一分配，您不得自行注册或转让账号；</view>
+      <view class="list-item">2. 您有义务妥善保管账号和密码，因账号密码泄露造成的损失由您自行承担；</view>
+      <view class="list-item">3. 您的账号仅限您本人使用，禁止以任何形式出借、出租或转让；</view>
+      <view class="list-item">4. 若发现账号被他人盗用或存在安全漏洞，请立即联系管理员处理。</view>
+    </view>
+
+    <view class="section">
+      <view class="section-title">四、用户行为规范</view>
+      <view class="section-text">您在使用本小程序时，应遵守以下规范：</view>
+      <view class="list-item">1. 遵守中华人民共和国相关法律法规；</view>
+      <view class="list-item">2. 不得利用本小程序从事任何违法违规活动；</view>
+      <view class="list-item">3. 不得对本小程序进行反向工程、反编译或反汇编；</view>
+      <view class="list-item">4. 不得恶意攻击、篡改或干扰本小程序的正常运行；</view>
+      <view class="list-item">5. 不得上传虚假信息或伪造考勤数据；</view>
+      <view class="list-item">6. 不得未经授权访问他人的账号或数据；</view>
+      <view class="list-item">7. 不得利用本小程序从事任何侵犯他人合法权益的行为。</view>
+    </view>
+
+    <view class="section">
+      <view class="section-title">五、知识产权</view>
+      <view class="section-text">
+        本小程序中的所有内容，包括但不限于文字、图片、界面设计、版面框架、数据及电子文档等均受中华人民共和国著作权法及国际版权公约的保护，其知识产权归本公司所有。未经本公司书面许可，您不得以任何形式复制、转载、修改、传播或以其他方式使用上述内容。
+      </view>
+    </view>
+
+    <view class="section">
+      <view class="section-title">六、免责声明</view>
+      <view class="list-item">1. 因不可抗力（如自然灾害、政府行为、网络故障等）导致服务中断，本公司不承担责任；</view>
+      <view class="list-item">2. 因您自身原因（如密码泄露、违规操作等）造成的损失，由您自行承担；</view>
+      <view class="list-item">3. 本小程序提供的考勤数据仅供参考，不作为任何法律纠纷的唯一证据；</view>
+      <view class="list-item">4. 因第三方服务（如网络运营商、考勤设备厂商等）故障导致的数据异常，本公司将协助排查但不承担直接责任。</view>
+    </view>
+
+    <view class="section">
+      <view class="section-title">七、协议的变更与终止</view>
+      <view class="section-text">
+        我们有权在必要时修改本协议，修改后的协议将在小程序内公布。如您继续使用本小程序，即视为您接受修改后的协议。若您不同意修改后的协议，您应立即停止使用本小程序并联系管理员注销账号。
+      </view>
+    </view>
+
+    <view class="section">
+      <view class="section-title">八、违约责任</view>
+      <view class="section-text">
+        如您违反本协议的任何条款，我们有权采取以下措施：警告、暂停或终止您的账号使用权，并要求您承担由此产生的全部损失和法律责任。
+      </view>
+    </view>
+
+    <view class="section">
+      <view class="section-title">九、法律适用与争议解决</view>
+      <view class="section-text">
+        本协议的成立、生效、履行及解释均适用中华人民共和国法律。因本协议产生的争议，双方应友好协商解决；协商不成的，任何一方均可向本公司所在地有管辖权的人民法院提起诉讼。
+      </view>
+    </view>
+
+    <view class="section">
+      <view class="section-title">十、联系方式</view>
+      <view class="section-text">如您对本协议有任何疑问，请通过以下方式联系我们：</view>
+      <view class="list-item">公司名称：宁波山淮科技有限公司</view>
+      <view class="list-item">联系电话：13777114735</view>
+    </view>
+  </scroll-view>
+</view>

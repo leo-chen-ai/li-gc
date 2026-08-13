@@ -22,6 +22,7 @@ Page({
     passwordVisible: false,
     rememberAccount: false,
     loading: false,
+    agreedToTerms: false,
     loginIllustration: assetPath("/assets/illustrations/login-attendance-bg-preview-v1.png"),
     accountIcon: assetPath("/login-user.png"),
     lockIcon: assetPath("/login-lock.png"),
@@ -102,6 +103,18 @@ Page({
     });
   },
 
+  toggleAgreement() {
+    this.setData({ agreedToTerms: !this.data.agreedToTerms });
+  },
+
+  openPrivacy() {
+    wx.navigateTo({ url: "/pages/privacy/privacy" });
+  },
+
+  openAgreement() {
+    wx.navigateTo({ url: "/pages/agreement/agreement" });
+  },
+
   async submitLogin() {
     const account = String(this.data.account || "").trim();
     const password = String(this.data.password || "");
@@ -109,6 +122,14 @@ Page({
     if (!account || !password) {
       wx.showToast({
         title: "请输入账号和密码",
+        icon: "none",
+      });
+      return;
+    }
+
+    if (!this.data.agreedToTerms) {
+      wx.showToast({
+        title: "请先阅读并同意用户服务协议和隐私政策",
         icon: "none",
       });
       return;

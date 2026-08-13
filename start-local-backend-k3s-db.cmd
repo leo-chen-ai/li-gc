@@ -38,6 +38,7 @@ if not exist "%USERPROFILE%\.ssh\shanhuai_k3s_deploy_ed25519" (
 
 set "BASH_EXE=%LOCALAPPDATA%\Programs\GrowthClawTools\Git\bin\bash.exe"
 if not exist "%BASH_EXE%" set "BASH_EXE=C:\Program Files\Git\bin\bash.exe"
+if not exist "%BASH_EXE%" set "BASH_EXE=D:\Git\bin\bash.exe"
 if not exist "%BASH_EXE%" (
   echo [ERROR] Git Bash was not found.
   echo         Install Git for Windows or check the bundled GrowthClawTools Git.

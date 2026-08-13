@@ -8,7 +8,9 @@
     "pages/workers/workers",
     "pages/companies/companies",
     "pages/attendance/attendance",
-    "pages/device/device"
+    "pages/device/device",
+    "pages/privacy/privacy",
+    "pages/agreement/agreement"
   ],
   "window": {
     "navigationStyle": "custom",
@@ -17,5 +19,6 @@
   },
   "style": "v2",
   "sitemapLocation": "sitemap.json",
-  "lazyCodeLoading": "requiredComponents"
+  "lazyCodeLoading": "requiredComponents",
+  "__usePrivacyCheck__": true
 }
