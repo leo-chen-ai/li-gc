@@ -47,6 +47,7 @@ import type {
   ConstructionAttendanceDeviceIssueWorkersSummary,
   ConstructionAttendanceDevicePayload,
 } from "@/features/projects/types/construction-types";
+import { useAuthUser } from "@/stores/use-auth-store";
 
 const DEVICE_PAGE_SIZE = 10;
 
@@ -84,6 +85,8 @@ const defaultFormState: DeviceFormState = {
 };
 
 export function AttendanceDeviceBindingsPage() {
+  const authUser = useAuthUser();
+  const isAdmin = authUser?.role === "admin";
   const projectsQuery = useProjectOptionsQuery();
   const projects = projectsQuery.data ?? [];
   const [selectedProjectId, setSelectedProjectId] = useState("");
@@ -275,14 +278,16 @@ export function AttendanceDeviceBindingsPage() {
             <CompactStat label="本页通用" value={genericCount} helper="方向为通用" accent="blue" />
           </div>
 
-          <Button
-            className="h-9 gap-2 justify-self-start bg-[#0f6b5d] text-white hover:bg-[#0b5148] lg:justify-self-end"
-            onClick={openCreateDialog}
-            disabled={projects.length === 0}
-          >
-            <Plus className="size-4" />
-            新增绑定
-          </Button>
+          {isAdmin ? (
+            <Button
+              className="h-9 gap-2 justify-self-start bg-[#0f6b5d] text-white hover:bg-[#0b5148] lg:justify-self-end"
+              onClick={openCreateDialog}
+              disabled={projects.length === 0}
+            >
+              <Plus className="size-4" />
+              新增绑定
+            </Button>
+          ) : null}
         </div>
 
         <div className="flex flex-wrap items-end gap-3 bg-[#f8faf9] px-5 py-3 dark:bg-muted/30">
@@ -450,26 +455,30 @@ export function AttendanceDeviceBindingsPage() {
                           </Button>
                         </>
                       ) : null}
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="gap-1 text-slate-600 hover:bg-slate-50 dark:text-muted-foreground dark:hover:bg-muted/40"
-                        onClick={() => openEditDialog(device)}
-                      >
-                        <Pencil className="size-4" />
-                        编辑
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="gap-1 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/30"
-                        onClick={() => setDevicePendingDelete(device)}
-                      >
-                        <Trash2 className="size-4" />
-                        删除
-                      </Button>
+                      {isAdmin ? (
+                        <>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="gap-1 text-slate-600 hover:bg-slate-50 dark:text-muted-foreground dark:hover:bg-muted/40"
+                            onClick={() => openEditDialog(device)}
+                          >
+                            <Pencil className="size-4" />
+                            编辑
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="gap-1 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/30"
+                            onClick={() => setDevicePendingDelete(device)}
+                          >
+                            <Trash2 className="size-4" />
+                            删除
+                          </Button>
+                        </>
+                      ) : null}
                     </div>
                   </TableCell>
                 </TableRow>

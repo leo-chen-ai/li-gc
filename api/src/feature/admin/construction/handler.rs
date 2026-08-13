@@ -4167,6 +4167,16 @@ fn ensure_system_admin(auth_user: &AuthUser) -> Result<(), ApiError> {
     }
 }
 
+fn ensure_attendance_device_admin(auth_user: &AuthUser) -> Result<(), ApiError> {
+    if auth_user.roles.contains(&Role::Admin) {
+        Ok(())
+    } else {
+        Err(ApiError::default()
+            .with_code(StatusCode::FORBIDDEN)
+            .with_message("仅系统管理员可新增、编辑或删除考勤机绑定"))
+    }
+}
+
 pub async fn preview_yongxin_attendance_reporting(
     State(state): State<AppState>,
     Extension(auth_user): Extension<AuthUser>,
@@ -7901,6 +7911,7 @@ pub async fn create_attendance_device(
     Path(project_id): Path<Uuid>,
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
+    ensure_attendance_device_admin(&auth_user)?;
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     create_row(
         state.db.pool(),
@@ -7919,6 +7930,7 @@ pub async fn update_attendance_device(
     Path((project_id, device_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
+    ensure_attendance_device_admin(&auth_user)?;
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     let updated = update_row(
         state.db.pool(),
@@ -7958,6 +7970,7 @@ pub async fn delete_attendance_device(
     Extension(auth_user): Extension<AuthUser>,
     Path((project_id, device_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<()> {
+    ensure_attendance_device_admin(&auth_user)?;
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     ensure_attendance_device_in_project(state.db.pool(), project_id, device_id).await?;
     sqlx::query(
