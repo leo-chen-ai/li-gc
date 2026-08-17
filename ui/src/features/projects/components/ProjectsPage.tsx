@@ -1,13 +1,11 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
-  CalendarDays,
   ChevronRight,
-  Pencil,
   MapPin,
+  Pencil,
   Plus,
   Search,
   Trash2,
-  Users,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -240,16 +238,16 @@ export function ProjectsPage() {
       </section>
 
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-border dark:bg-card">
-        <Table className="min-w-[1380px]">
+        <Table className="min-w-[1280px]">
           <TableHeader>
             <TableRow className="bg-[#f8faf9] hover:bg-[#f8faf9] dark:bg-muted/30 dark:hover:bg-muted/30">
-              <TableHead className="w-[430px] px-5 text-slate-500 dark:text-muted-foreground">项目名称</TableHead>
-              <TableHead className="text-slate-500 dark:text-muted-foreground">所在地</TableHead>
+              <TableHead className="w-[110px] text-slate-500 dark:text-muted-foreground">创建时间</TableHead>
+              <TableHead className="w-[280px] px-5 text-slate-500 dark:text-muted-foreground">项目名称</TableHead>
+              <TableHead className="w-[110px] text-slate-500 dark:text-muted-foreground">开工日期</TableHead>
               <TableHead>状态</TableHead>
-              <TableHead className="text-slate-500 dark:text-muted-foreground">建设 / 总包</TableHead>
-              <TableHead className="text-slate-500 dark:text-muted-foreground">项目经理</TableHead>
-              <TableHead className="text-slate-500 dark:text-muted-foreground">人员班组</TableHead>
-              <TableHead className="text-slate-500 dark:text-muted-foreground">今日考勤</TableHead>
+              <TableHead className="w-[80px] text-right text-slate-500 dark:text-muted-foreground">人数</TableHead>
+              <TableHead className="text-slate-500 dark:text-muted-foreground">项目所在地</TableHead>
+              <TableHead className="text-slate-500 dark:text-muted-foreground">总包单位</TableHead>
               <TableHead className="text-right">操作</TableHead>
             </TableRow>
           </TableHeader>
@@ -261,6 +259,9 @@ export function ProjectsPage() {
                 className="cursor-pointer hover:bg-[#f8faf9]/70 dark:hover:bg-muted/30"
                 onDoubleClick={() => handleOpenProject(project.id)}
               >
+                <TableCell className="py-4 text-xs text-slate-500 dark:text-muted-foreground">
+                  {project.createdAt ? project.createdAt.slice(0, 10) : "—"}
+                </TableCell>
                 <TableCell className="px-5 py-4">
                   <div className="w-[390px] space-y-1">
                     <Link
@@ -275,10 +276,6 @@ export function ProjectsPage() {
                       <Badge variant="outline" className="rounded-md border-slate-200 bg-white text-slate-500 dark:border-border dark:bg-background dark:text-muted-foreground">
                         {project.code}
                       </Badge>
-                      <CalendarDays className="size-3.5" />
-                      <span>{project.startDate}</span>
-                      <span>至</span>
-                      <span>{project.finishDate}</span>
                     </div>
                     {isAdmin ? (
                       <div className="grid grid-cols-[auto_1fr] items-start gap-2 border-t border-slate-100 pt-1.5 dark:border-border">
@@ -288,39 +285,24 @@ export function ProjectsPage() {
                     ) : null}
                   </div>
                 </TableCell>
+                <TableCell className="py-4 text-sm text-slate-700 dark:text-foreground">
+                  {project.startDate || "—"}
+                </TableCell>
+                <TableCell>
+                  <ProjectStatusBadge value={project.status} />
+                </TableCell>
+                <TableCell className="py-4 text-right">
+                  <span className="font-medium text-slate-900 dark:text-foreground">{project.workerCount}</span>
+                  <span className="text-xs text-slate-400 dark:text-muted-foreground"> 人</span>
+                </TableCell>
                 <TableCell className="py-4">
                   <div className="flex max-w-[190px] items-center gap-1.5 text-sm">
                     <MapPin className="size-3.5 shrink-0 text-slate-400 dark:text-muted-foreground" />
                     <span className="truncate">{project.location}</span>
                   </div>
                 </TableCell>
-                <TableCell>
-                  <ProjectStatusBadge value={project.status} />
-                </TableCell>
-                <TableCell>
-                  <div className="max-w-[220px] truncate text-sm">{project.buildUnit}</div>
-                  <div className="mt-1 max-w-[220px] truncate text-xs text-slate-500 dark:text-muted-foreground">
-                    {project.contractor}
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <div className="text-sm font-medium text-slate-800 dark:text-foreground">{project.manager}</div>
-                  <div className="mt-1 text-xs text-slate-500 dark:text-muted-foreground">{project.managerPhone}</div>
-                </TableCell>
-                <TableCell>
-                  <div className="inline-flex items-center gap-1.5 text-sm">
-                    <Users className="size-3.5 text-slate-400 dark:text-muted-foreground" />
-                    {project.workerCount} 人
-                  </div>
-                  <div className="mt-1 text-xs text-slate-500 dark:text-muted-foreground">{project.teamCount} 个班组</div>
-                </TableCell>
-                <TableCell>
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-slate-900 dark:text-foreground">{project.attendanceToday}</span>
-                    <Badge variant="outline" className="rounded-md border-slate-200 bg-white dark:border-border dark:bg-background">
-                      {project.attendanceRate}%
-                    </Badge>
-                  </div>
+                <TableCell className="py-4">
+                  <div className="max-w-[180px] truncate text-sm">{project.contractor}</div>
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-1">
@@ -529,6 +511,7 @@ function apiProjectToRow(project: ConstructionProject): ProjectRow {
     unitCount: project.unit_count ?? 0,
     attendanceToday: project.attendance_today ?? 0,
     attendanceRate: project.attendance_rate ?? 0,
+    createdAt: project.created_at ?? "",
     progress: 0,
     risk: "正常",
     realNameManager: project.real_name_manager ?? "未填写",

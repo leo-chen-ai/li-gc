@@ -1,6 +1,7 @@
-import { useMemo, useState, type ReactNode } from "react";
-import { CalendarClock, ChevronLeft, Database, Eye, Loader2, Sparkles, Users } from "lucide-react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
+import { CalendarClock, ChevronLeft, Database, Download, Eye, Loader2, Sparkles, Upload, Users } from "lucide-react";
 import { toast } from "sonner";
+import * as XLSX from "xlsx";
 
 import { StructuredWorkerSelect } from "@/components/StructuredWorkerSelect";
 import { Button } from "@/components/ui/button";
@@ -11,7 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { cn } from "@/lib/utils";
 import type { Worker } from "../data/mock-projects";
 import { constructionProjectService } from "../services/construction-project-service";
-import type { AttendanceGeneratorPreviewRequest, AttendanceGeneratorPreviewResponse } from "../types/construction-types";
+import type { AttendanceGeneratorPreviewRequest, AttendanceGeneratorPreviewResponse, GeneratedAttendancePreviewRecord } from "../types/construction-types";
 
 const currentMonth = () => {
   const date = new Date();
@@ -37,17 +38,20 @@ const DEFAULT_FORM: Omit<AttendanceGeneratorPreviewRequest, "worker_ids"> = {
 type Props = {
   open: boolean;
   projectId: string;
+  projectName?: string;
   workers: Worker[];
   onOpenChange: (open: boolean) => void;
   onCommitted: () => void;
 };
 
-export function AttendanceGeneratorDialog({ open, projectId, workers, onOpenChange, onCommitted }: Props) {
+export function AttendanceGeneratorDialog({ open, projectId, projectName, workers, onOpenChange, onCommitted }: Props) {
   const [workerIds, setWorkerIds] = useState<string[]>([]);
   const [form, setForm] = useState(DEFAULT_FORM);
   const [preview, setPreview] = useState<AttendanceGeneratorPreviewResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [committing, setCommitting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const activeWorkers = useMemo(() => workers.filter((worker) => worker.status === "在场"), [workers]);
   const workerOptions = useMemo(() => activeWorkers.map((worker) => ({
     id: worker.id,
@@ -56,6 +60,13 @@ export function AttendanceGeneratorDialog({ open, projectId, workers, onOpenChan
     teamName: worker.team,
     description: [worker.workType, worker.workerType].filter(Boolean).join(" · "),
   })), [activeWorkers]);
+  const workerByIdCard = useMemo(() => {
+    const map = new Map<string, Worker>();
+    for (const worker of workers) {
+      if (worker.idCard) map.set(worker.idCard, worker);
+    }
+    return map;
+  }, [workers]);
 
   const patchForm = (patch: Partial<typeof form>) => {
     setForm((current) => ({ ...current, ...patch }));
@@ -94,6 +105,76 @@ export function AttendanceGeneratorDialog({ open, projectId, workers, onOpenChan
       toast.error(error instanceof Error ? error.message : "写入考勤记录失败");
     } finally {
       setCommitting(false);
+    }
+  };
+
+  const exportPreview = () => {
+    if (!preview?.records.length) return toast.info("当前没有可导出的预览数据");
+    const workerById = new Map(workers.map((w) => [w.id, w]));
+    const header = ["项目基本信息", "工人名字", "工人身份证", "考勤时间（yyyy-mm-dd hh:mm:ss）", "进出方向（“进”或“出”）"];
+    const rows = preview.records.map((record) => {
+      const worker = workerById.get(record.worker_id);
+      return [
+        projectName ?? projectId,
+        record.worker_name ?? "",
+        worker?.idCard ?? "",
+        formatExportDateTime(record.trigger_time),
+        record.direction === 0 ? "进" : "出",
+      ];
+    });
+    const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
+    ws["!cols"] = [{ wch: 30 }, { wch: 16 }, { wch: 22 }, { wch: 30 }, { wch: 14 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Sheet2");
+    const fileName = `考勤预览_${projectName ?? projectId}_${formatDateForFile(new Date())}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+    toast.success(`已导出 ${preview.records.length} 条预览数据`);
+  };
+
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      if (!ws) throw new Error("Excel 文件中没有工作表");
+      const data: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false });
+      if (data.length < 2) throw new Error("Excel 文件没有数据行");
+      const records: GeneratedAttendancePreviewRecord[] = [];
+      let skipped = 0;
+      for (let i = 1; i < data.length; i++) {
+        const row = data[i];
+        const workerName = String(row[1] ?? "").trim();
+        const idCard = String(row[2] ?? "").trim();
+        const timeStr = String(row[3] ?? "").trim();
+        const dirStr = String(row[4] ?? "").trim();
+        if (!workerName && !idCard && !timeStr) { skipped++; continue; }
+        const worker = workerByIdCard.get(idCard) ?? workers.find((w) => w.name === workerName && w.idCard === idCard);
+        if (!worker) { skipped++; continue; }
+        const direction: 0 | 1 = dirStr === "进" ? 0 : dirStr === "出" ? 1 : (() => { throw new Error(`第 ${i + 1} 行进出方向必须是"进"或"出"`); })();
+        records.push({
+          worker_id: worker.id,
+          worker_name: worker.name,
+          team_name: worker.team,
+          direction,
+          trigger_time: parseImportDateTime(timeStr),
+        });
+      }
+      if (records.length === 0) throw new Error("没有可导入的有效记录，请检查身份证号是否与工人信息匹配");
+      const uniqueWorkerIds = new Set(records.map((r) => r.worker_id));
+      setPreview({
+        record_count: records.length,
+        worker_count: uniqueWorkerIds.size,
+        records,
+      });
+      toast.success(`已导入 ${records.length} 条记录${skipped > 0 ? `（跳过 ${skipped} 条无效行）` : ""}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "导入文件失败");
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
@@ -140,7 +221,7 @@ export function AttendanceGeneratorDialog({ open, projectId, workers, onOpenChan
           ) : (
             <div className="space-y-4">
               <div className="grid gap-3 sm:grid-cols-3"><Summary icon={UsersIcon} label="生成人员" value={`${preview.worker_count} 人`} /><Summary icon={CalendarClock} label="打卡记录" value={`${preview.record_count} 条`} /><Summary icon={Database} label="数据标记" value="生成数据" /></div>
-              <div className="flex items-center justify-between"><div><h3 className="font-semibold">生成结果预览</h3><p className="text-xs text-muted-foreground">请核对人员、班组、进出方向和时间；当前仅预览，尚未写入数据库。</p></div><Button variant="outline" size="sm" onClick={() => setPreview(null)}><ChevronLeft className="mr-1 size-4" />返回修改</Button></div>
+              <div className="flex items-center justify-between"><div><h3 className="font-semibold">生成结果预览</h3><p className="text-xs text-muted-foreground">请核对人员、班组、进出方向和时间；当前仅预览，尚未写入数据库。</p></div><div className="flex gap-2"><Button variant="outline" size="sm" onClick={exportPreview}><Download className="mr-1 size-4" />导出预览数据</Button><Button variant="outline" size="sm" onClick={() => setPreview(null)}><ChevronLeft className="mr-1 size-4" />返回修改</Button></div></div>
               {preview.records.length > 500 ? <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">记录较多，表格先展示前 500 条；确认写入时仍会写入全部 {preview.record_count} 条。</div> : null}
               <div className="max-h-[480px] overflow-auto rounded-lg border">
                 <Table><TableHeader className="sticky top-0 bg-slate-50 dark:bg-muted"><TableRow><TableHead>人员</TableHead><TableHead>班组</TableHead><TableHead>方向</TableHead><TableHead>考勤时间</TableHead><TableHead>来源</TableHead></TableRow></TableHeader><TableBody>{preview.records.slice(0, 500).map((record, index) => <TableRow key={`${record.worker_id}-${record.trigger_time}-${index}`}><TableCell className="font-medium">{record.worker_name}</TableCell><TableCell>{record.team_name || "未分配班组"}</TableCell><TableCell><span className={cn("rounded-full px-2 py-1 text-xs font-semibold", record.direction === 0 ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700")}>{record.direction === 0 ? "进场" : "出场"}</span></TableCell><TableCell>{formatDateTime(record.trigger_time)}</TableCell><TableCell><span className="rounded border border-violet-200 bg-violet-50 px-2 py-1 text-xs text-violet-700">生成工具</span></TableCell></TableRow>)}</TableBody></Table>
@@ -150,8 +231,14 @@ export function AttendanceGeneratorDialog({ open, projectId, workers, onOpenChan
         </div>
 
         <DialogFooter className="border-t bg-slate-50 px-6 py-4 dark:bg-muted/20">
-          <Button variant="outline" disabled={loading || committing} onClick={() => changeOpen(false)}>取消</Button>
-          {!preview ? <Button className="bg-[#0f6b5d] text-white hover:bg-[#0b5148]" disabled={loading || workerIds.length === 0} onClick={() => void createPreview()}>{loading ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Eye className="mr-2 size-4" />}生成并预览</Button> : <Button className="bg-[#0f6b5d] text-white hover:bg-[#0b5148]" disabled={committing} onClick={() => void commit()}>{committing ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Database className="mr-2 size-4" />}确认写入 {preview.record_count} 条</Button>}
+          <Button variant="outline" disabled={loading || committing || importing} onClick={() => changeOpen(false)}>取消</Button>
+          {!preview ? (
+            <div className="flex items-center gap-2">
+              <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => void handleFileSelect(e)} />
+              <Button variant="outline" disabled={loading || importing || workers.length === 0} onClick={() => fileInputRef.current?.click()}>{importing ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Upload className="mr-2 size-4" />}导入并生成预览</Button>
+              <Button className="bg-[#0f6b5d] text-white hover:bg-[#0b5148]" disabled={loading || workerIds.length === 0} onClick={() => void createPreview()}>{loading ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Eye className="mr-2 size-4" />}生成并预览</Button>
+            </div>
+          ) : <Button className="bg-[#0f6b5d] text-white hover:bg-[#0b5148]" disabled={committing} onClick={() => void commit()}>{committing ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Database className="mr-2 size-4" />}确认写入 {preview.record_count} 条</Button>}
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -164,3 +251,27 @@ function CheckOption({ label, checked, disabled, onChange }: { label: string; ch
 function Summary({ icon: Icon, label, value }: { icon: typeof CalendarClock; label: string; value: string }) { return <div className="flex items-center gap-3 rounded-xl border bg-slate-50 p-4 dark:bg-muted/20"><span className="flex size-9 items-center justify-center rounded-lg bg-emerald-100 text-[#0f6b5d] dark:bg-emerald-950"><Icon className="size-5" /></span><div><div className="text-xs text-muted-foreground">{label}</div><div className="font-semibold">{value}</div></div></div>; }
 const UsersIcon = Users;
 function formatDateTime(value: string) { return new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date(value)); }
+
+function formatExportDateTime(rfc3339: string): string {
+  const d = new Date(rfc3339);
+  if (isNaN(d.getTime())) return rfc3339;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const beijing = new Date(d.getTime() + 8 * 3600 * 1000);
+  return `${beijing.getUTCFullYear()}-${pad(beijing.getUTCMonth() + 1)}-${pad(beijing.getUTCDate())} ${pad(beijing.getUTCHours())}:${pad(beijing.getUTCMinutes())}:${pad(beijing.getUTCSeconds())}`;
+}
+
+function parseImportDateTime(value: string): string {
+  const trimmed = value.trim().replace(/[年月日]/g, (m) => m === "年" || m === "月" ? "-" : " ").replace(/\//g, "-");
+  const m = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})[\sT]+(\d{2}):(\d{2}):(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}+08:00`;
+  const m2 = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})[\sT]+(\d{2}):(\d{2})/);
+  if (m2) return `${m2[1]}-${m2[2]}-${m2[3]}T${m2[4]}:${m2[5]}:00+08:00`;
+  const d = new Date(trimmed);
+  if (!isNaN(d.getTime())) return d.toISOString();
+  throw new Error(`无法解析时间: ${value}`);
+}
+
+function formatDateForFile(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}`;
+}

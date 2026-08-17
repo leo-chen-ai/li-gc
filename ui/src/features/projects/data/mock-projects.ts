@@ -30,6 +30,7 @@ export type Project = {
   workPermit: string;
   area: string;
   coordinates: string;
+  createdAt?: string;
 };
 
 export type ConstructionUnit = {

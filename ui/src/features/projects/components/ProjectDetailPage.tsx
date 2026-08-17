@@ -560,12 +560,12 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     () => (projectQuery.data ? apiProjectToDetail(projectQuery.data) : null),
     [projectQuery.data]
   );
+  const projectName = projectQuery.data?.name?.trim() ?? "";
 
   useEffect(() => {
-    const projectName = projectQuery.data?.name?.trim();
     if (!projectName) return;
     updateAdminWindowTitle(`/app/admin/projects/${projectId}`, projectName);
-  }, [projectId, projectQuery.data?.name]);
+  }, [projectId, projectName]);
   const tableRawUnits = useMemo(() => unitQuery.data?.items ?? [], [unitQuery.data]);
   const tableRawTeams = useMemo(() => teamQuery.data?.items ?? [], [teamQuery.data]);
   const tableRawWorkers = useMemo(() => workerQuery.data?.items ?? [], [workerQuery.data]);
@@ -1483,6 +1483,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       <AttendanceGeneratorDialog
         open={attendanceGeneratorOpen}
         projectId={projectId}
+        projectName={projectName}
         workers={projectWorkers}
         onOpenChange={setAttendanceGeneratorOpen}
         onCommitted={() => {
