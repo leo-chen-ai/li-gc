@@ -7473,35 +7473,63 @@ worker_days AS (
     FROM daily_with_work_point
     GROUP BY worker_id
 )
-SELECT COALESCE(
-    jsonb_agg(
-        jsonb_build_object(
-            'worker_id', worker_id,
-            'worker_name', worker_name,
-            'team_id', team_id,
-            'team_name', team_name,
-            'total_working_hours', total_working_hours,
-            'total_work_point', total_work_point,
-            'days', days
-        )
-        ORDER BY worker_name
-    ),
-    '[]'::jsonb
-)
-FROM worker_days
+SELECT
+    COALESCE(
+        (
+            SELECT jsonb_agg(
+                jsonb_build_object(
+                    'worker_id', worker_id,
+                    'worker_name', worker_name,
+                    'team_id', team_id,
+                    'team_name', team_name,
+                    'total_working_hours', total_working_hours,
+                    'total_work_point', total_work_point,
+                    'days', days
+                )
+                ORDER BY worker_name
+            )
+            FROM (
+                SELECT *
+                FROM worker_days
+                ORDER BY worker_name
+                LIMIT
+        "#,
+    );
+
+    let offset = (params.page - 1) * params.page_size;
+
+    #[derive(sqlx::FromRow)]
+    struct AttendanceCalendarPage {
+        items: Value,
+        total: i64,
+    }
+
+    query.push_bind(params.page_size);
+    query.push(" OFFSET ");
+    query.push_bind(offset);
+    query.push(
+        r#"
+            ) paginated
+        ),
+        '[]'::jsonb
+    ) AS items,
+    (SELECT COUNT(*) FROM worker_days) AS total
 "#,
     );
 
-    let items = query
-        .build_query_scalar::<Value>()
+    let result = query
+        .build_query_as::<AttendanceCalendarPage>()
         .fetch_one(pool)
         .await
         .map_err(db_error)?;
 
     Ok(ApiSuccess::default().with_data(serde_json::json!({
-        "items": items,
+        "items": result.items,
+        "total": result.total,
         "month": month.format("%Y-%m").to_string(),
         "view": "calendar",
+        "page": params.page,
+        "page_size": params.page_size,
     })))
 }
 

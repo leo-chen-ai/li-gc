@@ -322,6 +322,9 @@ export type ConstructionAttendanceCalendarResponse = {
   items: ConstructionAttendanceCalendarRow[];
   month: string;
   view: "calendar";
+  total: number;
+  page: number;
+  page_size: number;
 };
 
 export type AttendanceGeneratorPreviewRequest = {

@@ -466,15 +466,23 @@ export function useProjectAttendanceQuery(
 export function useProjectAttendanceCalendarQuery(
   projectId: string,
   month: string,
+  page: number = 1,
+  pageSize: number = 10,
   filters?: ConstructionResourceListFilters
 ) {
   return useQuery({
-    queryKey: constructionProjectKeys.attendanceCalendar(projectId, month, filters),
+    queryKey: constructionProjectKeys.attendanceCalendar(projectId, month, {
+      ...filters,
+      page,
+      page_size: pageSize,
+    }),
     queryFn: () =>
       constructionProjectService.getAttendanceCalendar(projectId, {
         ...filters,
         view: "calendar",
         month,
+        page,
+        page_size: pageSize,
       }),
     enabled: canQueryProject(projectId),
   });

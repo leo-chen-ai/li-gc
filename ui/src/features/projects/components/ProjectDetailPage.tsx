@@ -394,6 +394,8 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const [attendancePageSize, setAttendancePageSize] = useState<(typeof PROJECT_PAGE_SIZE_OPTIONS)[number]>(DEFAULT_PROJECT_TABLE_PAGE_SIZE);
   const [attendanceViewMode, setAttendanceViewMode] = useState<AttendanceViewMode>("calendar");
   const [attendanceCalendarMonth, setAttendanceCalendarMonth] = useState(currentPayrollMonth());
+  const [attendanceCalendarPage, setAttendanceCalendarPage] = useState(1);
+  const [attendanceCalendarPageSize, setAttendanceCalendarPageSize] = useState(20);
   const [workerTreeSelection, setWorkerTreeSelection] = useState<WorkerTreeSelection>({ kind: "all" });
   const [reissuingWorkerId, setReissuingWorkerId] = useState<string | null>(null);
   const [issueDetailWorker, setIssueDetailWorker] = useState<Worker | null>(null);
@@ -515,6 +517,8 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     appliedAttendanceFilters.attendanceDate
       ? appliedAttendanceFilters.attendanceDate.slice(0, 7)
       : attendanceCalendarMonth,
+    attendanceCalendarPage,
+    attendanceCalendarPageSize,
     attendanceCalendarFilters
   );
   const [wageFilters, setWageFilters] = useState<WageFilters>({
@@ -1223,6 +1227,11 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     }
   };
 
+  // Reset calendar page when month or filters change
+  useEffect(() => {
+    setAttendanceCalendarPage(1);
+  }, [attendanceCalendarMonth, appliedAttendanceFilters.attendanceDate, appliedAttendanceFilters.direction, appliedAttendanceFilters.keyword]);
+
   if (!project || !projectMetrics) {
     return (
       <div className="space-y-5 text-slate-950 dark:text-foreground">
@@ -1462,6 +1471,13 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                 total: attendanceQuery.data?.total ?? 0,
                 onPageChange: setAttendancePage,
                 onPageSizeChange: (s) => { setAttendancePageSize(s as (typeof PROJECT_PAGE_SIZE_OPTIONS)[number]); setAttendancePage(1); },
+              }}
+              calendarPagination={{
+                page: attendanceCalendarPage,
+                pageSize: attendanceCalendarPageSize,
+                total: attendanceCalendarQuery.data?.total ?? 0,
+                onPageChange: setAttendanceCalendarPage,
+                onPageSizeChange: (s) => { setAttendanceCalendarPageSize(s); setAttendanceCalendarPage(1); },
               }}
             />
           )}
@@ -3830,6 +3846,7 @@ function AttendanceTab({
   calendarMonth,
   onCalendarMonthChange,
   pagination,
+  calendarPagination,
 }: {
   records: AttendanceRecord[];
   calendarRows: AttendanceCalendarRow[];
@@ -3838,6 +3855,13 @@ function AttendanceTab({
   calendarMonth: string;
   onCalendarMonthChange: (month: string) => void;
   pagination: TablePaginationConfig;
+  calendarPagination: {
+    total: number;
+    page: number;
+    pageSize: number;
+    onPageChange: (page: number) => void;
+    onPageSizeChange: (pageSize: number) => void;
+  };
 }) {
   const dayCount = getAttendanceMonthDays(calendarMonth);
 
@@ -3907,7 +3931,16 @@ function AttendanceTab({
           pagination={pagination}
         />
       ) : (
-        <AttendanceCalendarTable rows={calendarRows} dayCount={dayCount} />
+        <AttendanceCalendarTable
+          key={calendarMonth}
+          rows={calendarRows}
+          dayCount={dayCount}
+          total={calendarPagination.total}
+          page={calendarPagination.page}
+          pageSize={calendarPagination.pageSize}
+          onPageChange={calendarPagination.onPageChange}
+          onPageSizeChange={calendarPagination.onPageSizeChange}
+        />
       )}
     </div>
   );
@@ -4002,106 +4035,213 @@ function AttendanceDirectionBadge({ direction }: { direction: AttendanceRecord["
 function AttendanceCalendarTable({
   rows,
   dayCount,
+  total,
+  page,
+  pageSize,
+  onPageChange,
+  onPageSizeChange,
 }: {
   rows: AttendanceCalendarRow[];
   dayCount: number;
+  total: number;
+  page: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
 }) {
   const days = Array.from({ length: dayCount }, (_, index) => index + 1);
+
+  const leftColumns = [
+    { key: "worker", width: 96, label: "工人" },
+    { key: "team", width: 120, label: "班组名称" },
+    { key: "workType", width: 86, label: "工种" },
+    { key: "workerType", width: 86, label: "工人类型" },
+    { key: "attendanceDays", width: 72, label: "考勤天数" },
+    { key: "workingHours", width: 72, label: "工时" },
+    { key: "workPoint", width: 72, label: "记工" },
+  ] as const;
+
+  const totalRowPages = Math.max(1, Math.ceil(total / pageSize));
+  const currentRowPage = Math.min(page, totalRowPages);
+
+  const handlePrevRowPage = () => onPageChange(Math.max(1, page - 1));
+  const handleNextRowPage = () => onPageChange(Math.min(totalRowPages, page + 1));
+
+  const getStickyLeft = (index: number) => {
+    let left = 0;
+    for (let i = 0; i < index; i++) {
+      left += leftColumns[i].width;
+    }
+    return left;
+  };
+
+  const stickyHeaderClass = "bg-[#f8faf9] dark:bg-muted/30 border-r border-slate-200 dark:border-border";
+  const stickyCellClass = "bg-white dark:bg-background border-r border-slate-200 dark:border-border";
+  const dayCellClass = "border-r border-slate-200 dark:border-border";
 
   return (
     <div className="max-w-full overflow-hidden rounded-lg border border-slate-200 dark:border-border">
       <div className="max-w-full overflow-x-auto">
-        <Table className="min-w-[1680px] table-fixed text-[11px]">
-        <colgroup>
-          <col className="w-[96px]" />
-          <col className="w-[120px]" />
-          <col className="w-[86px]" />
-          <col className="w-[86px]" />
-          <col className="w-[72px]" />
-          <col className="w-[72px]" />
-          <col className="w-[72px]" />
-          {days.map((day) => (
-            <col key={day} className="w-[36px]" />
-          ))}
-        </colgroup>
-        <TableHeader className="bg-[#f8faf9] dark:bg-muted/30">
-          <TableRow>
-            <TableHead className="px-1 text-xs">工人</TableHead>
-            <TableHead className="px-1 text-xs">班组名称</TableHead>
-            <TableHead className="px-1 text-xs">工种</TableHead>
-            <TableHead className="px-1 text-xs">工人类型</TableHead>
-            <TableHead className="px-1 text-center text-[10px]">考勤天数</TableHead>
-            <TableHead className="px-1 text-center text-[10px]">工时</TableHead>
-            <TableHead className="px-1 text-center text-[10px]">记工</TableHead>
+        <Table className="min-w-[3084px] table-fixed text-[11px]">
+          <colgroup>
+            <col className="w-[96px]" />
+            <col className="w-[120px]" />
+            <col className="w-[86px]" />
+            <col className="w-[86px]" />
+            <col className="w-[72px]" />
+            <col className="w-[72px]" />
+            <col className="w-[72px]" />
             {days.map((day) => (
-              <TableHead key={day} className="px-0.5 text-center text-[10px]">
-                {day}
-              </TableHead>
+              <col key={day} className="w-[80px]" />
             ))}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.length === 0 ? (
+          </colgroup>
+          <TableHeader className="bg-[#f8faf9] dark:bg-muted/30">
             <TableRow>
-              <TableCell colSpan={dayCount + 7} className="h-24 text-center text-sm text-muted-foreground">
-                暂无月度考勤
-              </TableCell>
+              {leftColumns.map((col, index) => (
+                <TableHead
+                  key={col.key}
+                  className={cn("px-1 text-xs", stickyHeaderClass)}
+                  style={{ position: "sticky", left: getStickyLeft(index), zIndex: 20 }}
+                >
+                  {col.label}
+                </TableHead>
+              ))}
+              {days.map((day) => (
+                <TableHead key={day} className={cn("px-0.5 text-center text-[10px]", dayCellClass)}>
+                  {day}
+                </TableHead>
+              ))}
             </TableRow>
-          ) : (
-            rows.map((row) => (
-              <TableRow key={row.workerId ?? `${row.worker}-${row.team}`}>
-                <TableCell className="truncate px-1 font-medium" title={row.worker}>
-                  {row.worker}
+          </TableHeader>
+          <TableBody>
+            {rows.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={dayCount + 7} className="h-24 text-center text-sm text-muted-foreground">
+                  暂无月度考勤
                 </TableCell>
-                <TableCell className="truncate px-1 text-slate-500 dark:text-muted-foreground" title={row.team}>
-                  {row.team}
-                </TableCell>
-                <TableCell className="truncate px-1 text-slate-500 dark:text-muted-foreground" title={row.workType ?? "未填写"}>
-                  {row.workType ?? "未填写"}
-                </TableCell>
-                <TableCell className="truncate px-1 text-slate-500 dark:text-muted-foreground" title={row.workerType ?? "未填写"}>
-                  {row.workerType ?? "未填写"}
-                </TableCell>
-                <TableCell className="px-1 text-center font-medium text-slate-700 dark:text-foreground">
-                  {row.attendanceDays ?? 0}
-                </TableCell>
-                <TableCell className="px-1 text-center font-medium text-slate-700 dark:text-foreground" title={`${formatCompactNumber(row.monthlyWorkingHours)} 小时`}>
-                  {formatCompactNumber(row.monthlyWorkingHours)}
-                </TableCell>
-                <TableCell className="px-1 text-center font-medium text-slate-700 dark:text-foreground" title={`${formatCompactNumber(row.monthlyWorkPoint)} 工`}>
-                  {formatCompactNumber(row.monthlyWorkPoint)}
-                </TableCell>
-                {days.map((day) => {
-                  const cell = row.days[day];
-                  return (
-                    <TableCell key={day} className="px-0.5 align-top">
-                      {cell ? (
-                        <div className="space-y-0.5 text-center text-[10px] leading-3">
-                          {cell.records.slice(0, 2).map((record) => (
-                            <div
-                              key={record.id}
-                              className={cn(
-                                "truncate rounded px-0.5",
-                                record.direction === "进场"
-                                  ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
-                                  : "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300"
-                              )}
-                            >
-                              {record.time}
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="text-center text-xs text-slate-300">--</div>
-                      )}
-                    </TableCell>
-                  );
-                })}
               </TableRow>
-            ))
-          )}
-        </TableBody>
+            ) : (
+              rows.map((row) => (
+                <TableRow key={row.workerId ?? `${row.worker}-${row.team}`}>
+                  <TableCell
+                    className={cn("truncate px-1 font-medium", stickyCellClass)}
+                    style={{ position: "sticky", left: getStickyLeft(0), zIndex: 10 }}
+                    title={row.worker}
+                  >
+                    {row.worker}
+                  </TableCell>
+                  <TableCell
+                    className={cn("truncate px-1 text-slate-500 dark:text-muted-foreground", stickyCellClass)}
+                    style={{ position: "sticky", left: getStickyLeft(1), zIndex: 10 }}
+                    title={row.team}
+                  >
+                    {row.team}
+                  </TableCell>
+                  <TableCell
+                    className={cn("truncate px-1 text-slate-500 dark:text-muted-foreground", stickyCellClass)}
+                    style={{ position: "sticky", left: getStickyLeft(2), zIndex: 10 }}
+                    title={row.workType ?? "未填写"}
+                  >
+                    {row.workType ?? "未填写"}
+                  </TableCell>
+                  <TableCell
+                    className={cn("truncate px-1 text-slate-500 dark:text-muted-foreground", stickyCellClass)}
+                    style={{ position: "sticky", left: getStickyLeft(3), zIndex: 10 }}
+                    title={row.workerType ?? "未填写"}
+                  >
+                    {row.workerType ?? "未填写"}
+                  </TableCell>
+                  <TableCell
+                    className={cn("px-1 text-center font-medium text-slate-700 dark:text-foreground", stickyCellClass)}
+                    style={{ position: "sticky", left: getStickyLeft(4), zIndex: 10 }}
+                  >
+                    {row.attendanceDays ?? 0}
+                  </TableCell>
+                  <TableCell
+                    className={cn("px-1 text-center font-medium text-slate-700 dark:text-foreground", stickyCellClass)}
+                    style={{ position: "sticky", left: getStickyLeft(5), zIndex: 10 }}
+                    title={`${formatCompactNumber(row.monthlyWorkingHours)} 小时`}
+                  >
+                    {formatCompactNumber(row.monthlyWorkingHours)}
+                  </TableCell>
+                  <TableCell
+                    className={cn("px-1 text-center font-medium text-slate-700 dark:text-foreground", stickyCellClass)}
+                    style={{ position: "sticky", left: getStickyLeft(6), zIndex: 10 }}
+                    title={`${formatCompactNumber(row.monthlyWorkPoint)} 工`}
+                  >
+                    {formatCompactNumber(row.monthlyWorkPoint)}
+                  </TableCell>
+                  {days.map((day) => {
+                    const cell = row.days[day];
+                    return (
+                      <TableCell key={day} className={cn("px-0.5 align-top", dayCellClass)}>
+                        {cell ? (
+                          <div className="space-y-0.5 text-center text-[10px] leading-3">
+                            {cell.records.slice(0, 2).map((record) => (
+                              <div
+                                key={record.id}
+                                className={cn(
+                                  "truncate rounded px-0.5",
+                                  record.direction === "进场"
+                                    ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
+                                    : "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300"
+                                )}
+                              >
+                                {record.time}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-center text-xs text-slate-300">--</div>
+                        )}
+                      </TableCell>
+                    );
+                  })}
+                </TableRow>
+              ))
+            )}
+          </TableBody>
         </Table>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-white px-3 py-2 dark:border-border dark:bg-card">
+        <div className="text-xs text-slate-500 dark:text-muted-foreground">
+          共 {total} 人，每页 {pageSize} 条
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 px-2 text-xs"
+            disabled={currentRowPage <= 1}
+            onClick={handlePrevRowPage}
+          >
+            <ChevronLeft className="mr-1 size-3.5" /> 上一页
+          </Button>
+          <span className="min-w-[80px] text-center text-xs text-slate-600 dark:text-muted-foreground">
+            第 {currentRowPage} / {totalRowPages} 页
+          </span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 px-2 text-xs"
+            disabled={currentRowPage >= totalRowPages}
+            onClick={handleNextRowPage}
+          >
+            下一页 <ChevronRight className="ml-1 size-3.5" />
+          </Button>
+          <select
+            value={pageSize}
+            onChange={(event) => { onPageSizeChange(Number(event.target.value)); onPageChange(1); }}
+            className="h-7 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700 dark:border-border dark:bg-background dark:text-foreground"
+          >
+            <option value={10}>10 条/页</option>
+            <option value={20}>20 条/页</option>
+            <option value={50}>50 条/页</option>
+          </select>
+        </div>
       </div>
     </div>
   );
