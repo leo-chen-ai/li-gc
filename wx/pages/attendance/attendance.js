@@ -88,7 +88,7 @@ Page({
     project: null,
     projectName: "",
     month: "",
-    stats: { total: 0, present: 0, absent: 0, rate: "0%" },
+    stats: { total: 0, present: 0, absent: 0, rate: "0%", view: "" },
     loading: true,
     teamFilter: "全部班组",
     companyFilter: "全部参建单位",
@@ -117,37 +117,59 @@ Page({
 
   async onLoad() {
     const dates = recentDates();
+    const activeDateValue = dates[0].value;
     this.setData({
       loading: true,
       dateLoading: true,
       dateItems: dates,
       activeDate: dates[0].label,
-      activeDateValue: dates[0].value,
-      month: formatMonth(dates[0].value),
+      activeDateValue,
+      month: formatMonth(activeDateValue),
     });
     // 先快速加载 stats（只查计数，毫秒级），让用户先看到总人数/出勤数
-    await this.loadStats();
+    await this.loadStats(activeDateValue);
     // 再并行加载完整数据（工人、班组、单位、记录、月历计数）
     this.loadData();
   },
 
-  async loadStats() {
+  buildStatsFromResult(result) {
+    const isValidStats = result && result.view === "stats" && "present" in result;
+    if (!isValidStats) return null;
+    return {
+      total: result.total || 0,
+      present: result.present || 0,
+      absent: result.absent || 0,
+      rate: result.rate || "0%",
+      view: "stats",
+    };
+  },
+
+  computeStatsFromWorkers(rows) {
+    const present = rows.filter((item) => item.status === "已出勤").length;
+    const total = rows.length;
+    return {
+      total,
+      present,
+      absent: Math.max(0, total - present),
+      rate: total ? `${Math.round((present / total) * 1000) / 10}%` : "0%",
+      view: "client",
+    };
+  },
+
+  async loadStats(date) {
     const project = getSelectedProject();
     if (!project || !project.id) return;
     try {
       const result = await listResource(project.id, "attendance-records", {
         view: "stats",
-        attendance_date: this.data.activeDateValue,
+        attendance_date: date || this.data.activeDateValue,
       });
-      const stats = {
-        total: result.total || 0,
-        present: result.present || 0,
-        absent: result.absent || 0,
-        rate: result.rate || "0%",
-      };
+      const stats = this.buildStatsFromResult(result)
+        || this.computeStatsFromWorkers(this.data.filteredWorkers);
       this.setData({ stats, loading: false });
     } catch (error) {
-      this.setData({ loading: false });
+      const stats = this.computeStatsFromWorkers(this.data.filteredWorkers);
+      this.setData({ stats, loading: false });
       wx.showToast({ title: error.message || "统计加载失败", icon: "none" });
     }
   },
@@ -208,7 +230,7 @@ Page({
       detailVisible: false,
     }, () => {
       this.loadDailyRecords();
-      this.loadStats();
+      this.loadStats(item.value);
     });
   },
 
@@ -307,7 +329,11 @@ Page({
       return matchesTab && matchesKeyword && matchesTeam && matchesCompany;
     });
 
-    this.setData({ filteredWorkers });
+    // 如果 stats 不是来自后端 stats 接口（旧版/异常），按当前列表重新计算兜底
+    const stats = this.data.stats && this.data.stats.view === "stats"
+      ? this.data.stats
+      : this.computeStatsFromWorkers(filteredWorkers);
+    this.setData({ filteredWorkers, stats });
   },
 
   buildWorkerAttendance(worker) {
