@@ -164,11 +164,12 @@ Page({
         view: "stats",
         attendance_date: date || this.data.activeDateValue,
       });
+      console.log("loadStats result", result, "date", date || this.data.activeDateValue);
       const stats = this.buildStatsFromResult(result)
-        || this.computeStatsFromWorkers(this.data.filteredWorkers);
+        || this.computeStatsFromWorkers(this.data.workers.map((w) => this.buildWorkerAttendance(w)));
       this.setData({ stats, loading: false });
     } catch (error) {
-      const stats = this.computeStatsFromWorkers(this.data.filteredWorkers);
+      const stats = this.computeStatsFromWorkers(this.data.workers.map((w) => this.buildWorkerAttendance(w)));
       this.setData({ stats, loading: false });
       wx.showToast({ title: error.message || "统计加载失败", icon: "none" });
     }
@@ -329,10 +330,10 @@ Page({
       return matchesTab && matchesKeyword && matchesTeam && matchesCompany;
     });
 
-    // 如果 stats 不是来自后端 stats 接口（旧版/异常），按全部工人重新计算兜底
-    const stats = this.data.stats && this.data.stats.view === "stats"
-      ? this.data.stats
-      : this.computeStatsFromWorkers(rows);
+    // 如果 stats 不是来自后端 stats 接口（旧版/异常），或后端返回全 0 但本地记录非空，按全部工人重新计算兜底
+    const serverStats = this.data.stats && this.data.stats.view === "stats" ? this.data.stats : null;
+    const clientStats = this.computeStatsFromWorkers(rows);
+    const stats = serverStats && serverStats.total > 0 ? serverStats : clientStats;
     this.setData({ filteredWorkers, stats });
   },
 
