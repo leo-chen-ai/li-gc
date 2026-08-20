@@ -329,10 +329,10 @@ Page({
       return matchesTab && matchesKeyword && matchesTeam && matchesCompany;
     });
 
-    // 如果 stats 不是来自后端 stats 接口（旧版/异常），按当前列表重新计算兜底
+    // 如果 stats 不是来自后端 stats 接口（旧版/异常），按全部工人重新计算兜底
     const stats = this.data.stats && this.data.stats.view === "stats"
       ? this.data.stats
-      : this.computeStatsFromWorkers(filteredWorkers);
+      : this.computeStatsFromWorkers(rows);
     this.setData({ filteredWorkers, stats });
   },
 
