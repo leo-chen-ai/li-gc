@@ -771,6 +771,7 @@ struct ModuleListParams {
 enum ResourceListView {
     List,
     Calendar,
+    Stats,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -882,6 +883,9 @@ fn resource_list_params(uri: &Uri) -> Result<ResourceListParams, ApiError> {
                 }
                 "view" if trimmed == "calendar" => {
                     view = ResourceListView::Calendar;
+                }
+                "view" if trimmed == "stats" => {
+                    view = ResourceListView::Stats;
                 }
                 "month" | "attendance_month" if !trimmed.is_empty() => {
                     attendance_month = Some(parse_payroll_month(trimmed)?);
@@ -7151,8 +7155,14 @@ pub async fn list_attendance(
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     let params = resource_list_params(&uri)?;
 
-    if params.view == ResourceListView::Calendar {
-        return list_attendance_calendar(state.db.pool(), project_id, &params).await;
+    match params.view {
+        ResourceListView::Calendar => {
+            return list_attendance_calendar(state.db.pool(), project_id, &params).await;
+        }
+        ResourceListView::Stats => {
+            return list_attendance_stats(state.db.pool(), project_id, &params).await;
+        }
+        ResourceListView::List => {}
     }
 
     list_attendance_rows_page(state.db.pool(), project_id, &params).await
@@ -7530,6 +7540,55 @@ SELECT
         "view": "calendar",
         "page": params.page,
         "page_size": params.page_size,
+    })))
+}
+
+async fn list_attendance_stats(
+    pool: &sqlx::PgPool,
+    project_id: Uuid,
+    params: &ResourceListParams,
+) -> ApiResult<Value> {
+    let date = params.attendance_date.unwrap_or_else(|| chrono::Utc::now().date_naive());
+
+    #[derive(sqlx::FromRow)]
+    struct AttendanceStats {
+        total: i64,
+        present: i64,
+    }
+
+    let stats = sqlx::query_as::<_, AttendanceStats>(
+        r#"
+        SELECT
+            (SELECT COUNT(*) FROM construction_workers WHERE project_id = $1 AND is_deleted = FALSE) AS total,
+            (
+                SELECT COUNT(DISTINCT worker_id)
+                FROM construction_attendance_records
+                WHERE project_id = $1
+                  AND is_deleted = FALSE
+                  AND (trigger_time AT TIME ZONE 'Asia/Shanghai')::date = $2
+            ) AS present
+        "#,
+    )
+    .bind(project_id)
+    .bind(date)
+    .fetch_one(pool)
+    .await
+    .map_err(db_error)?;
+
+    let absent = (stats.total - stats.present).max(0);
+    let rate = if stats.total > 0 {
+        format!("{}%", ((stats.present as f64 / stats.total as f64) * 1000.0).round() / 10.0)
+    } else {
+        "0%".to_string()
+    };
+
+    Ok(ApiSuccess::default().with_data(serde_json::json!({
+        "total": stats.total,
+        "present": stats.present,
+        "absent": absent,
+        "rate": rate,
+        "attendance_date": date.format("%Y-%m-%d").to_string(),
+        "view": "stats",
     })))
 }
 
@@ -14531,6 +14590,23 @@ mod tests {
         assert_eq!(
             params.attendance_month,
             Some(chrono::NaiveDate::from_ymd_opt(2026, 6, 1).unwrap())
+        );
+        assert_eq!(params.page, 1);
+        assert_eq!(params.page_size, 10);
+    }
+
+    #[test]
+    fn resource_list_params_parse_attendance_stats_view() {
+        let uri: Uri = "/api/v1/admin/projects/00000000-0000-0000-0000-000000000000/attendance-records?view=stats&attendance_date=2026-06-23"
+            .parse()
+            .expect("valid uri");
+
+        let params = resource_list_params(&uri).expect("params");
+
+        assert_eq!(params.view, ResourceListView::Stats);
+        assert_eq!(
+            params.attendance_date,
+            Some(chrono::NaiveDate::from_ymd_opt(2026, 6, 23).unwrap())
         );
         assert_eq!(params.page, 1);
         assert_eq!(params.page_size, 10);

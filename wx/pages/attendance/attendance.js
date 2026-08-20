@@ -89,6 +89,7 @@ Page({
     projectName: "",
     month: "",
     stats: { total: 0, present: 0, absent: 0, rate: "0%" },
+    loading: true,
     teamFilter: "全部班组",
     companyFilter: "全部参建单位",
     teamOptions: ["全部班组"],
@@ -117,15 +118,42 @@ Page({
   async onLoad() {
     const dates = recentDates();
     this.setData({
+      loading: true,
+      dateLoading: true,
       dateItems: dates,
       activeDate: dates[0].label,
       activeDateValue: dates[0].value,
       month: formatMonth(dates[0].value),
     });
-    await this.loadData();
+    // 先快速加载 stats（只查计数，毫秒级），让用户先看到总人数/出勤数
+    await this.loadStats();
+    // 再并行加载完整数据（工人、班组、单位、记录、月历计数）
+    this.loadData();
+  },
+
+  async loadStats() {
+    const project = getSelectedProject();
+    if (!project || !project.id) return;
+    try {
+      const result = await listResource(project.id, "attendance-records", {
+        view: "stats",
+        attendance_date: this.data.activeDateValue,
+      });
+      const stats = {
+        total: result.total || 0,
+        present: result.present || 0,
+        absent: result.absent || 0,
+        rate: result.rate || "0%",
+      };
+      this.setData({ stats, loading: false });
+    } catch (error) {
+      this.setData({ loading: false });
+      wx.showToast({ title: error.message || "统计加载失败", icon: "none" });
+    }
   },
 
   async loadData() {
+    this.setData({ dateLoading: true });
     const project = getSelectedProject();
     if (!project || !project.id) {
       wx.showToast({ title: "请先选择项目", icon: "none" });
@@ -135,13 +163,14 @@ Page({
     this.setData({ project, projectName: project.title || project.name || "已授权项目" });
 
     try {
+      // 后端 page_size 最大 100，传更大值无效；首屏并行拉取基础数据
       const [unitsResult, teamsResult, workersResult, attendanceResult] = await Promise.all([
-        listResource(project.id, "units", { page: 1, page_size: 200 }),
-        listResource(project.id, "teams", { page: 1, page_size: 200 }),
-        listResource(project.id, "workers", { page: 1, page_size: 300 }),
+        listResource(project.id, "units", { page: 1, page_size: 100 }),
+        listResource(project.id, "teams", { page: 1, page_size: 100 }),
+        listResource(project.id, "workers", { page: 1, page_size: 100 }),
         listResource(project.id, "attendance-records", {
           page: 1,
-          page_size: 500,
+          page_size: 100,
           attendance_date: this.data.activeDateValue,
         }),
       ]);
@@ -150,6 +179,7 @@ Page({
       const workers = workersResult.items || [];
       const records = attendanceResult.items || [];
       this.setData({
+        dateLoading: false,
         units,
         teams,
         workers,
@@ -162,6 +192,7 @@ Page({
         this.loadMonthCalendarCounts();
       });
     } catch (error) {
+      this.setData({ dateLoading: false });
       wx.showToast({ title: error.message || "考勤加载失败", icon: "none" });
     }
   },
@@ -175,7 +206,10 @@ Page({
       activeDateValue: item.value,
       month: formatMonth(item.value),
       detailVisible: false,
-    }, () => this.loadDailyRecords());
+    }, () => {
+      this.loadDailyRecords();
+      this.loadStats();
+    });
   },
 
   async loadDailyRecords() {
@@ -191,7 +225,7 @@ Page({
     try {
       const attendanceResult = await listResource(project.id, "attendance-records", {
         page: 1,
-        page_size: 500,
+        page_size: 100,
         attendance_date: date,
       });
       const records = attendanceResult.items || [];
@@ -214,6 +248,8 @@ Page({
       const result = await listResource(project.id, "attendance-records", {
         view: "calendar",
         month,
+        page: 1,
+        page_size: 100,
       });
       const rows = result.items || [];
       const countMap = {};
@@ -262,14 +298,6 @@ Page({
 
   refresh() {
     const rows = this.data.workers.map((worker) => this.buildWorkerAttendance(worker));
-    const present = rows.filter((item) => item.status === "已出勤").length;
-    const total = rows.length;
-    const stats = {
-      total,
-      present,
-      absent: Math.max(0, total - present),
-      rate: total ? `${Math.round((present / total) * 1000) / 10}%` : "0%",
-    };
     const kw = String(this.data.keyword || "").trim().toLowerCase();
     const filteredWorkers = rows.filter((item) => {
       const matchesTab = item.status === this.data.activeTab;
@@ -279,7 +307,7 @@ Page({
       return matchesTab && matchesKeyword && matchesTeam && matchesCompany;
     });
 
-    this.setData({ stats, filteredWorkers });
+    this.setData({ filteredWorkers });
   },
 
   buildWorkerAttendance(worker) {
@@ -340,6 +368,8 @@ Page({
       const result = await listResource(this.data.project.id, "attendance-records", {
         view: "calendar",
         month,
+        page: 1,
+        page_size: 100,
       });
       const rows = result.items || [];
       this.setData({

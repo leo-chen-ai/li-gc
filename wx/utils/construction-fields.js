@@ -148,7 +148,7 @@ const deviceDirectionOptions = [
 
 const unitFields = [
   { key: "company_name", label: "单位名称", valueType: "string", required: true, section: "基础信息" },
-  { key: "company_credit_code", label: "统一社会信用代码", valueType: "string", section: "基础信息" },
+  { key: "company_credit_code", label: "统一社会信用代码", valueType: "string", required: true, section: "基础信息" },
   { key: "company_type", label: "单位类型", valueType: "number", control: "select", required: true, section: "基础信息", options: companyTypeOptions },
   { key: "register_date", label: "注册日期", valueType: "date", required: true, section: "基础信息" },
   { key: "register_area", label: "注册区域", valueType: "string", control: "region", required: true, regionNameKey: "register_area_list", regionRequireDistrict: true, section: "基础信息", wide: true },
@@ -171,7 +171,7 @@ const teamFields = [
   { key: "is_manage_team", label: "是否管理班组", valueType: "boolean", control: "select", defaultValue: "false", section: "基础信息", options: yesNoOptions },
   { key: "unit_id", label: "参建单位", valueType: "string", control: "select", required: true, section: "基础信息", optionsSource: "units" },
   { key: "name", label: "班组名称", valueType: "string", required: true, section: "基础信息" },
-  { key: "work_type", label: "工种", valueType: "number", control: "select", managementTeamType: true, section: "基础信息", options: teamWorkTypeOptions },
+  { key: "work_type", label: "工种", valueType: "number", control: "select", required: true, managementTeamType: true, section: "基础信息", options: teamWorkTypeOptions },
   { key: "settlement_type", label: "结算方式", valueType: "number", control: "select", section: "结算考勤", options: salaryCalcTypeOptions },
   { key: "quantity_unit_type", label: "计量单位", valueType: "number", control: "select", section: "结算考勤", options: quantityUnitTypeOptions },
   { key: "attendance_start_time", label: "考勤开始时间", valueType: "string", defaultValue: "06:00", section: "结算考勤" },

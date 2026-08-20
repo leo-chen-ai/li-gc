@@ -512,7 +512,7 @@ export const projectFormFields: ConstructionFormField[] = [
 
 export const unitFormFields: ConstructionFormField[] = [
   { key: "company_name", label: "单位名称", valueType: "string", required: true, section: "基础信息" },
-  { key: "company_credit_code", label: "统一社会信用代码", valueType: "string", section: "基础信息" },
+  { key: "company_credit_code", label: "统一社会信用代码", valueType: "string", required: true, section: "基础信息" },
   { key: "company_type", label: "单位类型", valueType: "number", control: "select", required: true, section: "基础信息", options: companyTypeOptions },
   { key: "register_date", label: "注册日期", valueType: "date", required: true, section: "基础信息" },
   {

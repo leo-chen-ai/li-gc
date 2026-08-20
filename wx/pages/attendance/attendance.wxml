@@ -1,4 +1,11 @@
 <view class="attendance-page">
+  <view class="page-loading-mask" wx:if="{{loading}}">
+    <view class="page-loading-box">
+      <view class="page-loading-spinner"></view>
+      <text class="page-loading-text">加载中...</text>
+    </view>
+  </view>
+
   <view class="page-top">
     <view class="back-button" bind:tap="goBack">‹</view>
     <view class="page-title">出勤统计</view>
