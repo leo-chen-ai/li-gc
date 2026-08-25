@@ -125,6 +125,7 @@ export type ConstructionReportingPlatform = {
 export type ConstructionEntityReportingPlatform = ConstructionReportingPlatform & {
   status: "success" | "failed" | "pending" | "not_reported" | string;
   failure_reason: string | null;
+  yongjian_code: string | null;
   reported_at: string | null;
 };
 

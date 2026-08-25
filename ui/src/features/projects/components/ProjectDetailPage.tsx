@@ -2936,20 +2936,26 @@ function EntityReportingPlatforms({
                 : "未传";
 
         return (
-          <div
-            key={`${platform.platform_type}-${platform.platform_name}`}
-            className={cn(
-              "flex max-w-[320px] items-start gap-1",
-              isSuccess
-                ? "text-emerald-600"
-                : isFailed
-                  ? "text-red-600"
-                  : "text-slate-400"
-            )}
-            title={`${platform.platform_name}：${statusText}`}
-          >
-            <span className="mt-[3px] size-1.5 shrink-0 rounded-full bg-current" />
-            <span className="break-words">{platform.platform_name}：{statusText}</span>
+          <div key={`${platform.platform_type}-${platform.platform_name}`} className="max-w-[320px] space-y-0.5">
+            <div
+              className={cn(
+                "flex items-start gap-1",
+                isSuccess
+                  ? "text-emerald-600"
+                  : isFailed
+                    ? "text-red-600"
+                    : "text-slate-400"
+              )}
+              title={`${platform.platform_name}：${statusText}`}
+            >
+              <span className="mt-[3px] size-1.5 shrink-0 rounded-full bg-current" />
+              <span className="break-words">{platform.platform_name}：{statusText}</span>
+            </div>
+            {platform.yongjian_code ? (
+              <div className="break-all pl-2.5 text-emerald-600" title={`甬建码：${platform.yongjian_code}`}>
+                甬建码：{platform.yongjian_code}
+              </div>
+            ) : null}
           </div>
         );
       })}

@@ -3124,7 +3124,7 @@ struct TeamPlatformSyncSource {
     work_type: Option<i32>,
     leader_name: String,
     remark: String,
-    company_credit_code: String,
+    contractor_credit_code: String,
     created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -3142,12 +3142,25 @@ pub(crate) async fn sync_new_team_to_ningbo_platforms(
             team.work_type,
             COALESCE(team.leader_name, '') AS leader_name,
             COALESCE(team.remark, '') AS remark,
-            COALESCE(unit.company_credit_code, '') AS company_credit_code,
+            COALESCE(
+                NULLIF(BTRIM(contractor_unit.company_credit_code), ''),
+                NULLIF(BTRIM(project.contractor_credit_code), ''),
+                ''
+            ) AS contractor_credit_code,
             team.created_at
         FROM construction_teams team
-        JOIN construction_units unit
-          ON unit.id = team.unit_id
-         AND unit.project_id = team.project_id
+        JOIN construction_projects project
+          ON project.id = team.project_id
+         AND project.is_deleted = FALSE
+        LEFT JOIN LATERAL (
+            SELECT unit.company_credit_code
+            FROM construction_units unit
+            WHERE unit.project_id = team.project_id
+              AND unit.company_type = 1
+              AND unit.is_deleted = FALSE
+            ORDER BY unit.created_at, unit.id
+            LIMIT 1
+        ) contractor_unit ON TRUE
         WHERE team.id = $1
         "#,
     )
@@ -3164,7 +3177,7 @@ pub(crate) async fn sync_new_team_to_ningbo_platforms(
         work_type: row.try_get("work_type").map_err(db_error)?,
         leader_name: row.try_get("leader_name").map_err(db_error)?,
         remark: row.try_get("remark").map_err(db_error)?,
-        company_credit_code: row.try_get("company_credit_code").map_err(db_error)?,
+        contractor_credit_code: row.try_get("contractor_credit_code").map_err(db_error)?,
         created_at: row.try_get("created_at").map_err(db_error)?,
     };
 
@@ -3210,19 +3223,19 @@ async fn sync_team_to_ningbo_config(
             return Ok(());
         }
     };
-    let corp_code = if source.company_credit_code.trim().is_empty() {
+    let corp_code = if source.contractor_credit_code.trim().is_empty() {
         json_string_from_keys(config, &["corp_code", "corpCode", "CorpCode"]).unwrap_or_default()
     } else {
-        source.company_credit_code.trim().to_owned()
+        source.contractor_credit_code.trim().to_owned()
     };
     let team_type = ningbo_team_type_label(source.work_type);
     let validation_error = if source.name.trim().is_empty() {
         Some("班组名称为空，无法上报市住建平台".to_owned())
     } else if corp_code.is_empty() {
-        Some("参建单位统一社会信用代码为空，无法上报市住建平台".to_owned())
+        Some("总承包单位统一社会信用代码为空，无法上报市住建平台".to_owned())
     } else if !ningbo_housing::is_valid_social_credit_code(&corp_code) {
         Some(format!(
-            "参建单位统一社会信用代码格式错误：{corp_code}（应为 18 位大写字母或数字）"
+            "总承包单位统一社会信用代码格式错误：{corp_code}（应为 18 位大写字母或数字）"
         ))
     } else if team_type.is_empty() {
         Some("班组工种未配置，无法匹配市住建班组类型".to_owned())
@@ -5095,16 +5108,33 @@ async fn load_worker_platform_sync_source(
             worker.exit_time,
             worker.has_insurance,
             COALESCE(worker.salary_bank_card, '') AS salary_bank_card,
-            COALESCE(unit.company_name, '') AS enterprise_name,
-            COALESCE(unit.company_credit_code, '') AS corp_code
+            COALESCE(
+                NULLIF(BTRIM(contractor_unit.company_name), ''),
+                NULLIF(BTRIM(project.contractor), ''),
+                ''
+            ) AS enterprise_name,
+            COALESCE(
+                NULLIF(BTRIM(contractor_unit.company_credit_code), ''),
+                NULLIF(BTRIM(project.contractor_credit_code), ''),
+                ''
+            ) AS corp_code
         FROM construction_workers worker
-        JOIN construction_units unit
-          ON unit.id = worker.unit_id
-         AND unit.project_id = worker.project_id
+        JOIN construction_projects project
+          ON project.id = worker.project_id
+         AND project.is_deleted = FALSE
         JOIN construction_teams team
           ON team.id = worker.team_id
          AND team.project_id = worker.project_id
          AND team.unit_id = worker.unit_id
+        LEFT JOIN LATERAL (
+            SELECT unit.company_name, unit.company_credit_code
+            FROM construction_units unit
+            WHERE unit.project_id = worker.project_id
+              AND unit.company_type = 1
+              AND unit.is_deleted = FALSE
+            ORDER BY unit.created_at, unit.id
+            LIMIT 1
+        ) contractor_unit ON TRUE
         WHERE worker.id = $1
         "#,
     )
@@ -6126,8 +6156,8 @@ fn worker_sync_validation_error(
     let required = [
         (source.name.trim(), "姓名"),
         (source.identity_card.trim(), "身份证号"),
-        (source.enterprise_name.trim(), "任职企业名称"),
-        (source.corp_code.trim(), "任职企业统一社会信用代码"),
+        (source.enterprise_name.trim(), "总承包单位名称"),
+        (source.corp_code.trim(), "总承包单位统一社会信用代码"),
         (work_type_name, "工种"),
     ];
     if let Some((_, label)) = required.iter().find(|(value, _)| value.is_empty()) {
@@ -6135,7 +6165,7 @@ fn worker_sync_validation_error(
     }
     if !ningbo_housing::is_valid_social_credit_code(source.corp_code.trim()) {
         return Some(format!(
-            "任职企业统一社会信用代码格式错误：{}（应为 18 位大写字母或数字）",
+            "总承包单位统一社会信用代码格式错误：{}（应为 18 位大写字母或数字）",
             source.corp_code.trim()
         ));
     }
@@ -6598,6 +6628,23 @@ async fn list_workers_page(
                                         latest_job.response_payload ->> 'message',
                                         latest_job.response_payload ->> 'msg',
                                         '上报未完成，请修正上报'
+                                    )
+                                ELSE NULL
+                            END,
+                            'yongjian_code', CASE
+                                WHEN config.platform_type = 'ningbo_housing' OR config.platform_name = '市住建'
+                                    THEN (
+                                        SELECT identity.external_person_id
+                                        FROM integration_person_identities identity
+                                        JOIN integration_platforms platform
+                                          ON platform.id = identity.platform_id
+                                         AND platform.code = 'ningbo_housing'
+                                         AND platform.is_deleted = FALSE
+                                        WHERE identity.is_deleted = FALSE
+                                          AND identity.identity_type = 'id_card'
+                                          AND UPPER(BTRIM(identity.identity_value)) = UPPER(BTRIM(r.id_card))
+                                        ORDER BY identity.last_verified_at DESC NULLS LAST, identity.updated_at DESC
+                                        LIMIT 1
                                     )
                                 ELSE NULL
                             END,

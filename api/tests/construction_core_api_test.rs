@@ -1844,6 +1844,22 @@ async fn worker_and_team_updates_enqueue_only_the_required_async_targets() {
     let (status, body) = authed_json(
         app.clone(),
         "POST",
+        "/api/v1/admin/platform-configs",
+        &token,
+        json!({
+            "project_id": project_id,
+            "platform_name": "市住建",
+            "platform_type": "ningbo_housing",
+            "config": {},
+            "is_enabled": true
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
         &format!("/api/v1/admin/projects/{project_id}/units"),
         &token,
         json!({
@@ -1888,6 +1904,32 @@ async fn worker_and_team_updates_enqueue_only_the_required_async_targets() {
     assert_eq!(status, StatusCode::CREATED, "{body}");
     let worker_id =
         Uuid::parse_str(body["data"]["id"].as_str().expect("worker id")).expect("valid worker id");
+
+    sqlx::query(
+        r#"
+        INSERT INTO integration_person_identities (
+            platform_id, identity_type, identity_value, external_person_id, last_verified_at
+        )
+        SELECT id, 'id_card', '330283199710280537', 'TEST-YONGJIAN-CODE', NOW()
+        FROM integration_platforms
+        WHERE code = 'ningbo_housing' AND is_deleted = FALSE
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .expect("insert Yongjian identity cache");
+
+    let (status, workers_body) = get_authed(
+        app.clone(),
+        &format!("/api/v1/admin/projects/{project_id}/workers"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{workers_body}");
+    assert_eq!(
+        workers_body["data"]["items"][0]["reporting_platforms"][0]["yongjian_code"],
+        "TEST-YONGJIAN-CODE"
+    );
 
     sqlx::query("DELETE FROM integration_outbox_events WHERE aggregate_id IN ($1, $2)")
         .bind(team_id)

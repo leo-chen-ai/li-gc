@@ -389,6 +389,25 @@ async fn three_project_platform_matrix_pushes_every_supported_entity_without_cro
         2,
     );
     assert_path_count(&ningbo_requests, "/Project/AddWorkerV2", 2);
+    let expected_contractor_name = "模拟单位-2-1";
+    let expected_contractor_code = "91330200MA2CLPX21N";
+    assert!(
+        ningbo_requests
+            .iter()
+            .filter(|request| request.path == "/Project/AddTeam")
+            .all(|request| request.body["CorpCode"] == expected_contractor_code),
+        "all Ningbo teams must be reported under the general contractor"
+    );
+    assert!(
+        ningbo_requests
+            .iter()
+            .filter(|request| request.path == "/EnterpriseWorker/AddEnterpriseOfWorker")
+            .all(|request| {
+                request.body["EnterpriseName"] == expected_contractor_name
+                    && request.body["CorpCode"] == expected_contractor_code
+            }),
+        "all Ningbo workers must be employed by the general contractor"
+    );
     assert!(ningbo_requests.iter().all(|request| {
         request.headers.get("appkey").is_some()
             && request.headers.get("curtime").is_some()
@@ -732,7 +751,7 @@ async fn seed_complete_project(
                 project_id, company_name, company_credit_code, company_type,
                 register_date, register_area, manager_name, manager_phone
             )
-            VALUES ($1, $2, $3, 1, DATE '2026-01-01', '浙江省宁波市330200', $4, $5)
+            VALUES ($1, $2, $3, $6, DATE '2026-01-01', '浙江省宁波市330200', $4, $5)
             RETURNING id
             "#,
         )
@@ -741,6 +760,7 @@ async fn seed_complete_project(
         .bind(&credit_code)
         .bind(format!("联系人{project_index}{entity_index}"))
         .bind(format!("1380000{project_index:02}{entity_index:02}"))
+        .bind(if entity_index == 1 { 1 } else { 2 })
         .fetch_one(pool)
         .await
         .unwrap();
