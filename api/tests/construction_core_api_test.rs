@@ -1919,6 +1919,25 @@ async fn worker_and_team_updates_enqueue_only_the_required_async_targets() {
     .await
     .expect("insert Yongjian identity cache");
 
+    sqlx::query(
+        r#"
+        INSERT INTO integration_jobs (
+            project_id, platform_code, operation, entity_type, local_entity_id,
+            idempotency_key, request_payload, status, last_error
+        )
+        VALUES (
+            $1, 'ningbo_housing', 'Project/AddWorkerV2', 'worker', $2,
+            $3, '{}'::jsonb, 'failed', '该人员为备案人员，请通过信用系统操作'
+        )
+        "#,
+    )
+    .bind(Uuid::parse_str(project_id).expect("project uuid"))
+    .bind(worker_id)
+    .bind(format!("ningbo-recorded-worker-{worker_id}"))
+    .execute(&pool)
+    .await
+    .expect("insert recorded-worker Ningbo result");
+
     let (status, workers_body) = get_authed(
         app.clone(),
         &format!("/api/v1/admin/projects/{project_id}/workers"),
@@ -1930,6 +1949,16 @@ async fn worker_and_team_updates_enqueue_only_the_required_async_targets() {
         workers_body["data"]["items"][0]["reporting_platforms"][0]["yongjian_code"],
         "TEST-YONGJIAN-CODE"
     );
+    assert_eq!(
+        workers_body["data"]["items"][0]["reporting_platforms"][0]["status"],
+        "success"
+    );
+    assert_eq!(
+        workers_body["data"]["items"][0]["reporting_platforms"][0]["failure_reason"],
+        Value::Null
+    );
+    assert_eq!(workers_body["data"]["reporting_summary"][0]["success_count"], 1);
+    assert_eq!(workers_body["data"]["reporting_summary"][0]["failure_count"], 0);
 
     sqlx::query("DELETE FROM integration_outbox_events WHERE aggregate_id IN ($1, $2)")
         .bind(team_id)

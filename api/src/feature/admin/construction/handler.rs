@@ -4017,7 +4017,7 @@ pub async fn repair_worker_reporting(
         SELECT worker.id
         FROM construction_workers worker
         LEFT JOIN LATERAL (
-            SELECT job.status
+            SELECT job.status, job.last_error
             FROM integration_jobs job
             WHERE job.project_id = worker.project_id
               AND job.entity_type IN ('worker', 'construction_worker')
@@ -4026,6 +4026,18 @@ pub async fn repair_worker_reporting(
             ORDER BY job.updated_at DESC, job.id DESC
             LIMIT 1
         ) latest_job ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT identity.id
+            FROM integration_person_identities identity
+            JOIN integration_platforms platform
+              ON platform.id = identity.platform_id
+             AND platform.code = 'ningbo_housing'
+             AND platform.is_deleted = FALSE
+            WHERE identity.is_deleted = FALSE
+              AND identity.identity_type = 'id_card'
+              AND UPPER(BTRIM(identity.identity_value)) = UPPER(BTRIM(worker.id_card))
+            LIMIT 1
+        ) yongjian_identity ON TRUE
         LEFT JOIN LATERAL (
             SELECT mapping.id
             FROM integration_entity_mappings mapping
@@ -4050,6 +4062,11 @@ pub async fn repair_worker_reporting(
               )
           AND COALESCE(worker.worker_type, 1) <> 1001
           AND COALESCE(worker.work_type, 0) <> 1001
+          AND NOT (
+              worker.work_status <> 2
+              AND COALESCE(latest_job.last_error, '') ILIKE '%备案人员%'
+              AND yongjian_identity.id IS NOT NULL
+          )
           AND (
               latest_job.status IS NULL
               OR latest_job.status NOT IN ('success', 'completed')
@@ -6616,6 +6633,9 @@ async fn list_workers_page(
                                 WHEN (config.platform_type = 'ningbo_housing' OR config.platform_name = '市住建')
                                      AND (r.worker_type = 1001 OR r.work_type = 1001) THEN 'ignored'
                                 WHEN latest_job.id IS NULL THEN 'not_reported'
+                                WHEN (config.platform_type = 'ningbo_housing' OR config.platform_name = '市住建')
+                                     AND COALESCE(latest_job.last_error, '') ILIKE '%备案人员%'
+                                     AND yongjian_identity.external_person_id IS NOT NULL THEN 'success'
                                 WHEN latest_job.status IN ('success', 'completed') THEN 'success'
                                 WHEN latest_job.status IN ('pending', 'processing', 'retry', 'awaiting_result', 'waiting_dependency', 'waiting_media') THEN 'pending'
                                 ELSE 'failed'
@@ -6623,6 +6643,11 @@ async fn list_workers_page(
                             'failure_reason', CASE
                                 WHEN latest_job.id IS NOT NULL
                                      AND latest_job.status NOT IN ('success', 'completed', 'pending', 'processing', 'retry', 'awaiting_result', 'waiting_dependency', 'waiting_media')
+                                     AND NOT (
+                                         (config.platform_type = 'ningbo_housing' OR config.platform_name = '市住建')
+                                         AND COALESCE(latest_job.last_error, '') ILIKE '%备案人员%'
+                                         AND yongjian_identity.external_person_id IS NOT NULL
+                                     )
                                     THEN COALESCE(
                                         NULLIF(latest_job.last_error, ''),
                                         latest_job.response_payload ->> 'message',
@@ -6633,19 +6658,7 @@ async fn list_workers_page(
                             END,
                             'yongjian_code', CASE
                                 WHEN config.platform_type = 'ningbo_housing' OR config.platform_name = '市住建'
-                                    THEN (
-                                        SELECT identity.external_person_id
-                                        FROM integration_person_identities identity
-                                        JOIN integration_platforms platform
-                                          ON platform.id = identity.platform_id
-                                         AND platform.code = 'ningbo_housing'
-                                         AND platform.is_deleted = FALSE
-                                        WHERE identity.is_deleted = FALSE
-                                          AND identity.identity_type = 'id_card'
-                                          AND UPPER(BTRIM(identity.identity_value)) = UPPER(BTRIM(r.id_card))
-                                        ORDER BY identity.last_verified_at DESC NULLS LAST, identity.updated_at DESC
-                                        LIMIT 1
-                                    )
+                                    THEN yongjian_identity.external_person_id
                                 ELSE NULL
                             END,
                             'reported_at', latest_job.updated_at
@@ -6665,6 +6678,20 @@ async fn list_workers_page(
                         ORDER BY job.updated_at DESC, job.id DESC
                         LIMIT 1
                     ) latest_job ON TRUE
+                    LEFT JOIN LATERAL (
+                        SELECT identity.external_person_id
+                        FROM integration_person_identities identity
+                        JOIN integration_platforms platform
+                          ON platform.id = identity.platform_id
+                         AND platform.code = 'ningbo_housing'
+                         AND platform.is_deleted = FALSE
+                        WHERE identity.is_deleted = FALSE
+                          AND identity.identity_type = 'id_card'
+                          AND UPPER(BTRIM(identity.identity_value)) = UPPER(BTRIM(r.id_card))
+                        ORDER BY identity.last_verified_at DESC NULLS LAST, identity.updated_at DESC
+                        LIMIT 1
+                    ) yongjian_identity
+                      ON config.platform_type = 'ningbo_housing' OR config.platform_name = '市住建'
                     WHERE config.project_id = r.project_id
                       AND config.is_deleted = FALSE
                       AND config.is_enabled = TRUE
@@ -6749,6 +6776,9 @@ async fn worker_reporting_summary(
                     WHEN (config.platform_type = 'ningbo_housing' OR config.platform_name = '市住建')
                          AND (worker.worker_type = 1001 OR worker.work_type = 1001) THEN 'ignored'
                     WHEN worker.id IS NULL OR latest_job.id IS NULL THEN 'not_reported'
+                    WHEN (config.platform_type = 'ningbo_housing' OR config.platform_name = '市住建')
+                         AND COALESCE(latest_job.last_error, '') ILIKE '%备案人员%'
+                         AND yongjian_identity.id IS NOT NULL THEN 'success'
                     WHEN latest_job.status IN ('success', 'completed') THEN 'success'
                     WHEN latest_job.status IN ('pending', 'processing', 'retry', 'awaiting_result', 'waiting_dependency', 'waiting_media') THEN 'pending'
                     ELSE 'failed'
@@ -6758,7 +6788,7 @@ async fn worker_reporting_summary(
               ON worker.project_id = config.project_id
              AND worker.is_deleted = FALSE
             LEFT JOIN LATERAL (
-                SELECT job.id, job.status
+                SELECT job.id, job.status, job.last_error
                 FROM integration_jobs job
                 LEFT JOIN integration_project_bindings binding
                   ON binding.id = job.binding_id
@@ -6769,6 +6799,19 @@ async fn worker_reporting_summary(
                 ORDER BY job.updated_at DESC, job.id DESC
                 LIMIT 1
             ) latest_job ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT identity.id
+                FROM integration_person_identities identity
+                JOIN integration_platforms platform
+                  ON platform.id = identity.platform_id
+                 AND platform.code = 'ningbo_housing'
+                 AND platform.is_deleted = FALSE
+                WHERE identity.is_deleted = FALSE
+                  AND identity.identity_type = 'id_card'
+                  AND UPPER(BTRIM(identity.identity_value)) = UPPER(BTRIM(worker.id_card))
+                LIMIT 1
+            ) yongjian_identity
+              ON config.platform_type = 'ningbo_housing' OR config.platform_name = '市住建'
             WHERE config.project_id = $1
               AND config.is_deleted = FALSE
               AND config.is_enabled = TRUE
