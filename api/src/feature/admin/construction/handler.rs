@@ -227,6 +227,8 @@ const ATTENDANCE_COLUMNS: &[ColumnSpec] = &[
     column("overall_photo", ColumnKind::Text),
     column("closeup_photo", ColumnKind::Text),
     column("original_time", ColumnKind::Text),
+    column("record_type", ColumnKind::Text),
+    column("attendance_point_id", ColumnKind::Uuid),
 ];
 
 #[derive(Debug, Deserialize)]
@@ -290,6 +292,13 @@ const ATTENDANCE_DEVICE_COLUMNS: &[ColumnSpec] = &[
     column("serial_number", ColumnKind::Text),
     column("device_name", ColumnKind::Text),
     column("direction", ColumnKind::SmallInt),
+    column("remark", ColumnKind::Text),
+];
+
+const ATTENDANCE_POINT_COLUMNS: &[ColumnSpec] = &[
+    column("name", ColumnKind::Text),
+    column("location", ColumnKind::Text),
+    column("machine_mode_enabled", ColumnKind::Boolean),
     column("remark", ColumnKind::Text),
 ];
 
@@ -4893,6 +4902,7 @@ pub async fn create_worker(
             "人员新增后自动下发",
         )
         .await;
+        enqueue_worker_face_enrollment_if_needed(&state, project_id, worker_id).await;
     }
 
     Ok(response)
@@ -6260,7 +6270,7 @@ async fn build_ningbo_worker_basic_request(
 // below its Base64 field limits. PositiveIdCardFile reuses id_card_photo.
 const NINGBO_WORKER_IMAGE_MAX_BYTES: usize = 20 * 1024;
 
-async fn load_worker_image_base64(
+pub(crate) async fn load_worker_image_base64(
     state: &AppState,
     public_url: &str,
     max_bytes: usize,
@@ -6962,6 +6972,26 @@ pub async fn update_worker(
 
     let after_issue_fields =
         fetch_worker_issue_fields(state.db.pool(), project_id, worker_id).await?;
+    if let (Some(before), Some(after)) = (&before_issue_fields, &after_issue_fields) {
+        // 头像变化：考勤机模式下异步同步人脸库（清空头像则从人脸库删除）。
+        let before_avatar = before.avatar.as_deref().map(str::trim).unwrap_or("");
+        let after_avatar = after.avatar.as_deref().map(str::trim).unwrap_or("");
+        if before_avatar != after_avatar
+            && crate::feature::face::project_machine_mode_enabled(state.db.pool(), project_id).await
+        {
+            let action = if after_avatar.is_empty() { "delete" } else { "upsert" };
+            if let Err(error) = crate::feature::face::enqueue_face_enrollment(
+                state.db.pool(),
+                project_id,
+                worker_id,
+                action,
+            )
+            .await
+            {
+                tracing::error!(%worker_id, error = %error, "failed to enqueue face enrollment");
+            }
+        }
+    }
     if let (Some(before), Some(after)) = (before_issue_fields, after_issue_fields) {
         enqueue_worker_reissue_after_change(
             state.db.pool(),
@@ -7232,6 +7262,17 @@ pub async fn delete_worker(
     .await
     {
         tracing::error!(%worker_id, %project_id, error = %error, "Failed to enqueue Ningbo worker exit");
+    }
+    if crate::feature::face::project_machine_mode_enabled(state.db.pool(), project_id).await
+        && let Err(error) = crate::feature::face::enqueue_face_enrollment(
+            state.db.pool(),
+            project_id,
+            worker_id,
+            "delete",
+        )
+        .await
+    {
+        tracing::error!(%worker_id, error = %error, "failed to enqueue face delete");
     }
     Ok(response)
 }
@@ -8193,6 +8234,382 @@ pub async fn delete_attendance_device(
     )
     .await
 }
+
+// ---------------------------------------------------------------------------
+// 考勤点（考勤机模式）
+// ---------------------------------------------------------------------------
+
+pub async fn list_attendance_points(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Path(project_id): Path<Uuid>,
+    uri: Uri,
+) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+    let params = resource_list_params(&uri)?;
+    list_rows_page(
+        state.db.pool(),
+        "construction_attendance_points",
+        &[("project_id", project_id)],
+        &[],
+        &params,
+    )
+    .await
+}
+
+pub async fn get_attendance_point(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Path((project_id, point_id)): Path<(Uuid, Uuid)>,
+) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+    get_row(
+        state.db.pool(),
+        "construction_attendance_points",
+        &[("project_id", project_id), ("id", point_id)],
+    )
+    .await
+}
+
+pub async fn create_attendance_point(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Path(project_id): Path<Uuid>,
+    Json(body): Json<Value>,
+) -> ApiResult<Value> {
+    ensure_attendance_device_admin(&auth_user)?;
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+    let response = create_row(
+        state.db.pool(),
+        "construction_attendance_points",
+        ATTENDANCE_POINT_COLUMNS,
+        &body,
+        &[("project_id", project_id)],
+        StatusCode::CREATED,
+    )
+    .await?;
+
+    // 创建时直接开启考勤机模式：批量为项目工人安排人脸入库。
+    let enabled = body
+        .get("machine_mode_enabled")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if enabled {
+        enqueue_project_face_enrollments_logged(state.db.pool(), project_id).await;
+    }
+    Ok(response)
+}
+
+pub async fn update_attendance_point(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Path((project_id, point_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<Value>,
+) -> ApiResult<Value> {
+    ensure_attendance_device_admin(&auth_user)?;
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+
+    let was_enabled = sqlx::query_scalar::<_, bool>(
+        "SELECT machine_mode_enabled FROM construction_attendance_points WHERE project_id = $1 AND id = $2 AND is_deleted = FALSE",
+    )
+    .bind(project_id)
+    .bind(point_id)
+    .fetch_optional(state.db.pool())
+    .await
+    .map_err(db_error)?
+    .ok_or_else(|| not_found())?;
+
+    let response = update_row(
+        state.db.pool(),
+        "construction_attendance_points",
+        ATTENDANCE_POINT_COLUMNS,
+        &body,
+        &[("project_id", project_id), ("id", point_id)],
+    )
+    .await?;
+
+    // 开关从关到开：批量为项目工人安排人脸入库（异步）。
+    let now_enabled = body
+        .get("machine_mode_enabled")
+        .and_then(Value::as_bool)
+        .unwrap_or(was_enabled);
+    if now_enabled && !was_enabled {
+        enqueue_project_face_enrollments_logged(state.db.pool(), project_id).await;
+    }
+    Ok(response)
+}
+
+pub async fn delete_attendance_point(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Path((project_id, point_id)): Path<(Uuid, Uuid)>,
+) -> ApiResult<()> {
+    ensure_attendance_device_admin(&auth_user)?;
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+    delete_row(
+        state.db.pool(),
+        "construction_attendance_points",
+        &[("project_id", project_id), ("id", point_id)],
+    )
+    .await
+}
+
+/// 工人头像存在且项目已开启考勤机模式时，安排人脸异步入库。
+async fn enqueue_worker_face_enrollment_if_needed(
+    state: &AppState,
+    project_id: Uuid,
+    worker_id: Uuid,
+) {
+    let pool = state.db.pool();
+    if !crate::feature::face::project_machine_mode_enabled(pool, project_id).await {
+        return;
+    }
+    let has_avatar = sqlx::query_scalar::<_, bool>(
+        "SELECT NULLIF(TRIM(COALESCE(avatar, '')), '') IS NOT NULL FROM construction_workers WHERE id = $1 AND is_deleted = FALSE",
+    )
+    .bind(worker_id)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or(false);
+    if !has_avatar {
+        return;
+    }
+    if let Err(error) =
+        crate::feature::face::enqueue_face_enrollment(pool, project_id, worker_id, "upsert").await
+    {
+        tracing::error!(%worker_id, error = %error, "failed to enqueue face enrollment");
+    }
+}
+
+async fn enqueue_project_face_enrollments_logged(pool: &sqlx::PgPool, project_id: Uuid) {
+    match crate::feature::face::enqueue_project_face_enrollments(pool, project_id).await {
+        Ok(count) if count > 0 => {
+            tracing::info!(%project_id, count, "enqueued face enrollments for project")
+        }
+        Ok(_) => {}
+        Err(error) => {
+            tracing::error!(%project_id, error = %error, "failed to enqueue project face enrollments")
+        }
+    }
+}
+
+/// 小程序考勤机模式可用的考勤点列表（仅返回已开启考勤机模式的点位）。
+pub async fn list_machine_attendance_points(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Path(project_id): Path<Uuid>,
+) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+    let items = sqlx::query_scalar::<_, Value>(
+        r#"
+        SELECT COALESCE(
+            jsonb_agg(
+                jsonb_build_object(
+                    'id', p.id,
+                    'name', p.name,
+                    'location', COALESCE(p.location, ''),
+                    'remark', COALESCE(p.remark, ''),
+                    'machine_mode_enabled', p.machine_mode_enabled
+                )
+                ORDER BY p.created_at ASC
+            ),
+            '[]'::jsonb
+        )
+        FROM construction_attendance_points p
+        WHERE p.project_id = $1
+          AND p.is_deleted = FALSE
+          AND p.machine_mode_enabled = TRUE
+        "#,
+    )
+    .bind(project_id)
+    .fetch_one(state.db.pool())
+    .await
+    .map_err(db_error)?;
+    Ok(ApiSuccess::default().with_data(items))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RecognizeAttendanceRequest {
+    /// 摄像头拍照图片（Base64，可带 data:image 前缀）
+    pub image: String,
+    /// 0=进场 1=出场，默认按当日已有记录自动判断
+    #[serde(default)]
+    pub direction: Option<i16>,
+}
+
+/// 考勤点人脸识别打卡：拍照 → 人脸服务 1:N 识别 → 写入考勤记录（考勤点考勤）。
+pub async fn recognize_attendance_point(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Path((project_id, point_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<RecognizeAttendanceRequest>,
+) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+
+    let point = sqlx::query_as::<_, (String, bool)>(
+        "SELECT name, machine_mode_enabled FROM construction_attendance_points WHERE project_id = $1 AND id = $2 AND is_deleted = FALSE",
+    )
+    .bind(project_id)
+    .bind(point_id)
+    .fetch_optional(state.db.pool())
+    .await
+    .map_err(db_error)?
+    .ok_or_else(|| not_found())?;
+    if !point.1 {
+        return Err(invalid_column_value(
+            "machine_mode_enabled",
+            "该考勤点未开启考勤机模式",
+        ));
+    }
+
+    if body.image.trim().is_empty() {
+        return Err(invalid_column_value("image", "拍照图片不能为空"));
+    }
+
+    let recognized = crate::feature::face::recognize_face(&state, project_id, &body.image)
+        .await
+        .map_err(|error| ApiError::default().with_message(&error))?;
+
+    if !recognized.matched {
+        return Ok(ApiSuccess::default().with_data(serde_json::json!({
+            "matched": false,
+            "reason": recognized.reason.unwrap_or_else(|| "unknown".to_string()),
+            "score": recognized.score,
+        })));
+    }
+
+    let worker_id = recognized
+        .person_id
+        .as_deref()
+        .and_then(|value| Uuid::parse_str(value).ok())
+        .ok_or_else(|| ApiError::default().with_message("人脸服务返回的人员 ID 无效"))?;
+
+    // 确认工人仍属于当前项目且未删除。
+    let worker = sqlx::query_as::<_, (String, Option<String>)>(
+        "SELECT name, avatar FROM construction_workers WHERE id = $1 AND project_id = $2 AND is_deleted = FALSE",
+    )
+    .bind(worker_id)
+    .bind(project_id)
+    .fetch_optional(state.db.pool())
+    .await
+    .map_err(db_error)?
+    .ok_or_else(|| not_found())?;
+
+    // 方向：默认按当日最后一条考勤记录取反（无记录则为进场）。
+    let direction = match body.direction {
+        Some(value) => value,
+        None => {
+            let last = sqlx::query_scalar::<_, i16>(
+                r#"
+                SELECT direction FROM construction_attendance_records
+                WHERE project_id = $1 AND worker_id = $2 AND is_deleted = FALSE
+                  AND trigger_time >= (NOW() AT TIME ZONE 'Asia/Shanghai')::date::timestamptz
+                ORDER BY trigger_time DESC
+                LIMIT 1
+                "#,
+            )
+            .bind(project_id)
+            .bind(worker_id)
+            .fetch_optional(state.db.pool())
+            .await
+            .map_err(db_error)?;
+            match last {
+                Some(0) => 1,
+                _ => 0,
+            }
+        }
+    };
+
+    // 压缩拍照图片后存为特写照片（Base64）。
+    let closeup_photo = match load_worker_image_base64(
+        &state,
+        body.image.trim(),
+        1024 * 1024,
+        "打卡照片",
+    )
+    .await
+    {
+        Ok(encoded) => Some(format!("data:image/jpeg;base64,{encoded}")),
+        Err(_) => None,
+    };
+
+    let record_id = Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO construction_attendance_records (
+            id, project_id, worker_id, direction, trigger_time,
+            equipment_id, record_type, attendance_point_id, closeup_photo, original_time
+        )
+        VALUES ($1, $2, $3, $4, NOW(), $5, 'attendance_point', $6, $7, TO_CHAR(NOW() AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS'))
+        "#,
+    )
+    .bind(record_id)
+    .bind(project_id)
+    .bind(worker_id)
+    .bind(direction)
+    .bind(format!("考勤点-{}", point.0))
+    .bind(point_id)
+    .bind(closeup_photo)
+    .execute(state.db.pool())
+    .await
+    .map_err(db_error)?;
+
+    Ok(ApiSuccess::default().with_data(serde_json::json!({
+        "matched": true,
+        "score": recognized.score,
+        "record_id": record_id,
+        "worker_id": worker_id,
+        "worker_name": recognized.name.unwrap_or(worker.0),
+        "worker_avatar": worker.1,
+        "direction": direction,
+        "trigger_time": chrono::Utc::now(),
+        "point_name": point.0,
+    })))
+}
+
+/// 考勤点当日人脸识别考勤记录（小程序打卡页列表）。
+pub async fn list_attendance_point_today_records(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Path((project_id, point_id)): Path<(Uuid, Uuid)>,
+) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+    let items = sqlx::query_scalar::<_, Value>(
+        r#"
+        SELECT COALESCE(
+            jsonb_agg(
+                jsonb_build_object(
+                    'id', r.id,
+                    'worker_id', r.worker_id,
+                    'worker_name', w.name,
+                    'worker_avatar', COALESCE(w.avatar, ''),
+                    'direction', r.direction,
+                    'trigger_time', r.trigger_time,
+                    'closeup_photo', COALESCE(r.closeup_photo, '')
+                )
+                ORDER BY r.trigger_time DESC
+            ),
+            '[]'::jsonb
+        )
+        FROM construction_attendance_records r
+        JOIN construction_workers w ON w.id = r.worker_id
+        WHERE r.project_id = $1
+          AND r.attendance_point_id = $2
+          AND r.record_type = 'attendance_point'
+          AND r.is_deleted = FALSE
+          AND r.trigger_time >= (NOW() AT TIME ZONE 'Asia/Shanghai')::date::timestamptz
+        "#,
+    )
+    .bind(project_id)
+    .bind(point_id)
+    .fetch_one(state.db.pool())
+    .await
+    .map_err(db_error)?;
+    Ok(ApiSuccess::default().with_data(items))
+}
+
 
 pub async fn list_attendance_device_issue_reports(
     State(state): State<AppState>,

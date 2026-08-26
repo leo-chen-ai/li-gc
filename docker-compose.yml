@@ -136,6 +136,7 @@ services:
       REPORT_FORWARD_CREDENTIAL_KEY: ${REPORT_FORWARD_CREDENTIAL_KEY:-local-report-forward-key-change-me-32-chars}
       STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
       UPLOAD_DIR: ${UPLOAD_DIR:-/data/artifacts}
+      FACE_SERVICE_URL: ${FACE_SERVICE_URL:-http://face-service:7100}
     ports:
       - "8080:8080"
     volumes:
@@ -159,6 +160,28 @@ services:
       emqx:
         condition: service_healthy
         required: false
+    networks:
+      - quax_net
+    profiles:
+      - full
+
+  # ===========================================================================
+  # Face Recognition Service (考勤机模式)
+  # ===========================================================================
+  face-service:
+    build:
+      context: ./face-service
+      dockerfile: Dockerfile
+    container_name: quax-face-service
+    environment:
+      FACE_SERVICE_PORT: "7100"
+      FACE_DATA_DIR: /data/faces
+      FACE_REC_THRESHOLD: ${FACE_REC_THRESHOLD:-0.45}
+    ports:
+      - "7100:7100"
+    volumes:
+      - face_data:/data/faces
+    restart: unless-stopped
     networks:
       - quax_net
     profiles:
@@ -298,6 +321,7 @@ volumes:
   emqx_log:
   pgadmin_data:
   report_worker_data:
+  face_data:
   caddy_data:
   caddy_config:
 

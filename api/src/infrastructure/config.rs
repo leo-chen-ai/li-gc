@@ -207,6 +207,25 @@ impl OcrConfig {
 }
 
 #[derive(Debug, Clone)]
+pub struct FaceConfig {
+    pub face_service_url: String,
+    pub face_service_timeout_secs: u64,
+}
+
+impl FaceConfig {
+    fn from_env() -> Self {
+        Self {
+            face_service_url: env::var("FACE_SERVICE_URL")
+                .unwrap_or_else(|_| "http://localhost:7100".to_string()),
+            face_service_timeout_secs: env::var("FACE_SERVICE_TIMEOUT_SECS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(15),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Config {
     pub rust_env: String,
     pub is_production: bool,
@@ -218,6 +237,7 @@ pub struct Config {
     pub cookie: CookieConfig,
     pub upload: UploadConfig,
     pub ocr: OcrConfig,
+    pub face: FaceConfig,
 }
 
 impl Config {
@@ -245,6 +265,7 @@ impl Config {
             cookie: CookieConfig::from_env(is_production),
             upload: UploadConfig::from_env(),
             ocr: OcrConfig::from_env(),
+            face: FaceConfig::from_env(),
         })
     }
 }

@@ -13,6 +13,7 @@ const emptyStats = {
   unitCount: 0,
   todayAttendanceCount: 0,
   deviceCount: 0,
+  pointCount: 0,
 };
 
 function dateToIso(date) {
@@ -73,9 +74,9 @@ function buildHomeModules(stats) {
       tone: "tone-mint",
     },
     {
-      key: "device",
+      key: "machine",
       title: "考勤机模式",
-      note: `${stats.deviceCount}台设备`,
+      note: `${stats.pointCount}个考勤点`,
       image: assetPath("/assets/illustrations/module-device.png"),
       tone: "tone-green",
     },
@@ -176,12 +177,13 @@ Page({
     this._loadingStats = true;
     try {
       const todayIso = dateToIso(new Date());
-      const [unitsResult, teamsResult, workersResult, attendanceResult, devicesResult] = await Promise.all([
+      const [unitsResult, teamsResult, workersResult, attendanceResult, devicesResult, pointsResult] = await Promise.all([
         listResource(projectId, "units", { page: 1, page_size: 1 }),
         listResource(projectId, "teams", { page: 1, page_size: 1 }),
         listResource(projectId, "workers", { page: 1, page_size: 1 }),
         listResource(projectId, "attendance-records", { view: "calendar", month: todayIso.slice(0, 7) }),
         listResource(projectId, "attendance-devices", { page: 1, page_size: 1 }),
+        listResource(projectId, "attendance-points", { page: 1, page_size: 1 }),
       ]);
       const homeStats = {
         workerCount: resultTotal(workersResult),
@@ -189,6 +191,7 @@ Page({
         unitCount: resultTotal(unitsResult),
         todayAttendanceCount: countTodayAttendance(attendanceResult, todayIso),
         deviceCount: resultTotal(devicesResult),
+        pointCount: resultTotal(pointsResult),
       };
       const statsChanged = Object.keys(homeStats).some((key) => homeStats[key] !== this.data.homeStats[key]);
       if (statsChanged) {
@@ -223,7 +226,7 @@ Page({
   },
 
   openDevice() {
-    wx.navigateTo({ url: "/pages/device/device" });
+    wx.navigateTo({ url: "/pages/attendance-machine/points" });
   },
 
   async openWorkerEntry() {

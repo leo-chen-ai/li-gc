@@ -70,6 +70,10 @@ export const API_ENDPOINTS = {
       `/management/projects/${projectId}/attendance-devices/${deviceId}`,
     PROJECT_ATTENDANCE_DEVICE_ISSUE_WORKERS: (projectId: string, deviceId: string) =>
       `/management/projects/${projectId}/attendance-devices/${deviceId}/issue-workers`,
+    PROJECT_ATTENDANCE_POINTS: (projectId: string) =>
+      `/management/projects/${projectId}/attendance-points`,
+    PROJECT_ATTENDANCE_POINT: (projectId: string, pointId: string) =>
+      `/management/projects/${projectId}/attendance-points/${pointId}`,
     ATTENDANCE_DEVICE_ISSUE_REPORTS: "/management/attendance-device-issue-reports",
     ATTENDANCE_DEVICE_ISSUE_REPORT: (reportId: string) =>
       `/management/attendance-device-issue-reports/${reportId}`,
@@ -181,6 +185,10 @@ export const API_ENDPOINTS = {
       `/admin/projects/${projectId}/attendance-devices/${deviceId}`,
     PROJECT_ATTENDANCE_DEVICE_ISSUE_WORKERS: (projectId: string, deviceId: string) =>
       `/admin/projects/${projectId}/attendance-devices/${deviceId}/issue-workers`,
+    PROJECT_ATTENDANCE_POINTS: (projectId: string) =>
+      `/admin/projects/${projectId}/attendance-points`,
+    PROJECT_ATTENDANCE_POINT: (projectId: string, pointId: string) =>
+      `/admin/projects/${projectId}/attendance-points/${pointId}`,
     ATTENDANCE_DEVICE_ISSUE_REPORTS: "/admin/attendance-device-issue-reports",
     ATTENDANCE_DEVICE_ISSUE_REPORT: (reportId: string) =>
       `/admin/attendance-device-issue-reports/${reportId}`,

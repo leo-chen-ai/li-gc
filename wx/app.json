@@ -9,6 +9,8 @@
     "pages/companies/companies",
     "pages/attendance/attendance",
     "pages/device/device",
+    "pages/attendance-machine/points",
+    "pages/attendance-machine/camera",
     "pages/privacy/privacy",
     "pages/agreement/agreement"
   ],

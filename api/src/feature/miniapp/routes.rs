@@ -4,7 +4,7 @@ use axum::{
     http::StatusCode,
     middleware::{self, Next},
     response::Response,
-    routing::get,
+    routing::{get, post},
 };
 use serde_json::Value;
 use uuid::Uuid;
@@ -80,6 +80,30 @@ pub fn miniapp_routes(state: AppState) -> Router<AppState> {
                 .put(construction::handler::update_attendance_device)
                 .patch(construction::handler::update_attendance_device)
                 .delete(construction::handler::delete_attendance_device),
+        )
+        .route(
+            "/projects/{project_id}/attendance-points",
+            get(construction::handler::list_attendance_points)
+                .post(construction::handler::create_attendance_point),
+        )
+        .route(
+            "/projects/{project_id}/attendance-points/machine",
+            get(construction::handler::list_machine_attendance_points),
+        )
+        .route(
+            "/projects/{project_id}/attendance-points/{point_id}",
+            get(construction::handler::get_attendance_point)
+                .put(construction::handler::update_attendance_point)
+                .patch(construction::handler::update_attendance_point)
+                .delete(construction::handler::delete_attendance_point),
+        )
+        .route(
+            "/projects/{project_id}/attendance-points/{point_id}/recognize",
+            post(construction::handler::recognize_attendance_point),
+        )
+        .route(
+            "/projects/{project_id}/attendance-points/{point_id}/records/today",
+            get(construction::handler::list_attendance_point_today_records),
         )
         .route_layer(middleware::from_fn_with_state(
             state,

@@ -1,0 +1,179 @@
+.machine-page {
+  min-height: 100vh;
+  padding: 0 30rpx 60rpx;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(217, 244, 239, 0.9) 0, rgba(217, 244, 239, 0) 230rpx),
+    linear-gradient(180deg, #f4f8f8 0%, #edf3f5 100%);
+  box-sizing: border-box;
+}
+
+.machine-hero {
+  position: relative;
+  overflow: hidden;
+  min-height: 240rpx;
+  padding: 26rpx;
+  border-radius: 26rpx;
+  background: linear-gradient(135deg, #0f6b5d 0%, #15937f 100%);
+  box-shadow: 0 18rpx 48rpx rgba(15, 107, 93, 0.18);
+}
+
+.hero-topline,
+.hero-title-row {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.back-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 58rpx;
+  height: 58rpx;
+  border-radius: 20rpx;
+  color: #102427;
+  font-size: 48rpx;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 12rpx 28rpx rgba(42, 59, 78, 0.06);
+}
+
+.hero-kicker {
+  flex: 1;
+  margin-left: 18rpx;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 20rpx;
+  letter-spacing: 4rpx;
+}
+
+.hero-title-row {
+  margin-top: 30rpx;
+}
+
+.hero-title {
+  color: #ffffff;
+  font-size: 44rpx;
+  font-weight: 600;
+}
+
+.hero-subtitle {
+  margin-top: 10rpx;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 24rpx;
+}
+
+.hero-count {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  color: #ffffff;
+  font-size: 22rpx;
+}
+
+.hero-count text:first-child {
+  font-size: 52rpx;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.point-list {
+  margin-top: 26rpx;
+}
+
+.point-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-bottom: 22rpx;
+  padding: 30rpx 26rpx;
+  border-radius: 26rpx;
+  background: #ffffff;
+  box-shadow: 0 14rpx 40rpx rgba(42, 59, 78, 0.07);
+}
+
+.point-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 88rpx;
+  height: 88rpx;
+  border-radius: 26rpx;
+  background: linear-gradient(135deg, #d9f4ef 0%, #bfeae1 100%);
+}
+
+.point-icon-text {
+  color: #0f6b5d;
+  font-size: 38rpx;
+  font-weight: 600;
+}
+
+.point-main {
+  flex: 1;
+  margin-left: 22rpx;
+  min-width: 0;
+}
+
+.point-name {
+  color: #102427;
+  font-size: 32rpx;
+  font-weight: 600;
+}
+
+.point-meta {
+  margin-top: 8rpx;
+  color: #718086;
+  font-size: 24rpx;
+}
+
+.point-remark {
+  margin-top: 6rpx;
+  color: #9aa7ac;
+  font-size: 22rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.point-badge {
+  flex-shrink: 0;
+  padding: 8rpx 16rpx;
+  border-radius: 999rpx;
+  background: rgba(15, 107, 93, 0.08);
+  color: #0f6b5d;
+  font-size: 20rpx;
+}
+
+.point-arrow {
+  margin-left: 14rpx;
+  color: #c2cccf;
+  font-size: 44rpx;
+}
+
+.empty-card,
+.loading-card {
+  margin-top: 26rpx;
+  padding: 60rpx 40rpx;
+  border-radius: 26rpx;
+  background: #ffffff;
+  text-align: center;
+  box-shadow: 0 14rpx 40rpx rgba(42, 59, 78, 0.06);
+}
+
+.empty-title {
+  color: #102427;
+  font-size: 30rpx;
+  font-weight: 600;
+}
+
+.empty-note {
+  margin-top: 14rpx;
+  color: #8a979c;
+  font-size: 24rpx;
+  line-height: 1.6;
+}
+
+.loading-card {
+  color: #8a979c;
+  font-size: 26rpx;
+}

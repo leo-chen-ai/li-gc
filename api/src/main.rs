@@ -65,8 +65,22 @@ async fn main() -> eyre::Result<()> {
         quax::feature::integration::outbox_worker::spawn_integration_outbox_workers(state.clone());
         quax::feature::integration::xinleda_job_worker::spawn_xinleda_job_workers(state.clone());
         quax::feature::integration::yongxin_job_worker::spawn_yongxin_job_workers(state.clone());
+        // Face enrollment queue: push worker faces to the face-recognition service.
+        quax::feature::face::spawn_face_enrollment_worker(state.clone());
     } else {
         info!("background workers disabled for this API process");
+    }
+
+    // 人脸入库队列与生产队列无关，本地联调考勤机模式时可单独开启：
+    // FACE_ENROLLMENT_WORKER_ENABLED=true
+    if !background_workers_enabled {
+        let face_worker_enabled = std::env::var("FACE_ENROLLMENT_WORKER_ENABLED")
+            .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "on"))
+            .unwrap_or(false);
+        if face_worker_enabled {
+            info!("face enrollment worker enabled standalone (BACKGROUND_WORKERS_ENABLED=false)");
+            quax::feature::face::spawn_face_enrollment_worker(state.clone());
+        }
     }
 
     // 8. Start server (dual-stack, graceful shutdown)

@@ -224,6 +224,18 @@ pub fn admin_routes() -> Router<AppState> {
             post(construction::handler::issue_attendance_device_workers),
         )
         .route(
+            "/projects/{project_id}/attendance-points",
+            get(construction::handler::list_attendance_points)
+                .post(construction::handler::create_attendance_point),
+        )
+        .route(
+            "/projects/{project_id}/attendance-points/{point_id}",
+            get(construction::handler::get_attendance_point)
+                .put(construction::handler::update_attendance_point)
+                .patch(construction::handler::update_attendance_point)
+                .delete(construction::handler::delete_attendance_point),
+        )
+        .route(
             "/attendance-device-issue-reports",
             get(construction::handler::list_attendance_device_issue_reports)
                 .post(construction::handler::create_attendance_device_issue_report),
@@ -603,6 +615,18 @@ pub fn management_routes(state: AppState) -> Router<AppState> {
         .route(
             "/projects/{project_id}/attendance-devices/{device_id}/issue-workers",
             post(construction::handler::issue_attendance_device_workers),
+        )
+        .route(
+            "/projects/{project_id}/attendance-points",
+            get(construction::handler::list_attendance_points)
+                .post(construction::handler::create_attendance_point),
+        )
+        .route(
+            "/projects/{project_id}/attendance-points/{point_id}",
+            get(construction::handler::get_attendance_point)
+                .put(construction::handler::update_attendance_point)
+                .patch(construction::handler::update_attendance_point)
+                .delete(construction::handler::delete_attendance_point),
         )
         .route(
             "/attendance-device-issue-reports",

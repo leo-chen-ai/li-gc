@@ -1,4 +1,4 @@
-const LOCAL_API_BASE_URL = "http://192.168.2.22:8080/api/v1";
+const LOCAL_API_BASE_URL = "http://192.168.32.174:8080/api/v1";
 const PRODUCTION_API_BASE_URL = "https://shanhuai.top/api/v1";
 
 function isDevelopEnv() {

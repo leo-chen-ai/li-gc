@@ -1,0 +1,101 @@
+<view class="camera-page" style="padding-top: {{topPadding}}px;">
+  <view class="camera-header">
+    <view class="back-button" bind:tap="goBack">‹</view>
+    <view class="camera-title-wrap">
+      <view class="camera-title">{{pointName}}</view>
+      <view class="camera-subtitle">考勤机模式 · 刷脸打卡</view>
+    </view>
+  </view>
+
+  <view class="camera-panel">
+    <camera
+      class="camera-view"
+      device-position="{{cameraPosition}}"
+      flash="off"
+      binderror="onCameraError"
+      bindstop="onCameraStop"
+      wx:if="{{!cameraBlocked && cameraAlive}}"
+    ></camera>
+    <view class="camera-blocked" wx:if="{{cameraBlocked}}">
+      <view class="camera-blocked-title">无法使用摄像头</view>
+      <view class="camera-blocked-note">{{cameraErrorText || '请在设置中允许使用摄像头'}}</view>
+      <view class="camera-blocked-btn" bind:tap="openSystemSetting">去授权</view>
+    </view>
+    <view class="camera-blocked" wx:elif="{{!cameraAlive}}">
+      <view class="camera-blocked-note">摄像头加载中...</view>
+    </view>
+    <view class="scan-frame" wx:if="{{!cameraBlocked}}">
+      <view class="scan-corner tl"></view>
+      <view class="scan-corner tr"></view>
+      <view class="scan-corner bl"></view>
+      <view class="scan-corner br"></view>
+    </view>
+    <view class="camera-mask" wx:if="{{recognizing}}">
+      <view class="camera-mask-text">识别中...</view>
+    </view>
+  </view>
+
+  <view class="camera-toolbar">
+    <view class="camera-switch" bind:tap="toggleCamera">
+      <text class="camera-switch-icon">⇄</text>
+      <text>切换{{cameraPosition === 'front' ? '后置' : '前置'}}摄像头</text>
+    </view>
+    <view class="camera-position-tag">当前：{{cameraPosition === 'front' ? '前置' : '后置'}}</view>
+  </view>
+
+  <view class="capture-area">
+    <view class="result-banner {{lastResult.ok ? 'ok' : 'fail'}}" wx:if="{{lastResult}}">
+      <view class="result-title">{{lastResult.title}}</view>
+      <view class="result-note">{{lastResult.note}}</view>
+    </view>
+    <button
+      class="capture-button {{recognizing ? 'disabled' : ''}}"
+      bind:tap="captureAndRecognize"
+      disabled="{{recognizing || cameraBlocked}}"
+    >
+      <view class="capture-button-inner">{{recognizing ? '识别中' : '点击识别'}}</view>
+    </button>
+    <view class="capture-hint">请正对摄像头，保持面部在取景框内</view>
+  </view>
+
+  <view class="today-section">
+    <view class="today-header">
+      <view class="today-title">今日识别记录</view>
+      <view class="today-count">{{todayRecords.length}} 条</view>
+    </view>
+    <view class="today-empty" wx:if="{{!todayRecords.length && !loadingRecords}}">今日暂无识别记录</view>
+    <view class="today-list">
+      <view class="today-item" wx:for="{{todayRecords}}" wx:key="id">
+        <image class="today-avatar" src="{{item.avatarUrl}}" mode="aspectFill" wx:if="{{item.avatarUrl}}" />
+        <view class="today-avatar today-avatar-fallback" wx:else>{{item.worker_name[0] || '工'}}</view>
+        <view class="today-main">
+          <view class="today-name">{{item.worker_name}}</view>
+          <view class="today-time">{{item.timeText}}</view>
+        </view>
+        <view class="today-direction {{item.direction === 1 ? 'out' : 'in'}}">
+          {{item.direction === 1 ? '出场' : '进场'}}
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="privacy-mask" wx:if="{{privacyVisible}}">
+    <view class="privacy-modal">
+      <view class="privacy-title">用户隐私保护提示</view>
+      <view class="privacy-content">
+        考勤机模式需要使用你的摄像头进行人脸识别打卡。请仔细阅读
+        <text class="privacy-link" bind:tap="openPrivacyContract">{{privacyContractName}}</text>
+        ，同意后我们将调用摄像头完成刷脸考勤。
+      </view>
+      <view class="privacy-actions">
+        <view class="privacy-btn privacy-btn-reject" bind:tap="handlePrivacyDisagree">不同意</view>
+        <button
+          id="privacy-agree-btn"
+          class="privacy-btn privacy-btn-agree"
+          open-type="agreePrivacyAuthorization"
+          bindagreeprivacyauthorization="handlePrivacyAgree"
+        >同意</button>
+      </view>
+    </view>
+  </view>
+</view>

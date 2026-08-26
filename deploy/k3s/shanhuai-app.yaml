@@ -25,6 +25,7 @@ data:
   UPLOAD_DIR: /app/uploads
   MAX_AVATAR_SIZE: "2097152"
   MAX_UPLOAD_SIZE: "52428800"
+  FACE_SERVICE_URL: http://shanhuai-face-service:7100
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -171,6 +172,103 @@ spec:
           emptyDir:
             medium: Memory
             sizeLimit: 256Mi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: shanhuai-face-data
+  namespace: shanhuai-app
+  labels:
+    app.kubernetes.io/name: shanhuai-face-service
+    app.kubernetes.io/part-of: shanhuai-gc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shanhuai-face-service
+  namespace: shanhuai-app
+  labels:
+    app.kubernetes.io/name: shanhuai-face-service
+    app.kubernetes.io/part-of: shanhuai-gc
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: shanhuai-face-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: shanhuai-face-service
+        app.kubernetes.io/part-of: shanhuai-gc
+    spec:
+      containers:
+        - name: face-service
+          image: shanhuai-face-service:initial
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 7100
+          env:
+            - name: FACE_SERVICE_PORT
+              value: "7100"
+            - name: FACE_DATA_DIR
+              value: /data/faces
+          volumeMounts:
+            - name: face-data
+              mountPath: /data/faces
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 40
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+      volumes:
+        - name: face-data
+          persistentVolumeClaim:
+            claimName: shanhuai-face-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shanhuai-face-service
+  namespace: shanhuai-app
+  labels:
+    app.kubernetes.io/name: shanhuai-face-service
+    app.kubernetes.io/part-of: shanhuai-gc
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: shanhuai-face-service
+  ports:
+    - name: http
+      port: 7100
+      targetPort: http
 ---
 apiVersion: apps/v1
 kind: Deployment

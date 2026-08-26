@@ -91,6 +91,27 @@ function uploadConstructionFile(filePath, context = {}) {
   });
 }
 
+// 考勤机模式：已开启的考勤点列表
+function listMachineAttendancePoints(projectId) {
+  return request({ url: projectUrl(projectId, "attendance-points/machine") });
+}
+
+// 考勤机模式：拍照人脸识别打卡
+function recognizeAttendancePoint(projectId, pointId, imageBase64) {
+  return request({
+    url: projectUrl(projectId, `attendance-points/${pointId}/recognize`),
+    method: "POST",
+    data: { image: imageBase64 },
+  });
+}
+
+// 考勤机模式：考勤点当日识别记录
+function listAttendancePointTodayRecords(projectId, pointId) {
+  return request({
+    url: projectUrl(projectId, `attendance-points/${pointId}/records/today`),
+  });
+}
+
 module.exports = {
   SELECTED_PROJECT_KEY,
   clearSelectedProject,
@@ -98,9 +119,12 @@ module.exports = {
   deleteResource,
   getResource,
   getSelectedProject,
+  listAttendancePointTodayRecords,
+  listMachineAttendancePoints,
   listProjectOptions,
   listResource,
   normalizeProject,
+  recognizeAttendancePoint,
   setSelectedProject,
   updateResource,
   uploadConstructionFile,

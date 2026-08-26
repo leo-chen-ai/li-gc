@@ -185,8 +185,9 @@ import { ConstructionRecordForm } from "./ConstructionRecordForm";
 import { AttendanceGeneratorDialog } from "./AttendanceGeneratorDialog";
 import { ProjectStatusBadge } from "./ProjectStatusBadge";
 import { ProjectReportingPlatforms } from "./ProjectReportingPlatforms";
+import { AttendanceMachinePanel } from "./AttendanceMachinePanel";
 
-const tabs = ["项目基本信息", "建设单位", "班组信息", "项目工人", "考勤记录", "工资统计"] as const;
+const tabs = ["项目基本信息", "建设单位", "班组信息", "项目工人", "考勤记录", "考勤机模式", "工资统计"] as const;
 type DetailTab = (typeof tabs)[number];
 type DetailDialogMode = "create" | "edit";
 type DetailFormState = Record<string, string>;
@@ -1295,16 +1296,18 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                 考勤生成工具
               </Button>
             ) : null}
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-8 gap-2 border-slate-200 bg-white dark:border-border dark:bg-background"
-              onClick={handleExportActiveTab}
-            >
-              <Download className="size-4" />
-              {getExportButtonLabel(activeTab)}
-            </Button>
-            {activeTab !== "考勤记录" ? (
+            {activeTab !== "考勤机模式" ? (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 gap-2 border-slate-200 bg-white dark:border-border dark:bg-background"
+                onClick={handleExportActiveTab}
+              >
+                <Download className="size-4" />
+                {getExportButtonLabel(activeTab)}
+              </Button>
+            ) : null}
+            {activeTab !== "考勤记录" && activeTab !== "考勤机模式" ? (
               <Button
                 size="sm"
                 className="h-8 gap-2 bg-[#0f6b5d] text-white hover:bg-[#0b5148]"
@@ -1341,7 +1344,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       </div>
 
       <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-border dark:bg-card">
-        {activeTab !== "项目基本信息" && (
+        {activeTab !== "项目基本信息" && activeTab !== "考勤机模式" && (
           <div
             className={cn(
               "border-b px-3 py-2",
@@ -1492,6 +1495,9 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
               onPageChange={(page) => setWageFilters((current) => ({ ...current, page }))}
               editable
             />
+          )}
+          {activeTab === "考勤机模式" && (
+            <AttendanceMachinePanel projectId={projectId} />
           )}
         </div>
       </section>
