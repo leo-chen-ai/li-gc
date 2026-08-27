@@ -37,6 +37,8 @@ function countTodayAttendance(result, todayIso) {
 }
 
 function buildHomeModules(stats) {
+  // 考勤机模式（人脸考勤点）功能入口：功能开发中，暂时隐藏首页入口
+  const ENABLE_ATTENDANCE_MACHINE = false;
   const featureCards = [
     {
       key: "onboarding",
@@ -86,7 +88,9 @@ function buildHomeModules(stats) {
     primaryFeature: featureCards[0],
     miniFeatures: [featureCards[1], featureCards[2]],
     wideFeature: featureCards[3],
-    attendanceModules: [featureCards[4], featureCards[5]],
+    attendanceModules: ENABLE_ATTENDANCE_MACHINE
+      ? [featureCards[4], featureCards[5]]
+      : [featureCards[4]],
     sectionMetric: `今日出勤${stats.todayAttendanceCount}人`,
   };
 }

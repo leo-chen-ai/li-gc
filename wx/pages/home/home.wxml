@@ -61,7 +61,7 @@
         <view class="section-item-title">{{attendanceModules[0].title}}</view>
         <view class="section-item-note">{{attendanceModules[0].note}}</view>
       </view>
-      <view class="section-item" catchtap="openDevice">
+      <view class="section-item" catchtap="openDevice" wx:if="{{attendanceModules[1]}}">
         <view class="icon-disc">
           <image class="section-icon" src="{{attendanceModules[1].image}}" mode="aspectFit" />
         </view>

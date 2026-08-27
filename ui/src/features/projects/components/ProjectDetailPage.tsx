@@ -187,8 +187,14 @@ import { ProjectStatusBadge } from "./ProjectStatusBadge";
 import { ProjectReportingPlatforms } from "./ProjectReportingPlatforms";
 import { AttendanceMachinePanel } from "./AttendanceMachinePanel";
 
-const tabs = ["项目基本信息", "建设单位", "班组信息", "项目工人", "考勤记录", "考勤机模式", "工资统计"] as const;
-type DetailTab = (typeof tabs)[number];
+const allTabs = ["项目基本信息", "建设单位", "班组信息", "项目工人", "考勤记录", "考勤机模式", "工资统计"] as const;
+type DetailTab = (typeof allTabs)[number];
+
+// 考勤机模式（人脸考勤点）：功能开发中，暂时隐藏项目详情内的配置入口
+const SHOW_ATTENDANCE_MACHINE_TAB = false;
+const tabs: readonly DetailTab[] = SHOW_ATTENDANCE_MACHINE_TAB
+  ? allTabs
+  : allTabs.filter((tab) => tab !== "考勤机模式");
 type DetailDialogMode = "create" | "edit";
 type DetailFormState = Record<string, string>;
 type WageFilters = {
