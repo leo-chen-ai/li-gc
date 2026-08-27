@@ -50,6 +50,8 @@ export type ConstructionProject = {
   address: string | null;
   longitude: string | null;
   latitude: string | null;
+  map_poi_name: string | null;
+  map_address: string | null;
   work_permit: string | null;
   supervision_area: string | null;
   contractor: string | null;

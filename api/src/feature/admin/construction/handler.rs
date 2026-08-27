@@ -74,6 +74,8 @@ const PROJECT_COLUMNS: &[ColumnSpec] = &[
     column("address", ColumnKind::Text),
     column("longitude", ColumnKind::Text),
     column("latitude", ColumnKind::Text),
+    column("map_poi_name", ColumnKind::Text),
+    column("map_address", ColumnKind::Text),
     column("work_permit", ColumnKind::Text),
     column("supervision_area", ColumnKind::Text),
     column("contractor", ColumnKind::Text),

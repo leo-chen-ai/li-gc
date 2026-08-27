@@ -20,7 +20,7 @@ export type ConstructionFormField = {
   key: string;
   label: string;
   valueType: "string" | "number" | "boolean" | "json" | "date" | "datetime";
-  control?: "input" | "select" | "textarea" | "upload" | "region" | "nativePlace";
+  control?: "input" | "select" | "textarea" | "upload" | "region" | "nativePlace" | "mapPicker";
   uploadKind?: "image" | "file";
   uploadMultiple?: boolean;
   signaturePad?: boolean;
@@ -401,6 +401,11 @@ export const projectFormFields: ConstructionFormField[] = [
   { key: "address_code_list", label: "行政区划名称", valueType: "string", section: "基本信息", hidden: true },
   { key: "street", label: "街道", valueType: "string", section: "基本信息", hidden: true },
   { key: "address", label: "项目地址", valueType: "string", section: "基本信息", wide: true },
+  { key: "map_location", label: "地图定位", valueType: "string", control: "mapPicker", section: "基本信息", wide: true },
+  { key: "longitude", label: "地图经度", valueType: "string", section: "基本信息", hidden: true },
+  { key: "latitude", label: "地图纬度", valueType: "string", section: "基本信息", hidden: true },
+  { key: "map_poi_name", label: "地图POI名称", valueType: "string", section: "基本信息", hidden: true },
+  { key: "map_address", label: "地图规范化地址", valueType: "string", section: "基本信息", hidden: true },
 
   { key: "invest_total", label: "总投资", valueType: "number", section: "基本信息", ...moneyInput },
   {
@@ -666,6 +671,8 @@ export function buildPayloadFromForm(
 ): ConstructionPayload {
   return fields.reduce<ConstructionPayload>((payload, field) => {
     if (!isFieldVisible(field, state)) return payload;
+    // 地图定位是复合展示字段，真实数据（经纬度/POI/地址）由选点组件写入对应 hidden 字段
+    if (field.control === "mapPicker") return payload;
     const rawValue = state[field.key]?.trim() ?? "";
 
     if (field.required && rawValue.length === 0) {

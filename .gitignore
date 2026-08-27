@@ -15,6 +15,9 @@ __pycache__/
 .idea/
 *.swp
 
+# AI tools
+.qoder/
+
 # OS
 .DS_Store
 
