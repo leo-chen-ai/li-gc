@@ -14,6 +14,7 @@ import {
   type ConstructionFormState,
 } from "../data/construction-form-fields";
 import { constructionProjectService } from "../services/construction-project-service";
+import { AMapPickerField } from "./AMapPickerField";
 import {
   compressWorkerImageBeforeUpload,
   workerImageLimitLabel,
@@ -118,6 +119,8 @@ function RecordFormField({
       </span>
       {field.control === "region" ? (
         <RegionField field={field} value={value} state={state} onChange={onChange} onBulkChange={onBulkChange} />
+      ) : field.control === "mapPicker" ? (
+        <AMapPickerField state={state} onBulkChange={onBulkChange} />
       ) : field.control === "nativePlace" ? (
         <NativePlaceField value={value} onChange={onChange} />
       ) : field.control === "upload" ? (
