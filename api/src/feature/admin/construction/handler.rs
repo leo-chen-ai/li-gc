@@ -5295,6 +5295,7 @@ async fn sync_worker_to_ningbo_config(
     let mut worker_code =
         cached_external_person_id(state.db.pool(), platform_id, source.identity_card.trim())
             .await?;
+    let acquired_worker_code = worker_code.is_none();
 
     let mut recorded_person = false;
     if worker_code.is_none() {
@@ -5621,6 +5622,12 @@ async fn sync_worker_to_ningbo_config(
             None,
         )
         .await?;
+        enqueue_worker_device_reissue_after_yongjian_code(
+            state.db.pool(),
+            source,
+            acquired_worker_code,
+        )
+        .await;
         return Ok(());
     }
 
@@ -5659,7 +5666,39 @@ async fn sync_worker_to_ningbo_config(
             "platform_response": response.body,
         }),
     )
+    .await?;
+    enqueue_worker_device_reissue_after_yongjian_code(
+        state.db.pool(),
+        source,
+        acquired_worker_code,
+    )
+    .await;
+    Ok(())
+}
+
+async fn enqueue_worker_device_reissue_after_yongjian_code(
+    pool: &sqlx::PgPool,
+    source: &WorkerPlatformSyncSource,
+    acquired_worker_code: bool,
+) {
+    if !acquired_worker_code {
+        return;
+    }
+    if let Err(error) = crate::feature::integration::outbox_worker::enqueue_worker_device_reconcile(
+        pool,
+        source.project_id,
+        source.id,
+        "update",
+    )
     .await
+    {
+        tracing::error!(
+            project_id = %source.project_id,
+            worker_id = %source.id,
+            error = %error,
+            "取得甬建码后安排考勤机人员替换失败"
+        );
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
