@@ -40,3 +40,19 @@ test("platform attempt curl contains full URL headers and JSON body", () => {
   assert.match(curl, /汇绿园林建设发展有限公司/);
   assert.match(curl, /O'"'"'Reilly/);
 });
+
+test("GET attempt curl puts logged request fields in the query string", () => {
+  const [attempt] = platformLogAttempts({
+    attempts: [{
+      attempt_no: 1,
+      method: "GET",
+      url: "http://example.test/EnterpriseWorker/GetWorkerCode",
+      request: { IdentityCard: "[REDACTED]", ProjectGuid: "project-guid" },
+    }],
+  });
+
+  const curl = buildPlatformAttemptCurl(attempt!);
+  assert.match(curl, /IdentityCard=%5BREDACTED%5D&ProjectGuid=project-guid/);
+  assert.doesNotMatch(curl, /--data-raw/);
+  assert.doesNotMatch(curl, /Content-Type/);
+});

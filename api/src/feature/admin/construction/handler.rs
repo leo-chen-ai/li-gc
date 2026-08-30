@@ -4071,8 +4071,6 @@ pub async fn repair_worker_reporting(
                         OR config.platform_name = '市住建'
                       )
               )
-          AND COALESCE(worker.worker_type, 1) <> 1001
-          AND COALESCE(worker.work_type, 0) <> 1001
           AND NOT (
               worker.work_status <> 2
               AND COALESCE(latest_job.last_error, '') ILIKE '%备案人员%'
@@ -4081,6 +4079,7 @@ pub async fn repair_worker_reporting(
           AND (
               latest_job.status IS NULL
               OR latest_job.status NOT IN ('success', 'completed')
+              OR yongjian_identity.id IS NULL
               OR (worker.work_status = 2 AND active_mapping.id IS NOT NULL)
               OR (worker.work_status <> 2 AND active_mapping.id IS NULL)
           )
@@ -4960,9 +4959,6 @@ pub(crate) async fn reconcile_worker_to_ningbo_platforms(
             .exit_time
             .get_or_insert_with(|| chrono::Local::now().date_naive());
     }
-    if source.worker_type == Some(1001) || source.work_type == Some(1001) {
-        return Ok(());
-    }
     let configs = sqlx::query(
         r#"
         SELECT id, config
@@ -5300,6 +5296,7 @@ async fn sync_worker_to_ningbo_config(
         cached_external_person_id(state.db.pool(), platform_id, source.identity_card.trim())
             .await?;
 
+    let mut recorded_person = false;
     if worker_code.is_none() {
         let lookup_url = credentials
             .endpoint("EnterpriseWorker/GetWorkerCode")
@@ -5417,27 +5414,30 @@ async fn sync_worker_to_ningbo_config(
             };
         if !response.status.is_success() {
             let message = ningbo_housing::response_message(&response.body);
-            finish_team_sync_job(
-                state.db.pool(),
-                job_id,
-                "failed",
-                Some(&response.body),
-                Some(&message),
-            )
-            .await?;
-            return Ok(());
+            if !message.contains("备案人员") {
+                finish_team_sync_job(
+                    state.db.pool(),
+                    job_id,
+                    "failed",
+                    Some(&response.body),
+                    Some(&message),
+                )
+                .await?;
+                return Ok(());
+            }
+
+            recorded_person = true;
+        } else {
+            worker_code = ningbo_housing::extract_worker_code(&response.body);
         }
-        worker_code = ningbo_housing::extract_worker_code(&response.body);
     }
     let Some(worker_code) = worker_code else {
-        finish_team_sync_job(
-            state.db.pool(),
-            job_id,
-            "failed",
-            None,
-            Some("平台未返回甬建码"),
-        )
-        .await?;
+        let message = if recorded_person {
+            "市住建判定为备案人员，平台数据尚未同步涌建码；请稍后继续点击修正上报重试"
+        } else {
+            "市住建未返回涌建码；可继续点击修正上报重试"
+        };
+        finish_team_sync_job(state.db.pool(), job_id, "failed", None, Some(message)).await?;
         return Ok(());
     };
     if let Err(error) = upsert_external_person_identity(
@@ -5606,6 +5606,24 @@ async fn sync_worker_to_ningbo_config(
                 return Ok(());
             }
         };
+    let project_response_message = ningbo_housing::response_message(&response.body);
+    if project_response_message.contains("备案人员") {
+        finish_team_sync_job(
+            state.db.pool(),
+            job_id,
+            "success",
+            Some(&serde_json::json!({
+                "worker_code": worker_code,
+                "project_worker_skipped": true,
+                "skip_reason": project_response_message,
+                "platform_response": response.body,
+            })),
+            None,
+        )
+        .await?;
+        return Ok(());
+    }
+
     let Some(project_worker_id) = (response.status.is_success())
         .then(|| ningbo_housing::extract_project_worker_id(&response.body))
         .flatten()
@@ -5613,7 +5631,7 @@ async fn sync_worker_to_ningbo_config(
         let message = if response.status.is_success() {
             "平台未返回项目人员 ID".to_owned()
         } else {
-            ningbo_housing::response_message(&response.body)
+            project_response_message
         };
         finish_team_sync_job(
             state.db.pool(),
@@ -6271,6 +6289,7 @@ async fn build_ningbo_worker_basic_request(
 // Keep every populated worker image sent to the Ningbo housing platform well
 // below its Base64 field limits. PositiveIdCardFile reuses id_card_photo.
 const NINGBO_WORKER_IMAGE_MAX_BYTES: usize = 20 * 1024;
+const WORKER_IMAGE_DOWNLOAD_MAX_BYTES: usize = 15 * 1024 * 1024;
 
 pub(crate) async fn load_worker_image_base64(
     state: &AppState,
@@ -6297,9 +6316,9 @@ pub(crate) async fn load_worker_image_base64(
         return Ok(general_purpose::STANDARD.encode(compressed));
     }
 
-    let object_key = sqlx::query_scalar::<_, String>(
+    let (object_key, storage_driver) = sqlx::query_as::<_, (String, String)>(
         r#"
-        SELECT object_key
+        SELECT object_key, storage_driver
         FROM upload_files
         WHERE public_url = $1
           AND is_deleted = FALSE
@@ -6312,11 +6331,43 @@ pub(crate) async fn load_worker_image_base64(
     .await
     .map_err(|error| format!("读取{label}上传记录失败：{error}"))?
     .ok_or_else(|| format!("{label}不是系统上传文件，无法安全读取原图"))?;
-    let bytes = state
-        .storage
-        .get(&object_key)
-        .await
-        .map_err(|error| format!("读取{label}失败：{error}"))?;
+    let bytes = match state.storage.get(&object_key).await {
+        Ok(bytes) => bytes,
+        Err(storage_error) if matches!(storage_driver.as_str(), "jdcloud_oss" | "s3") => {
+            let response = reqwest::Client::builder()
+                .connect_timeout(Duration::from_secs(5))
+                .timeout(Duration::from_secs(20))
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .map_err(|error| {
+                    format!("读取{label}失败：{storage_error}；创建 OSS 下载请求失败：{error}")
+                })?
+                .get(trimmed)
+                .send()
+                .await
+                .map_err(|error| {
+                    format!("读取{label}失败：{storage_error}；OSS 公网地址下载失败：{error}")
+                })?
+                .error_for_status()
+                .map_err(|error| {
+                    format!("读取{label}失败：{storage_error}；OSS 公网地址返回错误：{error}")
+                })?;
+            if response
+                .content_length()
+                .is_some_and(|size| size > WORKER_IMAGE_DOWNLOAD_MAX_BYTES as u64)
+            {
+                return Err(format!("{label}原图超过 15 MiB 限制"));
+            }
+            let bytes = response.bytes().await.map_err(|error| {
+                format!("读取{label}失败：{storage_error}；读取 OSS 响应失败：{error}")
+            })?;
+            if bytes.len() > WORKER_IMAGE_DOWNLOAD_MAX_BYTES {
+                return Err(format!("{label}原图超过 15 MiB 限制"));
+            }
+            bytes
+        }
+        Err(error) => return Err(format!("读取{label}失败：{error}")),
+    };
     let compressed = crate::infrastructure::image_compression::compress_to_jpeg_below_async(
         bytes.to_vec(),
         max_bytes,
@@ -6642,17 +6693,24 @@ async fn list_workers_page(
                             'platform_type', config.platform_type,
                             'is_enabled', config.is_enabled,
                             'status', CASE
-                                WHEN (config.platform_type = 'ningbo_housing' OR config.platform_name = '市住建')
-                                     AND (r.worker_type = 1001 OR r.work_type = 1001) THEN 'ignored'
                                 WHEN latest_job.id IS NULL THEN 'not_reported'
                                 WHEN (config.platform_type = 'ningbo_housing' OR config.platform_name = '市住建')
                                      AND COALESCE(latest_job.last_error, '') ILIKE '%备案人员%'
                                      AND yongjian_identity.external_person_id IS NOT NULL THEN 'success'
-                                WHEN latest_job.status IN ('success', 'completed') THEN 'success'
+                                WHEN latest_job.status IN ('success', 'completed')
+                                     AND NOT (
+                                         (config.platform_type = 'ningbo_housing' OR config.platform_name = '市住建')
+                                         AND yongjian_identity.external_person_id IS NULL
+                                     ) THEN 'success'
                                 WHEN latest_job.status IN ('pending', 'processing', 'retry', 'awaiting_result', 'waiting_dependency', 'waiting_media') THEN 'pending'
                                 ELSE 'failed'
                             END,
                             'failure_reason', CASE
+                                WHEN latest_job.id IS NOT NULL
+                                     AND latest_job.status IN ('success', 'completed')
+                                     AND (config.platform_type = 'ningbo_housing' OR config.platform_name = '市住建')
+                                     AND yongjian_identity.external_person_id IS NULL
+                                    THEN '市住建未返回涌建码，请修正上报'
                                 WHEN latest_job.id IS NOT NULL
                                      AND latest_job.status NOT IN ('success', 'completed', 'pending', 'processing', 'retry', 'awaiting_result', 'waiting_dependency', 'waiting_media')
                                      AND NOT (
@@ -6785,13 +6843,15 @@ async fn worker_reporting_summary(
                 config.created_at AS platform_created_at,
                 worker.id AS worker_id,
                 CASE
-                    WHEN (config.platform_type = 'ningbo_housing' OR config.platform_name = '市住建')
-                         AND (worker.worker_type = 1001 OR worker.work_type = 1001) THEN 'ignored'
                     WHEN worker.id IS NULL OR latest_job.id IS NULL THEN 'not_reported'
                     WHEN (config.platform_type = 'ningbo_housing' OR config.platform_name = '市住建')
                          AND COALESCE(latest_job.last_error, '') ILIKE '%备案人员%'
                          AND yongjian_identity.id IS NOT NULL THEN 'success'
-                    WHEN latest_job.status IN ('success', 'completed') THEN 'success'
+                    WHEN latest_job.status IN ('success', 'completed')
+                         AND NOT (
+                             (config.platform_type = 'ningbo_housing' OR config.platform_name = '市住建')
+                             AND yongjian_identity.id IS NULL
+                         ) THEN 'success'
                     WHEN latest_job.status IN ('pending', 'processing', 'retry', 'awaiting_result', 'waiting_dependency', 'waiting_media') THEN 'pending'
                     ELSE 'failed'
                 END AS reporting_status

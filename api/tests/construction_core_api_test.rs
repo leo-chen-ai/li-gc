@@ -1699,7 +1699,6 @@ async fn enabled_ningbo_platform_requires_team_type_but_not_team_leader() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
-
     let (status, body) = authed_json(
         app.clone(),
         "POST",
@@ -1856,6 +1855,25 @@ async fn worker_and_team_updates_enqueue_only_the_required_async_targets() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
+    let platform_config_id =
+        Uuid::parse_str(body["data"]["id"].as_str().expect("platform config id"))
+            .expect("valid platform config id");
+    let binding_id = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        INSERT INTO integration_project_bindings (
+            project_id, platform_id, platform_config_id, is_enabled
+        )
+        SELECT $1, platform.id, $2, TRUE
+        FROM integration_platforms platform
+        WHERE platform.code = 'ningbo_housing' AND platform.is_deleted = FALSE
+        RETURNING id
+        "#,
+    )
+    .bind(Uuid::parse_str(project_id).expect("project uuid"))
+    .bind(platform_config_id)
+    .fetch_one(&pool)
+    .await
+    .expect("Ningbo housing binding");
 
     let (status, body) = authed_json(
         app.clone(),
@@ -1922,16 +1940,18 @@ async fn worker_and_team_updates_enqueue_only_the_required_async_targets() {
     sqlx::query(
         r#"
         INSERT INTO integration_jobs (
-            project_id, platform_code, operation, entity_type, local_entity_id,
-            idempotency_key, request_payload, status, last_error
+            project_id, binding_id, platform_code, operation, entity_type, local_entity_id,
+            idempotency_key, request_payload, status, last_error, updated_at
         )
         VALUES (
-            $1, 'ningbo_housing', 'Project/AddWorkerV2', 'worker', $2,
-            $3, '{}'::jsonb, 'failed', '该人员为备案人员，请通过信用系统操作'
+            $1, $2, 'ningbo_housing', 'Project/AddWorkerV2', 'worker', $3,
+            $4, '{}'::jsonb, 'failed', '该人员为备案人员，请通过信用系统操作',
+            '2099-01-01 00:00:00+00'
         )
         "#,
     )
     .bind(Uuid::parse_str(project_id).expect("project uuid"))
+    .bind(binding_id)
     .bind(worker_id)
     .bind(format!("ningbo-recorded-worker-{worker_id}"))
     .execute(&pool)
@@ -1957,8 +1977,89 @@ async fn worker_and_team_updates_enqueue_only_the_required_async_targets() {
         workers_body["data"]["items"][0]["reporting_platforms"][0]["failure_reason"],
         Value::Null
     );
-    assert_eq!(workers_body["data"]["reporting_summary"][0]["success_count"], 1);
-    assert_eq!(workers_body["data"]["reporting_summary"][0]["failure_count"], 0);
+    assert_eq!(
+        workers_body["data"]["reporting_summary"][0]["success_count"],
+        1
+    );
+    assert_eq!(
+        workers_body["data"]["reporting_summary"][0]["failure_count"],
+        0
+    );
+
+    sqlx::query("UPDATE construction_workers SET worker_type = 1001 WHERE id = $1")
+        .bind(worker_id)
+        .execute(&pool)
+        .await
+        .expect("mark worker as recorded worker");
+    sqlx::query(
+        r#"
+        DELETE FROM integration_person_identities
+        WHERE identity_type = 'id_card'
+          AND identity_value = '330283199710280537'
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .expect("remove Yongjian identity cache");
+    sqlx::query(
+        r#"
+        INSERT INTO integration_jobs (
+            project_id, binding_id, platform_code, operation, entity_type, local_entity_id,
+            idempotency_key, request_payload, status, completed_at, updated_at
+        )
+        VALUES (
+            $1, $2, 'ningbo_housing', 'Project/AddWorkerV2', 'worker', $3,
+            $4, '{}'::jsonb, 'success', NOW(), '2099-01-02 00:00:00+00'
+        )
+        "#,
+    )
+    .bind(Uuid::parse_str(project_id).expect("project uuid"))
+    .bind(binding_id)
+    .bind(worker_id)
+    .bind(format!("ningbo-success-without-code-{worker_id}"))
+    .execute(&pool)
+    .await
+    .expect("insert successful Ningbo job without Yongjian code");
+
+    let (status, workers_body) = get_authed(
+        app.clone(),
+        &format!("/api/v1/admin/projects/{project_id}/workers"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{workers_body}");
+    assert_eq!(
+        workers_body["data"]["items"][0]["reporting_platforms"][0]["status"],
+        "failed"
+    );
+    assert_eq!(
+        workers_body["data"]["items"][0]["reporting_platforms"][0]["failure_reason"],
+        "市住建未返回涌建码，请修正上报"
+    );
+    assert_eq!(
+        workers_body["data"]["reporting_summary"][0]["success_count"],
+        0
+    );
+    assert_eq!(
+        workers_body["data"]["reporting_summary"][0]["failure_count"],
+        1
+    );
+
+    let (status, repair_body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/workers/reporting/repair"),
+        &token,
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{repair_body}");
+    assert_eq!(repair_body["data"]["attempted_count"], 1);
+    sqlx::query("UPDATE construction_workers SET worker_type = 1 WHERE id = $1")
+        .bind(worker_id)
+        .execute(&pool)
+        .await
+        .expect("restore ordinary worker type");
 
     sqlx::query("DELETE FROM integration_outbox_events WHERE aggregate_id IN ($1, $2)")
         .bind(team_id)

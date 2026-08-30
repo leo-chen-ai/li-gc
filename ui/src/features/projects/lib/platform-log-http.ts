@@ -30,23 +30,45 @@ export function platformLogAttempts(payload: JsonValue | null): PlatformHttpAtte
 }
 
 export function buildPlatformAttemptCurl(attempt: PlatformHttpAttempt, baseUrl = ""): string {
-  const url = resolveAttemptUrl(attempt.url, baseUrl);
+  const method = (attempt.method || "POST").toUpperCase();
+  const queryRequest = method === "GET" || method === "HEAD";
+  const url = queryRequest
+    ? appendQuery(resolveAttemptUrl(attempt.url, baseUrl), attempt.request)
+    : resolveAttemptUrl(attempt.url, baseUrl);
   const headers = { ...attempt.headers };
-  if (!hasHeader(headers, "content-type") && attempt.request !== null) {
+  if (!queryRequest && !hasHeader(headers, "content-type") && attempt.request !== null) {
     headers["Content-Type"] = "application/json";
   }
 
   const lines = [
-    `curl --request ${shellQuote(attempt.method || "POST")}`,
+    `curl --request ${shellQuote(method)}`,
     `  --url ${shellQuote(url || attempt.url || "[REQUEST_URL]")}`,
     ...Object.entries(headers).map(
       ([name, value]) => `  --header ${shellQuote(`${name}: ${value}`)}`
     ),
   ];
-  if (attempt.request !== null) {
+  if (!queryRequest && attempt.request !== null) {
     lines.push(`  --data-raw ${shellQuote(JSON.stringify(attempt.request))}`);
   }
   return lines.join(" \\\n");
+}
+
+function appendQuery(url: string, request: JsonValue | null): string {
+  const object = asObject(request);
+  if (!object || !url) return url;
+  const separator = url.includes("?") ? "&" : "?";
+  const query = Object.entries(object)
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(queryValue(value))}`)
+    .join("&");
+  return query ? `${url}${separator}${query}` : url;
+}
+
+function queryValue(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return JSON.stringify(value);
 }
 
 export function formatPlatformLogJson(value: JsonValue | null): string {
