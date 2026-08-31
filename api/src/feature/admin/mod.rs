@@ -1,6 +1,7 @@
 pub mod api_key;
 pub mod attendance_alert;
 pub mod construction;
+pub mod dashboard;
 pub mod enterprise;
 pub mod log;
 pub mod managed_attendance_dispatcher;

@@ -591,6 +591,8 @@ fi
 if [ "$DEPLOY_UI" = true ]; then
   build_image "$UI_IMAGE" ui \
     --build-arg "VITE_API_URL=$FRONTEND_API_URL" \
+    --build-arg "VITE_AMAP_KEY=${VITE_AMAP_KEY:-}" \
+    --build-arg "VITE_AMAP_SECURITY_CODE=${VITE_AMAP_SECURITY_CODE:-}" \
     "$ROOT_DIR/ui"
   import_image "$UI_IMAGE"
   rollout_ui

@@ -55,6 +55,7 @@ pub fn app_routes(state: AppState) -> Router {
         )
         .nest("/admin", admin::routes::admin_routes())
         .nest("/admin/api-keys", admin::api_key::api_key_routes())
+        .nest("/dashboard", admin::dashboard::dashboard_routes())
         .layer(Extension(blacklist)) // Inject blacklist for auth middleware
         .layer(DefaultBodyLimit::max(API_REQUEST_BODY_LIMIT_BYTES))
         .layer(from_fn(rate_limit_middleware))

@@ -220,4 +220,19 @@ export const API_ENDPOINTS = {
       `/admin/managed-attendance/configs/${configId}/resend-day`,
     MANAGED_ATTENDANCE_RECORDS: "/admin/managed-attendance/records",
   },
+  DASHBOARD: {
+    OVERVIEW: "/dashboard/overview",
+    PROJECTS_MAP: "/dashboard/projects/map",
+    SMART_SITE: "/dashboard/smart-site",
+    ALERTS_30D: "/dashboard/alerts/30d",
+    ALERTS_TODAY: "/dashboard/alerts/today",
+    ATTENDANCE_30D: "/dashboard/attendance/30d",
+    PROJECT_BOARD: (projectId: string) => `/dashboard/projects/${projectId}/board`,
+    PROJECT_ATTENDANCE_FEED: (projectId: string) =>
+      `/dashboard/projects/${projectId}/attendance/feed`,
+    PROJECT_ATTENDANCE_30D: (projectId: string) =>
+      `/dashboard/projects/${projectId}/attendance/30d`,
+    PROJECT_ATTENDANCE_TODAY_HOURLY: (projectId: string) =>
+      `/dashboard/projects/${projectId}/attendance/today-hourly`,
+  },
 } as const;

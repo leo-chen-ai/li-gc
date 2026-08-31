@@ -2,6 +2,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import {
   ChevronRight,
   MapPin,
+  Monitor,
   Pencil,
   Plus,
   Search,
@@ -90,6 +91,8 @@ export function ProjectsPage() {
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(10);
   const [formOpen, setFormOpen] = useState(false);
   const [projectForm, setProjectForm] = useState<ConstructionFormState>(() => buildDefaultFormState(projectFormFields));
+  // 编辑时保存打开表单的初始快照，提交只包含变更字段，防止未回显/未填写字段被覆盖清空
+  const [projectFormInitial, setProjectFormInitial] = useState<ConstructionFormState | null>(null);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [projectPendingDelete, setProjectPendingDelete] = useState<ProjectRow | null>(null);
   const updateProject = useUpdateProjectMutation(editingProjectId ?? "");
@@ -130,12 +133,15 @@ export function ProjectsPage() {
   const openCreateForm = () => {
     setEditingProjectId(null);
     setProjectForm(buildDefaultFormState(projectFormFields));
+    setProjectFormInitial(null);
     setFormOpen(true);
   };
 
   const openEditForm = (project: ProjectRow) => {
+    const initial = projectToForm(project);
     setEditingProjectId(project.id);
-    setProjectForm(projectToForm(project));
+    setProjectForm(initial);
+    setProjectFormInitial(initial);
     setFormOpen(true);
   };
 
@@ -147,7 +153,13 @@ export function ProjectsPage() {
     }
 
     try {
-      const payload = buildPayloadFromForm(projectFormFields, projectForm) as ConstructionProjectPayload;
+      const payload = buildPayloadFromForm(projectFormFields, projectForm, {
+        initialState: editingProjectId ? projectFormInitial ?? undefined : undefined,
+      }) as ConstructionProjectPayload;
+      if (editingProjectId && Object.keys(payload).length === 0) {
+        toast.info("没有需要保存的修改");
+        return;
+      }
       if (editingProjectId) {
         await updateProject.mutateAsync(payload);
         toast.success("项目已修改");
@@ -158,6 +170,7 @@ export function ProjectsPage() {
       setFormOpen(false);
       setEditingProjectId(null);
       setProjectForm(buildDefaultFormState(projectFormFields));
+      setProjectFormInitial(null);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : editingProjectId ? "项目修改失败" : "项目新增失败");
     }
@@ -189,15 +202,25 @@ export function ProjectsPage() {
             <CompactStat label="重点关注" value={`${focusProjects} 个`} helper="关注/预警项目" accent="amber" />
           </div>
 
-          {isAdmin ? (
+          <div className="flex items-center gap-2 lg:justify-self-end">
             <Button
-              className="h-9 gap-2 justify-self-start bg-[#0f6b5d] text-white hover:bg-[#0b5148] lg:justify-self-end"
-              onClick={openCreateForm}
+              variant="outline"
+              className="h-9 gap-2"
+              onClick={() => navigate({ to: "/app/data-screen" })}
             >
-              <Plus className="size-4" />
-              新增项目
+              <Monitor className="size-4" />
+              数据大屏
             </Button>
-          ) : null}
+            {isAdmin ? (
+              <Button
+                className="h-9 gap-2 bg-[#0f6b5d] text-white hover:bg-[#0b5148]"
+                onClick={openCreateForm}
+              >
+                <Plus className="size-4" />
+                新增项目
+              </Button>
+            ) : null}
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-3 bg-[#f8faf9] px-4 py-2.5 dark:bg-muted/30">

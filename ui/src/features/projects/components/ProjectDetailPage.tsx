@@ -712,6 +712,8 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const [formState, setFormState] = useState<DetailFormState>({});
   const [formOpen, setFormOpen] = useState(false);
   const [projectFormState, setProjectFormState] = useState<DetailFormState>({});
+  // 打开编辑弹窗时的初始快照，提交只包含变更字段，防止未回显/未填写字段被覆盖清空
+  const [projectFormInitial, setProjectFormInitial] = useState<DetailFormState | null>(null);
   const [projectFormOpen, setProjectFormOpen] = useState(false);
   const [advancedExportOpen, setAdvancedExportOpen] = useState(false);
   const [attendanceGeneratorOpen, setAttendanceGeneratorOpen] = useState(false);
@@ -836,12 +838,12 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       toast.info("项目数据尚未加载，暂不能编辑。");
       return;
     }
-    setProjectFormState(
-      buildFormStateFromRecord(
-        projectFormFields,
-        projectQuery.data as unknown as Record<string, unknown>
-      )
+    const initial = buildFormStateFromRecord(
+      projectFormFields,
+      projectQuery.data as unknown as Record<string, unknown>
     );
+    setProjectFormState(initial);
+    setProjectFormInitial(initial);
     setProjectFormOpen(true);
   };
 
@@ -855,8 +857,13 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     try {
       const payload = buildPayloadFromForm(
         projectFormFields,
-        projectFormState
+        projectFormState,
+        { initialState: projectFormInitial ?? undefined }
       ) as ConstructionProjectPayload;
+      if (Object.keys(payload).length === 0) {
+        toast.info("没有需要保存的修改");
+        return;
+      }
       await updateProject.mutateAsync(payload);
       setProjectFormOpen(false);
       toast.success("项目已修改");

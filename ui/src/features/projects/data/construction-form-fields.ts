@@ -667,8 +667,10 @@ export function buildFormStateFromRecord(
 
 export function buildPayloadFromForm(
   fields: ConstructionFormField[],
-  state: ConstructionFormState
+  state: ConstructionFormState,
+  options: { initialState?: ConstructionFormState } = {}
 ): ConstructionPayload {
+  const { initialState } = options;
   return fields.reduce<ConstructionPayload>((payload, field) => {
     if (!isFieldVisible(field, state)) return payload;
     // 地图定位是复合展示字段，真实数据（经纬度/POI/地址）由选点组件写入对应 hidden 字段
@@ -681,6 +683,13 @@ export function buildPayloadFromForm(
 
     if (field.regionRequireDistrict && rawValue.length > 0 && !/^\d{6}$/.test(rawValue)) {
       throw new Error(`请选择${field.label}的省、市和区县`);
+    }
+
+    // 编辑模式（传入打开表单时的初始快照）：未改动的字段不进入 payload，
+    // 后端按 payload 部分更新，避免表单未回显/未填写的字段被清空覆盖。
+    // 用户主动清空某字段属于改动（初始非空 → 现为空），仍会提交。
+    if (initialState && (initialState[field.key] ?? "").trim() === rawValue) {
+      return payload;
     }
 
     if (field.valueType === "boolean") {

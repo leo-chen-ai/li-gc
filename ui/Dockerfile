@@ -15,7 +15,11 @@ RUN bun install --frozen-lockfile --registry https://registry.npmjs.org/
 # Copy source and build
 COPY . .
 ARG VITE_API_URL=
+ARG VITE_AMAP_KEY=
+ARG VITE_AMAP_SECURITY_CODE=
 ENV VITE_API_URL=$VITE_API_URL
+ENV VITE_AMAP_KEY=$VITE_AMAP_KEY
+ENV VITE_AMAP_SECURITY_CODE=$VITE_AMAP_SECURITY_CODE
 RUN bun run build
 
 # Stage 2: Production (Nginx)

@@ -64,6 +64,8 @@ export type AMapConstructor = {
   Marker: new (options: Record<string, unknown>) => AMapMarker;
   Geocoder: new (options?: Record<string, unknown>) => AMapGeocoder;
   PlaceSearch: new (options?: Record<string, unknown>) => AMapPlaceSearch;
+  // 2.0 下插件可能延迟就绪，缺失时用它按需补加载
+  plugin?: (names: string[], callback: () => void) => void;
 };
 
 declare global {

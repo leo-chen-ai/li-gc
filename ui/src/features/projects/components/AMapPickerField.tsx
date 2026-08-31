@@ -144,6 +144,57 @@ function AMapLocationPickerOverlay({
       : null
   );
 
+  // 逆地理编码取地名：高德服务偶发超时/限流导致失败，
+  // 自动重试，最终失败给出提示和手动重试入口，避免地名静默丢失。
+  // seq 用于丢弃过期请求（用户快速连续点图时只采纳最后一次）。
+  const geocodeSeqRef = useRef(0);
+  const [nameStatus, setNameStatus] = useState<"idle" | "loading" | "failed">("idle");
+
+  const fillLocationName = useCallback((lng: number, lat: number) => {
+    const seq = ++geocodeSeqRef.current;
+    setNameStatus("loading");
+
+    const attempt = (retriesLeft: number) => {
+      const AMap = amapRef.current;
+      if (!AMap) return;
+      if (typeof AMap.Geocoder !== "function") {
+        // 2.0 下插件可能延迟就绪，按需补加载后重试一次
+        if (AMap.plugin && retriesLeft > 0) {
+          AMap.plugin(["AMap.Geocoder"], () => {
+            if (seq === geocodeSeqRef.current) attempt(retriesLeft - 1);
+          });
+          return;
+        }
+        setNameStatus("failed");
+        return;
+      }
+      const geocoder = new AMap.Geocoder();
+      geocoder.getAddress([lng, lat], (status, result) => {
+        if (seq !== geocodeSeqRef.current) return;
+        if (status === "complete" && result.regeocode) {
+          const formattedAddress = result.regeocode.formattedAddress ?? "";
+          const nearestPoiName = result.regeocode.pois?.[0]?.name ?? "";
+          setNameStatus("idle");
+          setSelected((current) =>
+            current
+              ? { ...current, address: formattedAddress || current.address, poiName: nearestPoiName || current.poiName }
+              : current
+          );
+          return;
+        }
+        if (retriesLeft > 0) {
+          window.setTimeout(() => {
+            if (seq === geocodeSeqRef.current) attempt(retriesLeft - 1);
+          }, 600);
+          return;
+        }
+        setNameStatus("failed");
+      });
+    };
+
+    attempt(2);
+  }, []);
+
   const placeMarker = useCallback((AMap: AMapConstructor, map: AMapMap, lng: number, lat: number) => {
     if (markerRef.current) {
       markerRef.current.setPosition([lng, lat]);
@@ -161,23 +212,11 @@ function AMapLocationPickerOverlay({
         poiName: "",
         address: "",
       });
-      if (amapRef.current) {
-        const geocoder = new amapRef.current.Geocoder();
-        geocoder.getAddress([nextLng, nextLat], (status, result) => {
-          if (status !== "complete" || !result.regeocode) return;
-          const formattedAddress = result.regeocode.formattedAddress ?? "";
-          const nearestPoiName = result.regeocode.pois?.[0]?.name ?? "";
-          setSelected((current) =>
-            current
-              ? { ...current, address: formattedAddress, poiName: nearestPoiName || current.poiName }
-              : current
-          );
-        });
-      }
+      fillLocationName(nextLng, nextLat);
     });
     map.add(marker);
     markerRef.current = marker;
-  }, []);
+  }, [fillLocationName]);
 
   useEffect(() => {
     let disposed = false;
@@ -217,17 +256,7 @@ function AMapLocationPickerOverlay({
           const lat = event.lnglat.getLat();
           placeMarker(AMap, map, lng, lat);
           setSelected({ longitude: lng.toFixed(6), latitude: lat.toFixed(6), poiName: "", address: "" });
-          const geocoder = new AMap.Geocoder();
-          geocoder.getAddress([lng, lat], (status, result) => {
-            if (status !== "complete" || !result.regeocode) return;
-            const formattedAddress = result.regeocode.formattedAddress ?? "";
-            const nearestPoiName = result.regeocode.pois?.[0]?.name ?? "";
-            setSelected((current) =>
-              current
-                ? { ...current, address: formattedAddress, poiName: nearestPoiName || current.poiName }
-                : current
-            );
-          });
+          fillLocationName(lng, lat);
         });
 
         setLoading(false);
@@ -294,6 +323,7 @@ function AMapLocationPickerOverlay({
       placeMarker(AMap, map, lng, lat);
     }
     const regionAddress = [poi.pname, poi.cityname, poi.adname].filter(Boolean).join("");
+    setNameStatus("idle");
     setSelected({
       longitude: lng.toFixed(6),
       latitude: lat.toFixed(6),
@@ -385,10 +415,24 @@ function AMapLocationPickerOverlay({
             {selected ? (
               <>
                 <div className="font-medium text-slate-800 dark:text-foreground">
-                  {selected.poiName || selected.address || "已选择坐标"}
+                  {selected.poiName
+                    || selected.address
+                    || (nameStatus === "loading" ? "正在获取地名…" : "已选择坐标")}
                 </div>
                 {selected.address && selected.poiName ? (
                   <div className="mt-0.5">{selected.address}</div>
+                ) : null}
+                {!selected.poiName && !selected.address && nameStatus === "failed" ? (
+                  <div className="mt-1 flex items-center gap-2 text-red-600 dark:text-red-400">
+                    <span>地名获取失败（网络波动或高德服务繁忙），坐标已选上</span>
+                    <button
+                      type="button"
+                      className="underline"
+                      onClick={() => fillLocationName(Number(selected.longitude), Number(selected.latitude))}
+                    >
+                      重试获取地名
+                    </button>
+                  </div>
                 ) : null}
                 <div className="mt-0.5">
                   经纬度：{selected.longitude}, {selected.latitude}（高德 GCJ-02）
