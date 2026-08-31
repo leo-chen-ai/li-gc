@@ -52,6 +52,8 @@ export const WorldMap = memo(function WorldMap({ projects, onProjectClick, selec
   const clickRef = useRef(onProjectClick);
   const mapReadyRef = useRef(onMapReady);
   const closeRef = useRef(onCloseTooltip);
+  // Always holds the latest projects so the map-init callback can read them
+  const projectsRef = useRef(projects);
 
   useEffect(() => {
     clickRef.current = onProjectClick;
@@ -64,6 +66,10 @@ export const WorldMap = memo(function WorldMap({ projects, onProjectClick, selec
   useEffect(() => {
     closeRef.current = onCloseTooltip;
   }, [onCloseTooltip]);
+
+  useEffect(() => {
+    projectsRef.current = projects;
+  });
 
   // Tooltip position state
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
@@ -87,6 +93,71 @@ export const WorldMap = memo(function WorldMap({ projects, onProjectClick, selec
     }
   }, [selectedProject]);
 
+  // ── Shared marker render helper ─────────────────────────────────────────
+  function renderMarkers(map: any, pts: MapProjectPoint[]) {
+    const AMap = (window as any).AMap;
+    if (!AMap) return;
+
+    markersRef.current.forEach((m: any) => map.remove(m));
+    markersRef.current = [];
+
+    pts
+      .filter((p) => p.latitude != null && p.longitude != null)
+      .forEach((p) => {
+        const lng = Number(p.longitude);
+        const lat = Number(p.latitude);
+
+        // Neon glowing dot
+        const el = document.createElement("div");
+        el.style.cssText = `
+          width: 10px; height: 10px; border-radius: 50%;
+          background: radial-gradient(circle, #ffffff 0%, #00e5ff 40%, #0088ff 100%);
+          box-shadow: 0 0 8px 2px rgba(0,229,255,0.7), 0 0 20px 6px rgba(0,136,255,0.35), 0 0 35px 10px rgba(0,229,255,0.12);
+          cursor: pointer; position: relative;
+        `;
+
+        // Radar ripple rings
+        [1, 2].forEach((i) => {
+          const ring = document.createElement("div");
+          const delay = i * 0.6;
+          ring.style.cssText = `
+            position: absolute; top: -10px; left: -10px;
+            width: 30px; height: 30px; border-radius: 50%;
+            border: 1.5px solid rgba(0,229,255,${0.5 - i * 0.15});
+            animation: amapRipple 2.4s ease-out infinite;
+            animation-delay: ${delay}s;
+            pointer-events: none;
+          `;
+          el.appendChild(ring);
+        });
+
+        const marker = new AMap.Marker({
+          position: new AMap.LngLat(lng, lat),
+          content: el,
+          offset: new AMap.Pixel(-6, -6),
+          extData: p,
+        });
+
+        marker.on("click", () => {
+          clickRef.current?.(p);
+          const m = mapRef.current;
+          if (m) {
+            const pos = m.lngLatToContainer(new AMap.LngLat(lng, lat));
+            if (pos) {
+              const size = m.getSize();
+              setTooltipPos({
+                x: Math.max(150, Math.min(size.width - 150, pos.x)),
+                y: Math.max(0, pos.y - 20),
+              });
+            }
+          }
+        });
+
+        map.add(marker);
+        markersRef.current.push(marker);
+      });
+  }
+
   // ── Init map once ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!containerRef.current) return;
@@ -109,6 +180,10 @@ export const WorldMap = memo(function WorldMap({ projects, onProjectClick, selec
       });
 
       mapRef.current = map;
+
+      // Render any projects that arrived before the map was ready
+      renderMarkers(map, projectsRef.current);
+
       mapReadyRef.current?.();
 
       // Click on empty map area to dismiss tooltip
@@ -124,77 +199,15 @@ export const WorldMap = memo(function WorldMap({ projects, onProjectClick, selec
         mapRef.current = null;
       }
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Update markers when data changes ───────────────────────────────────
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return;
-    const AMap = (window as any).AMap;
-    if (!AMap) return;
-
-    // Clear old markers
-    markersRef.current.forEach((m: any) => map.remove(m));
-    markersRef.current = [];
-
-    const validProjects = projects.filter(
-      (p) => p.latitude != null && p.longitude != null
-    );
-
-    validProjects.forEach((p) => {
-      const lng = Number(p.longitude);
-      const lat = Number(p.latitude);
-
-      // Neon glowing dot
-      const el = document.createElement("div");
-      el.style.cssText = `
-        width: 10px; height: 10px; border-radius: 50%;
-        background: radial-gradient(circle, #ffffff 0%, #00e5ff 40%, #0088ff 100%);
-        box-shadow: 0 0 8px 2px rgba(0,229,255,0.7), 0 0 20px 6px rgba(0,136,255,0.35), 0 0 35px 10px rgba(0,229,255,0.12);
-        cursor: pointer; position: relative;
-      `;
-
-      // Radar ripple rings
-      [1, 2].forEach((i) => {
-        const ring = document.createElement("div");
-        const delay = i * 0.6;
-        ring.style.cssText = `
-          position: absolute; top: -10px; left: -10px;
-          width: 30px; height: 30px; border-radius: 50%;
-          border: 1.5px solid rgba(0,229,255,${0.5 - i * 0.15});
-          animation: amapRipple 2.4s ease-out infinite;
-          animation-delay: ${delay}s;
-          pointer-events: none;
-        `;
-        el.appendChild(ring);
-      });
-
-      const marker = new AMap.Marker({
-        position: new AMap.LngLat(lng, lat),
-        content: el,
-        offset: new AMap.Pixel(-6, -6),
-        extData: p,
-      });
-
-      marker.on("click", () => {
-        clickRef.current?.(p);
-        // Position tooltip above this marker
-        const map = mapRef.current;
-        if (map) {
-          const pos = map.lngLatToContainer(new AMap.LngLat(lng, lat));
-          if (pos) {
-            const size = map.getSize();
-            setTooltipPos({
-              x: Math.max(150, Math.min(size.width - 150, pos.x)),
-              y: Math.max(0, pos.y - 20),
-            });
-          }
-        }
-      });
-
-      map.add(marker);
-      markersRef.current.push(marker);
-    });
+    if (!map) return; // map not ready yet — init callback will handle it
+    renderMarkers(map, projects);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projects]);
 
   return (
