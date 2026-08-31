@@ -5,6 +5,7 @@ import {
   canAccessSystemWarnings,
   getDefaultAdminPath,
   getMenuKeysForUserRole,
+  isAdminWorkspacePath,
   menuPermissions,
 } from "./rbac.ts";
 
@@ -45,4 +46,11 @@ test("custom roles receive their configured menus", () => {
 test("report-only roles land directly in the data reporting center", () => {
   assert.equal(getDefaultAdminPath(["data_reporting"]), "/app/admin/data-reporting");
   assert.equal(getDefaultAdminPath([]), "/app/admin");
+});
+
+test("admin menu guard does not intercept the standalone data screen", () => {
+  assert.equal(isAdminWorkspacePath("/app/admin"), true);
+  assert.equal(isAdminWorkspacePath("/app/admin/projects"), true);
+  assert.equal(isAdminWorkspacePath("/app/data-screen"), false);
+  assert.equal(isAdminWorkspacePath("/app/data-screen/project/project-id"), false);
 });

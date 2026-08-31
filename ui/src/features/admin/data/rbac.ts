@@ -385,6 +385,10 @@ export function getDefaultAdminPath(menuKeys: Iterable<MenuPermissionKey>): stri
   );
 }
 
+export function isAdminWorkspacePath(pathname: string): boolean {
+  return pathname === "/app/admin" || pathname.startsWith("/app/admin/");
+}
+
 export function canAccessSystemWarnings(role?: string): boolean {
   return role !== "shujubaosong";
 }

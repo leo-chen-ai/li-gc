@@ -17,6 +17,7 @@ import {
   canAccessSystemWarnings,
   getDefaultAdminPath,
   getMenuKeysForUserRole,
+  isAdminWorkspacePath,
   type MenuPermissionKey,
 } from "@/features/admin/data/rbac";
 import { useCurrentRolePermissions } from "@/features/admin/hooks/use-roles";
@@ -122,7 +123,11 @@ function AdminContent() {
     );
   }
 
-  if (user?.role !== "admin" && !canUseScopedPage) {
+  if (
+    user?.role !== "admin" &&
+    isAdminWorkspacePath(location.pathname) &&
+    !canUseScopedPage
+  ) {
     if (firstAllowedScopedPage) {
       navigate({ to: firstAllowedScopedPage.path });
       return null;

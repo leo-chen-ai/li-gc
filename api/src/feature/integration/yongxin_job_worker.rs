@@ -505,12 +505,15 @@ async fn execute_entry_exit_sync(
         .await?
         .ok_or_else(|| JobIssue::WaitingDependency("等待所属班组同步成功".to_owned()))?;
     let is_exit = event_operation(job) == "delete" || value_i64(&worker, "work_status") == Some(2);
-    let date = if is_exit {
-        optional_text(&worker, "exit_time")
-            .unwrap_or_else(|| Utc::now().format("%Y-%m-%d").to_string())
-    } else {
-        required_text(&worker, "entry_time", "人员进场日期")?
-    };
+    let is_reentry = !is_exit
+        && latest_successful_entry_exit_was_exit(
+            state.db.pool(),
+            job.binding_id,
+            worker_id,
+            job.id,
+        )
+        .await?;
+    let date = entry_exit_datetime(&worker, &job.request_payload, is_exit, is_reentry)?;
     let payload = json!({
         "name": required_text(&worker, "name", "人员姓名")?,
         "idCardType": "01",
@@ -520,7 +523,7 @@ async fn execute_entry_exit_sync(
         ).map_err(|error| JobIssue::WaitingData(error.to_string()))?,
         "teamSysNo": team_sys_no,
         "type": if is_exit { 0 } else { 1 },
-        "date": format_platform_datetime(date)?,
+        "date": date,
     });
     let response = call_json(
         state,
@@ -532,6 +535,64 @@ async fn execute_entry_exit_sync(
     )
     .await?;
     await_async_response(state.db.pool(), job, &response.body).await
+}
+
+async fn latest_successful_entry_exit_was_exit(
+    pool: &PgPool,
+    binding_id: Uuid,
+    worker_id: Uuid,
+    current_job_id: Uuid,
+) -> Result<bool, JobIssue> {
+    sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT COALESCE((attempt.request_body ->> 'type')::int = 0, FALSE)
+        FROM integration_jobs earlier
+        JOIN LATERAL (
+            SELECT request_body
+            FROM integration_attempts
+            WHERE job_id = earlier.id
+              AND request_url LIKE '%/entryExit/v2/add'
+            ORDER BY attempt_no DESC, created_at DESC, id DESC
+            LIMIT 1
+        ) attempt ON TRUE
+        WHERE earlier.binding_id = $1
+          AND earlier.local_entity_id = $2
+          AND earlier.id <> $3
+          AND earlier.platform_code = 'yongxin_v2'
+          AND earlier.operation = 'entry_exit.sync'
+          AND earlier.status = 'success'
+        ORDER BY earlier.completed_at DESC NULLS LAST, earlier.created_at DESC, earlier.id DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(binding_id)
+    .bind(worker_id)
+    .bind(current_job_id)
+    .fetch_optional(pool)
+    .await
+    .map(|value| value.unwrap_or(false))
+    .map_err(|error| JobIssue::Retryable(error.to_string()))
+}
+
+fn entry_exit_datetime(
+    worker: &Value,
+    request_payload: &Value,
+    is_exit: bool,
+    is_reentry: bool,
+) -> Result<String, JobIssue> {
+    let value = if is_exit {
+        optional_text(worker, "exit_time")
+            .unwrap_or_else(|| Utc::now().format("%Y-%m-%d").to_string())
+    } else if is_reentry {
+        request_payload
+            .pointer("/event/occurred_at")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| Utc::now().to_rfc3339())
+    } else {
+        required_text(worker, "entry_time", "人员进场日期")?
+    };
+    format_platform_datetime(value)
 }
 
 async fn execute_attendance_sync(
@@ -1854,5 +1915,28 @@ mod tests {
         assert_eq!(native_place_code(Some(330200)).unwrap(), "27");
         assert_eq!(native_place_code(None).unwrap(), "27");
         assert_eq!(native_place_code(Some(0)).unwrap(), "27");
+    }
+
+    #[test]
+    fn reentry_uses_the_status_change_time_in_shanghai_timezone() {
+        let worker = json!({
+            "entry_time": "2026-08-31",
+            "exit_time": null,
+        });
+        let event = json!({
+            "event": {
+                "operation": "update",
+                "occurred_at": "2026-08-31T08:52:36.623630+00:00",
+            }
+        });
+
+        assert_eq!(
+            entry_exit_datetime(&worker, &event, false, true).unwrap(),
+            "2026-08-31 16:52:36"
+        );
+        assert_eq!(
+            entry_exit_datetime(&worker, &event, false, false).unwrap(),
+            "2026-08-31 00:00:00"
+        );
     }
 }
