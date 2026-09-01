@@ -67,6 +67,18 @@ class TargetLogin:
         self.short_wait = None
         self.sms_requested_at = None
 
+    def clear_persisted_session(self):
+        """Clear the target profile's stale cross-subdomain authentication."""
+        try:
+            self.driver.execute_cdp_cmd('Network.clearBrowserCookies', {})
+            self.driver.execute_cdp_cmd('Network.clearBrowserCache', {})
+        except Exception as error:
+            logger.warning("CDP 清理目标站会话失败，回退到当前域 Cookie 清理: %s", error)
+            try:
+                self.driver.delete_all_cookies()
+            except Exception:
+                pass
+
     def _start_feishu_listener(self):
         listener_script = os.path.join(self.script_dir, 'feishu_listener.py')
 

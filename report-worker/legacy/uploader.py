@@ -27,6 +27,10 @@ PAGE_LOAD_TIMEOUT = 30
 EXISTING_MARKERS = ('已存在', '已经存在', '人员已备案', '重复参保', '重复申报')
 
 
+class TargetSessionExpired(RuntimeError):
+    """The public home page looks logged in, but the user center rejected it."""
+
+
 def normalize_upload_result(total_rows, success_rows, result_text):
     total = int(total_rows) if str(total_rows).isdigit() else None
     success = int(success_rows) if str(success_rows).isdigit() else None
@@ -278,7 +282,7 @@ class Uploader:
         self.short_wait = WebDriverWait(self.driver, 5)
         logger.info("Chromium 浏览器已启动")
 
-    def _login(self):
+    def _login(self, force_reauth=False):
         from target_login import TargetLogin
         self.target = TargetLogin(self.config)
         self.target.driver = self.driver
@@ -292,8 +296,11 @@ class Uploader:
             self.long_wait = WebDriverWait(self.driver, 15)
             self.short_wait = WebDriverWait(self.driver, 5)
 
-            if self.target._reuse_existing_session():
+            if not force_reauth and self.target._reuse_existing_session():
                 return
+            if force_reauth:
+                logger.warning("目标站跨域登录状态已过期，清理旧会话后重新登录")
+                self.target.clear_persisted_session()
             if not self.target._start_feishu_listener():
                 raise RuntimeError("飞书监听启动失败")
             if not self.target.login(reuse_session=False):
@@ -341,6 +348,7 @@ class Uploader:
             logger.info(f"  - {os.path.basename(file_path)}")
 
         session_needs_restart = False
+        force_reauth = False
         for idx, file_path in enumerate(xlsx_files):
             filename = os.path.basename(file_path)
             project_name = extract_project_name(file_path)
@@ -349,8 +357,12 @@ class Uploader:
             for attempt in range(self.max_execution_retries + 1):
                 try:
                     if session_needs_restart:
-                        self._restart_session()
+                        if force_reauth:
+                            self._restart_session(force_reauth=True)
+                        else:
+                            self._restart_session()
                         session_needs_restart = False
+                        force_reauth = False
                     result = self._upload_single_file(
                         file_path,
                         project_name,
@@ -361,6 +373,7 @@ class Uploader:
                 except Exception as e:
                     self._log_page_state("上传失败现场")
                     session_needs_restart = True
+                    force_reauth = isinstance(e, TargetSessionExpired)
                     error = str(e)
                     is_business_rejection = error.startswith(
                         "政府平台未接受该人员"
@@ -395,7 +408,7 @@ class Uploader:
         logger.info(f"全部上传完成，失败/错误文件: {len(self.error_files)}")
         return self.results
 
-    def _restart_session(self):
+    def _restart_session(self, force_reauth=False):
         if not self.own_driver:
             raise RuntimeError("外部浏览器会话无法自动重启")
         self.close()
@@ -404,7 +417,7 @@ class Uploader:
         self.short_wait = None
         self.target = None
         self._init_driver()
-        self._login()
+        self._login(force_reauth=force_reauth)
 
     def _upload_single_file(self, file_path, project_name, is_first=False):
         if is_first:
@@ -693,6 +706,10 @@ class Uploader:
         deadline = time.time() + 60
         last_log = 0
         while time.time() < deadline:
+            if self._target_session_expired():
+                raise TargetSessionExpired(
+                    "目标政务网跨域登录状态已过期（用户中心要求重新登录）"
+                )
             el = _find_first(self.driver, selectors)
             if el:
                 break
@@ -753,6 +770,15 @@ class Uploader:
         raise RuntimeError(
             f"点击在线办理后未识别到授权页、备案类型选择或在线填表页: {self.driver.current_url}"
         )
+
+    def _target_session_expired(self):
+        current_url = (self.driver.current_url or '').lower()
+        if '#/mymessage' not in current_url and 'zjucenter' not in current_url:
+            return False
+        return _find_first(self.driver, [
+            (By.XPATH, "//*[self::a or self::button or self::span][normalize-space(.)='立即登录']"),
+            (By.XPATH, "//*[self::a or self::button][normalize-space(.)='登录']"),
+        ]) is not None
 
     def _log_page_state(self, label):
         try:

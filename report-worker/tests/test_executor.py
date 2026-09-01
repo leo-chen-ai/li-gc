@@ -1069,6 +1069,30 @@ def test_online_handle_does_not_treat_workguide_text_as_navigation(monkeypatch):
         instance._click_online_handle()
 
 
+def test_online_handle_rejects_expired_user_center_session(monkeypatch):
+    class FakeDriver:
+        current_url = "https://www.zjzwfw.gov.cn/zjucenter/#/mymessage"
+
+    instance = uploader.Uploader.__new__(uploader.Uploader)
+    instance.driver = FakeDriver()
+    instance._target_session_expired = lambda: True
+    monkeypatch.setattr(uploader.time, "time", lambda: 0)
+
+    with pytest.raises(uploader.TargetSessionExpired, match="跨域登录状态已过期"):
+        instance._click_online_handle()
+
+
+def test_target_session_expired_requires_login_entry(monkeypatch):
+    class FakeDriver:
+        current_url = "https://www.zjzwfw.gov.cn/zjucenter/#/mymessage"
+
+    instance = uploader.Uploader.__new__(uploader.Uploader)
+    instance.driver = FakeDriver()
+    monkeypatch.setattr(uploader, "_find_first", lambda *_args, **_kwargs: object())
+
+    assert instance._target_session_expired() is True
+
+
 def test_confirmation_is_skipped_when_form_is_already_visible():
     instance = uploader.Uploader.__new__(uploader.Uploader)
     instance._is_upload_form_visible = lambda: True
