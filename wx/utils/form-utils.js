@@ -332,15 +332,28 @@ function uploadDisplayValue(field, value) {
   }
 }
 
+function shortenName(name, maxLen) {
+  maxLen = maxLen || 10;
+  if (!name || name.length <= maxLen) return name || "";
+  var dot = name.lastIndexOf(".");
+  if (dot > 0) {
+    var base = name.substring(0, dot);
+    var ext = name.substring(dot);
+    if (base.length <= maxLen) return name;
+    return base.substring(0, maxLen) + "..." + ext;
+  }
+  return name.substring(0, maxLen) + "...";
+}
+
 function uploadPreviewItems(field, value) {
   if (!value) return [];
   return parseUploadItems(field, value).map((file, index) => {
     const url = resolveAssetUrl(typeof file === "string" ? file : file.public_url || file.url || "");
-    const name = typeof file === "string"
+    const rawName = typeof file === "string"
       ? (url ? url.split("/").pop() : "") || `${field.label || "文件"}${index + 1}`
       : file.original_filename || file.name || file.object_key || (url ? url.split("/").pop() : "") || `${field.label || "文件"}${index + 1}`;
     return {
-      name,
+      name: shortenName(rawName),
       url,
       isImage: isImageUpload(field, file, url),
     };
