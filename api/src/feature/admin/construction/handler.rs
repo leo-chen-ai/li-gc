@@ -5434,9 +5434,9 @@ async fn sync_worker_to_ningbo_config(
     }
     let Some(worker_code) = worker_code else {
         let message = if recorded_person {
-            "市住建判定为备案人员，平台数据尚未同步涌建码；请稍后继续点击修正上报重试"
+            "市住建判定为备案人员，平台数据尚未同步甬建码；请稍后继续点击修正上报重试"
         } else {
-            "市住建未返回涌建码；可继续点击修正上报重试"
+            "市住建未返回甬建码；可继续点击修正上报重试"
         };
         finish_team_sync_job(state.db.pool(), job_id, "failed", None, Some(message)).await?;
         return Ok(());
@@ -6749,7 +6749,7 @@ async fn list_workers_page(
                                      AND latest_job.status IN ('success', 'completed')
                                      AND (config.platform_type = 'ningbo_housing' OR config.platform_name = '市住建')
                                      AND yongjian_identity.external_person_id IS NULL
-                                    THEN '市住建未返回涌建码，请修正上报'
+                                    THEN '市住建未返回甬建码，请修正上报'
                                 WHEN latest_job.id IS NOT NULL
                                      AND latest_job.status NOT IN ('success', 'completed', 'pending', 'processing', 'retry', 'awaiting_result', 'waiting_dependency', 'waiting_media')
                                      AND NOT (

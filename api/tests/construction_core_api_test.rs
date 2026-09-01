@@ -2034,7 +2034,7 @@ async fn worker_and_team_updates_enqueue_only_the_required_async_targets() {
     );
     assert_eq!(
         workers_body["data"]["items"][0]["reporting_platforms"][0]["failure_reason"],
-        "市住建未返回涌建码，请修正上报"
+        "市住建未返回甬建码，请修正上报"
     );
     assert_eq!(
         workers_body["data"]["reporting_summary"][0]["success_count"],
