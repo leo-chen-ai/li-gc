@@ -408,8 +408,7 @@ async fn process_claimed_event(state: &AppState, event: ClaimedEvent) {
                 aggregate_id,
                 action,
             )
-            .await;
-            Ok(())
+            .await
         }
         event_type if GENERIC_EVENTS.contains(&event_type) => dispatcher::dispatch(
             state.db.pool(),

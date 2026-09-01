@@ -4895,14 +4895,17 @@ pub async fn create_worker(
         {
             tracing::error!(%worker_id, error = %error, "Failed to enqueue Ningbo worker sync");
         }
-        trigger_worker_device_issue(
+        if let Err(error) = trigger_worker_device_issue(
             &state,
             project_id,
             worker_id,
             "create",
             "人员新增后自动下发",
         )
-        .await;
+        .await
+        {
+            tracing::warn!(%project_id, %worker_id, error = %error, "新增人员考勤机同步失败");
+        }
         enqueue_worker_face_enrollment_if_needed(&state, project_id, worker_id).await;
     }
 
@@ -7241,7 +7244,7 @@ pub(crate) async fn reconcile_worker_to_attendance_devices(
     project_id: Uuid,
     worker_id: Uuid,
     action: &str,
-) {
+) -> Result<(), String> {
     trigger_worker_device_issue(
         state,
         project_id,
@@ -7253,7 +7256,7 @@ pub(crate) async fn reconcile_worker_to_attendance_devices(
             "人员资料修改后异步下发"
         },
     )
-    .await;
+    .await
 }
 
 async fn trigger_worker_device_issue(
@@ -7262,22 +7265,13 @@ async fn trigger_worker_device_issue(
     worker_id: Uuid,
     action: &str,
     remark: &str,
-) {
+) -> Result<(), String> {
     let broker_url = state.config.mqtt_broker_url.as_deref();
 
-    let device_ids = match list_project_attendance_device_ids(state.db.pool(), project_id).await {
-        Ok(device_ids) => device_ids,
-        Err(error) => {
-            tracing::warn!(
-                %project_id,
-                %worker_id,
-                %action,
-                error = ?error,
-                "查询项目考勤机失败，跳过人员同步"
-            );
-            return;
-        }
-    };
+    let device_ids = list_project_attendance_device_ids(state.db.pool(), project_id)
+        .await
+        .map_err(|error| format!("查询项目考勤机失败：{}", error.message))?;
+    let mut failures = Vec::new();
 
     for device_id in device_ids {
         if let Err(error) = issue_single_worker_via_broker(
@@ -7300,7 +7294,18 @@ async fn trigger_worker_device_issue(
                 error = %error,
                 "考勤机人员同步失败"
             );
+            failures.push(format!("{device_id}: {error}"));
         }
+    }
+
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "考勤机人员同步失败（{} 台）：{}",
+            failures.len(),
+            failures.join("；")
+        ))
     }
 }
 
@@ -7340,14 +7345,17 @@ pub async fn delete_worker(
     Path((project_id, worker_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<()> {
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
-    trigger_worker_device_issue(
+    if let Err(error) = trigger_worker_device_issue(
         &state,
         project_id,
         worker_id,
         "delete",
         "人员删除前自动从考勤机删除",
     )
-    .await;
+    .await
+    {
+        tracing::warn!(%project_id, %worker_id, error = %error, "删除人员前考勤机同步失败");
+    }
     let response = delete_row(
         state.db.pool(),
         "construction_workers",
