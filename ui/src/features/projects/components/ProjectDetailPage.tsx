@@ -2,8 +2,6 @@ import { Link } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
-  ArrowDown,
-  ArrowRight,
   Building2,
   CalendarDays,
   ChevronLeft,
@@ -189,7 +187,7 @@ import { ProjectStatusBadge } from "./ProjectStatusBadge";
 import { ProjectReportingPlatforms } from "./ProjectReportingPlatforms";
 import { AttendanceMachinePanel } from "./AttendanceMachinePanel";
 
-const allTabs = ["操作指引", "项目基本信息", "建设单位", "班组信息", "项目工人", "考勤记录", "考勤机模式", "工资统计"] as const;
+const allTabs = ["项目基本信息", "建设单位", "班组信息", "项目工人", "考勤记录", "考勤机模式", "工资统计"] as const;
 type DetailTab = (typeof allTabs)[number];
 
 // 考勤机模式（人脸考勤点）：功能开发中，暂时隐藏项目详情内的配置入口
@@ -1264,21 +1262,67 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
 
   return (
     <div className="space-y-4 text-slate-950 dark:text-foreground">
-      <div className="sticky top-0 z-20 rounded-lg border border-slate-200 bg-white/95 px-3 py-2 shadow-sm backdrop-blur dark:border-border dark:bg-card/95">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-2">
-            <Button variant="ghost" size="sm" asChild className="-ml-2 h-8 gap-2 text-slate-600 hover:bg-emerald-50 hover:text-[#0f6b5d] dark:text-muted-foreground dark:hover:bg-accent dark:hover:text-accent-foreground">
+      <section className="overflow-hidden rounded-sm border border-[#dfe4ea] bg-white shadow-sm dark:border-border dark:bg-card">
+        <div className="px-5 py-4 sm:px-6">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="truncate text-xl font-semibold text-[#303133] dark:text-foreground sm:text-2xl">
+                  {formatProjectTitle(project.name)}
+                </h1>
+                <button
+                  type="button"
+                  onClick={openProjectEditDialog}
+                  className="inline-flex items-center gap-1 text-sm text-[#409eff] hover:text-[#1677d2]"
+                >
+                  <Pencil className="size-3.5" />
+                  编辑
+                </button>
+              </div>
+              <div className="mt-3 inline-flex rounded-sm bg-[#f5a623] px-4 py-1.5 text-sm font-medium text-white">
+                项目看板
+              </div>
+            </div>
+            <Button asChild size="sm" className="bg-[#409eff] text-white hover:bg-[#337ecc]">
               <Link to="/app/admin/projects">
                 <ArrowLeft className="size-4" />
-                返回
+                返回上一步
               </Link>
             </Button>
-            <div className="min-w-0 border-l border-slate-200 pl-3 dark:border-border">
-              <div className="text-xs font-medium text-[#0f6b5d] dark:text-primary">劳务管理模块</div>
-              <div className="truncate text-sm font-semibold text-slate-950 dark:text-foreground">{activeTab}</div>
-            </div>
           </div>
-          <div className="flex items-center gap-2">
+
+          <dl className="mt-4 grid gap-x-10 gap-y-3 text-sm text-[#4b5563] sm:grid-cols-2 xl:grid-cols-3">
+            <div className="flex gap-2"><dt className="shrink-0 text-[#303133]">项目编号：</dt><dd className="min-w-0 break-all">{project.code || "-"}</dd></div>
+            <div className="flex gap-2"><dt className="shrink-0 text-[#303133]">项目所在地：</dt><dd>{project.location || project.address || "-"}</dd></div>
+            <div className="flex gap-2"><dt className="shrink-0 text-[#303133]">项目分类：</dt><dd>{getFieldOptionLabel(projectFormFields, "category", projectQuery.data?.category) || "-"}</dd></div>
+            <div className="flex gap-2"><dt className="shrink-0 text-[#303133]">项目状态：</dt><dd>{project.status || "-"}</dd></div>
+            <div className="flex gap-2"><dt className="shrink-0 text-[#303133]">投资性质：</dt><dd>{getFieldOptionLabel(projectFormFields, "investment_nature", projectQuery.data?.investment_nature) || "-"}</dd></div>
+            <div className="flex gap-2"><dt className="shrink-0 text-[#303133]">施工许可证：</dt><dd>{project.workPermit || "-"}</dd></div>
+            <div className="flex gap-2"><dt className="shrink-0 text-[#303133]">项目经理：</dt><dd>{formatPersonWithPhone(project.manager, project.managerPhone)}</dd></div>
+            <div className="flex gap-2"><dt className="shrink-0 text-[#303133]">劳资专管员：</dt><dd>{project.laborManager || "-"}</dd></div>
+            <div className="flex gap-2"><dt className="shrink-0 text-[#303133]">实名制专管员：</dt><dd>{formatPersonWithPhone(project.realNameManager, projectQuery.data?.real_name_manager_phone)}</dd></div>
+          </dl>
+        </div>
+
+        <div className="flex items-stretch overflow-x-auto border-t border-[#e4e7ed] bg-[#fafafa] [scrollbar-width:thin] dark:border-border dark:bg-muted/30">
+          {tabs.map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setActiveTab(tab)}
+              className={cn(
+                "relative h-12 shrink-0 border-r border-[#e4e7ed] px-7 text-[15px] text-[#909399] transition-colors hover:bg-white hover:text-[#409eff] dark:border-border",
+                activeTab === tab && "bg-white font-medium text-[#409eff] dark:bg-card dark:text-primary"
+              )}
+            >
+              {tab}
+              {activeTab === tab ? <span className="absolute inset-x-0 top-0 h-0.5 bg-[#409eff]" /> : null}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <div className="flex flex-wrap items-center justify-end gap-2">
             {activeTab === "考勤记录" && isSystemAdmin ? (
               <Button
                 size="sm"
@@ -1311,7 +1355,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                 考勤生成工具
               </Button>
             ) : null}
-            {activeTab !== "操作指引" && activeTab !== "考勤机模式" ? (
+            {activeTab !== "考勤机模式" ? (
               <Button
                 size="sm"
                 variant="outline"
@@ -1322,7 +1366,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                 {getExportButtonLabel(activeTab)}
               </Button>
             ) : null}
-            {activeTab !== "操作指引" && activeTab !== "考勤记录" && activeTab !== "考勤机模式" ? (
+            {activeTab !== "考勤记录" && activeTab !== "考勤机模式" ? (
               <Button
                 size="sm"
                 className="h-8 gap-2 bg-[#0f6b5d] text-white hover:bg-[#0b5148]"
@@ -1338,28 +1382,10 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                 {getCreateButtonLabel(activeTab)}
               </Button>
             ) : null}
-          </div>
-        </div>
-        <div className="mt-2 flex flex-wrap border-t border-slate-100 pt-1 dark:border-border">
-            {tabs.map((tab) => (
-              <button
-                key={tab}
-                type="button"
-                onClick={() => setActiveTab(tab)}
-                className={cn(
-                  "relative h-8 shrink-0 px-3 text-sm font-medium text-slate-500 transition-colors hover:text-slate-950 dark:text-muted-foreground dark:hover:text-foreground",
-                  activeTab === tab && "text-[#0f6b5d] dark:text-primary"
-                )}
-              >
-                {tab}
-                {activeTab === tab && <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-[#0f6b5d] dark:bg-primary" />}
-              </button>
-            ))}
-        </div>
       </div>
 
       <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-border dark:bg-card">
-        {activeTab !== "操作指引" && activeTab !== "项目基本信息" && activeTab !== "考勤机模式" && (
+        {activeTab !== "项目基本信息" && activeTab !== "考勤机模式" && (
           <div
             className={cn(
               "border-b px-3 py-2",
@@ -1405,14 +1431,6 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
         )}
 
         <div className="p-4">
-          {activeTab === "操作指引" && (
-            <ProjectOperationGuide
-              project={projectMetrics}
-              deviceCount={faceIssueSummary.deviceCount}
-              platformCount={projectQuery.data?.reporting_platforms?.filter((item) => item.is_enabled).length ?? 0}
-              onOpenTab={setActiveTab}
-            />
-          )}
           {activeTab === "项目基本信息" && (
             <ProjectInfoTab
               project={projectMetrics}
@@ -2679,150 +2697,6 @@ function buildAdvancedExportScopePayload(
     payload.work_type = scope.workType;
   }
   return payload;
-}
-
-type OperationGuideItem = {
-  label: string;
-  description: string;
-  count?: number;
-  completed?: boolean;
-  targetTab?: DetailTab;
-};
-
-function ProjectOperationGuide({
-  project,
-  deviceCount,
-  platformCount,
-  onOpenTab,
-}: {
-  project: Project;
-  deviceCount: number;
-  platformCount: number;
-  onOpenTab: (tab: DetailTab) => void;
-}) {
-  const primaryItems: OperationGuideItem[] = [
-    {
-      label: "项目完善",
-      description: project.workPermit ? "项目档案已建立" : "施工许可证等信息待完善",
-      completed: Boolean(project.name && project.location && project.contractor),
-      targetTab: "项目基本信息",
-    },
-    {
-      label: "完善参建单位",
-      description: project.unitCount ? `已完善 ${project.unitCount} 家` : "暂无参建单位数据",
-      count: project.unitCount,
-      completed: project.unitCount > 0,
-      targetTab: "建设单位",
-    },
-    {
-      label: "完善班组信息",
-      description: project.teamCount ? `已完善 ${project.teamCount} 个班组` : "暂无班组数据",
-      count: project.teamCount,
-      completed: project.teamCount > 0,
-      targetTab: "班组信息",
-    },
-    {
-      label: "电子围栏维护",
-      description: project.coordinates ? "项目坐标已维护" : "暂无电子围栏数据",
-      completed: Boolean(project.coordinates),
-      targetTab: "项目基本信息",
-    },
-    {
-      label: "考勤点维护",
-      description: deviceCount ? `已接入 ${deviceCount} 台考勤设备` : "暂无考勤设备数据",
-      count: deviceCount,
-      completed: deviceCount > 0,
-    },
-    {
-      label: "考勤机绑定",
-      description: deviceCount ? `已绑定 ${deviceCount} 台` : "暂无绑定数据",
-      count: deviceCount,
-      completed: deviceCount > 0,
-    },
-    {
-      label: "工人入职",
-      description: project.workerCount ? `已入职 ${project.workerCount} 人` : "暂无工人数据",
-      count: project.workerCount,
-      completed: project.workerCount > 0,
-      targetTab: "项目工人",
-    },
-    { label: "积分管理", description: "暂无积分数据" },
-    { label: "技术管理", description: "暂无技术管理数据" },
-    { label: "智慧党建管理", description: "暂无党建数据" },
-    { label: "机械管理", description: "暂无机械设备数据" },
-    { label: "进度管理", description: project.progress ? `当前进度 ${project.progress}%` : "暂无进度数据", completed: project.progress > 0 },
-    { label: "施工日志", description: "暂无施工日志数据" },
-    { label: "材料管理", description: "暂无材料数据" },
-    { label: "质安管理", description: project.risk === "正常" ? "当前风险正常" : `当前状态：${project.risk}`, completed: project.risk === "正常" },
-    {
-      label: "平台对接",
-      description: platformCount ? `已对接 ${platformCount} 个平台` : "暂无平台对接数据",
-      count: platformCount,
-      completed: platformCount > 0,
-      targetTab: "项目基本信息",
-    },
-    { label: "物联网监测", description: "按下方设备能力逐项接入" },
-  ];
-  const iotItems = [
-    "深基坑监测", "车辆道闸", "智能安全帽", "智能LED屏", "智能喇叭", "视频监控", "AI识别", "无人机全景", "数字孪生",
-    "智能水电", "履带吊监测", "冲洗监测", "升降机监测", "塔吊监测", "智能烟感监测", "龙门吊监测", "高支模监测", "有毒气体监测", "地磅监测", "大体积混凝土监测",
-  ];
-  const guideRows = [
-    primaryItems.slice(0, 5),
-    [...primaryItems.slice(5, 10)].reverse(),
-    primaryItems.slice(10),
-  ];
-
-  return (
-    <div className="space-y-7 py-2">
-      <div className="space-y-4 px-2">
-        {guideRows.map((row, rowIndex) => (
-          <div key={rowIndex}>
-            <div className={cn("grid gap-x-10 gap-y-5 sm:grid-cols-2", rowIndex < 2 ? "lg:grid-cols-5" : "lg:grid-cols-4 xl:grid-cols-7")}>
-              {row.map((item, itemIndex) => (
-                <div key={item.label} className="relative flex min-h-28 flex-col items-center">
-                  <div className="relative flex h-14 w-full items-center justify-center overflow-hidden rounded-md bg-[#f0f6ff] px-3 text-center text-sm font-medium text-[#596579] dark:bg-slate-800 dark:text-slate-200">
-                    {item.label}
-                    {item.completed ? (
-                      <span className="absolute right-0 top-0 rounded-bl-md bg-[#42d3a5] px-1.5 py-0.5 text-[9px] font-normal text-white">已完善</span>
-                    ) : null}
-                  </div>
-                  <div className="mt-2 flex min-h-7 items-center justify-center gap-2">
-                    {item.targetTab ? (
-                      <button type="button" onClick={() => onOpenTab(item.targetTab!)} className="h-6 rounded border border-[#4a91ff] bg-white px-3 text-[11px] text-[#3b82f6] hover:bg-blue-50 dark:bg-background">查看</button>
-                    ) : null}
-                    {!item.completed && item.targetTab ? (
-                      <button type="button" onClick={() => onOpenTab(item.targetTab!)} className="h-6 rounded border border-orange-300 bg-orange-50/40 px-3 text-[11px] text-orange-500 hover:bg-orange-50 dark:bg-background">去完善</button>
-                    ) : null}
-                    {!item.completed && !item.targetTab ? (
-                      <span className="h-6 rounded border border-emerald-300 bg-white px-3 py-1 text-[11px] text-emerald-500 dark:bg-background">添加</span>
-                    ) : null}
-                  </div>
-                  <div className="mt-1 min-h-4 text-center text-[11px] text-slate-400">{item.description}</div>
-                  {itemIndex < row.length - 1 ? (
-                    <ArrowRight strokeWidth={4} className={cn("absolute -right-8 top-5 z-10 hidden size-6 text-[#3b8df5] lg:block", rowIndex === 1 && "rotate-180")} />
-                  ) : null}
-                </div>
-              ))}
-            </div>
-            {rowIndex < guideRows.length - 1 ? (
-              <div className={cn("flex h-10 items-center", rowIndex === 0 ? "justify-end pr-[9%]" : "justify-start pl-[9%]")}><ArrowDown strokeWidth={4} className="size-7 text-[#3b8df5]" /></div>
-            ) : null}
-          </div>
-        ))}
-      </div>
-      <div className="rounded-md border border-[#69a6ff] bg-white px-5 py-5 dark:border-blue-800 dark:bg-card">
-        <div className="mb-4 flex items-center gap-2 text-sm font-medium text-[#596579]"><Building2 className="size-4 text-[#3b8df5]" />物联网监测能力</div>
-        <div className="grid gap-x-7 gap-y-10 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-7">
-          {iotItems.map((label) => (
-            <div key={label} className="rounded-md bg-[#f0f6ff] px-3 py-3 text-center text-xs text-[#596579] dark:bg-slate-800 dark:text-slate-200">
-              {label}<div className="mt-1 text-[10px] text-slate-400">暂无数据</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function ProjectInfoTab({
@@ -5205,6 +5079,13 @@ function apiProjectToDetail(project: ConstructionProject): Project {
     area: project.acreage == null ? "" : `${project.acreage} 平方米`,
     coordinates: [project.longitude, project.latitude].filter(Boolean).join(", "),
   };
+}
+
+function formatPersonWithPhone(name?: string | null, phone?: string | null) {
+  const normalizedName = name?.trim();
+  const normalizedPhone = phone?.trim();
+  if (!normalizedName || normalizedName === "未填写") return "-";
+  return normalizedPhone ? `${normalizedName}（${normalizedPhone}）` : normalizedName;
 }
 
 function apiUnitToDetail(unit: ApiConstructionUnit, workerCount = 0): ConstructionUnit {

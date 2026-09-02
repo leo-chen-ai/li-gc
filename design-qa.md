@@ -1,24 +1,43 @@
+**Source Visual Truth**
+
+- Path: `/var/folders/dz/8rb0dzv57712vj2y3kv_nx700000gn/T/codex-clipboard-82bd1240-b009-4ca1-8cbb-d51c0acf5a48.png`
+- Source pixels: 2737 × 1343 (desktop screenshot; conversation preview was scaled to 2048 × 1005).
+- Target state: authenticated project detail page with the project summary header visible and “项目基本信息” selected.
+
+**Implementation Evidence**
+
+- Implementation screenshot path: unavailable.
+- Intended viewport: desktop, matching the source aspect ratio.
+- CSS size and density normalization: not measured because no authenticated browser-rendered capture was available.
+- Build verification: production TypeScript/Vite build passed.
+- Primary interactions implemented: horizontal tab selection, edit action, return-to-list action, existing tab-specific actions.
+- Browser interactions and console errors: not checked because the browser-control surface was unavailable.
+
 **Findings**
-- No actionable P0/P1/P2 findings remain.
+
+- [P1] Rendered fidelity cannot be verified
+  Location: project detail header and horizontal tab strip.
+  Evidence: the source screenshot is available, but there is no browser-rendered implementation screenshot in the same authenticated state.
+  Impact: typography, spacing, overflow behavior, and live data wrapping may still differ from the reference.
+  Fix: open an authenticated project-detail route, capture it at a matching desktop viewport, compare both images together, and correct any visible P1/P2 differences.
 
 **Open Questions**
-- The source visual includes "记住账号" and "忘记密码". The implementation omits them because the current miniapp login flow does not have backed remember-password or recovery behavior, and the requested direction was to reduce text and keep the page app-like.
+
+- None about scope: the standalone “操作指引” page/tab was removed, “项目基本信息” is now the default tab, and the project summary remains visible while switching tabs.
 
 **Implementation Checklist**
-- Source visual truth path: `/Users/mac/.codex/generated_images/019efa52-e3f7-7372-9f86-b7e0e5896095/ig_0373107834fa502e016a3de0e97bb881919ca42cb6dd91fdf1.png`
-- Implementation screenshot path: `/Users/mac/leo/李总-山淮/shanhuai_gc/.design-qa/login-implementation.png`
-- Full-view comparison evidence: `/Users/mac/leo/李总-山淮/shanhuai_gc/.design-qa/login-comparison.png`
-- Viewport: `390 x 844`
-- State: login page, empty account and password fields, daytime command-console style
-- Focused region comparison evidence: not needed; the screen is a single login composition and the full-view comparison clearly shows hierarchy, panel spacing, inputs, button, and bottom capability strip.
-- Patches made since previous QA pass:
-  - Expanded login page max width for Taro H5 scaling so the mobile surface fills the 390px viewport.
-  - Moved the capability strip outside the login panel and positioned it near the lower viewport.
-  - Removed the extra "账号登录" title row to better match the selected source visual and reduce copy.
-  - Replaced the oversized PNG background with a compressed JPG asset.
+
+- Capture the authenticated project detail page at a desktop viewport.
+- Verify the summary grid with long names, addresses, and phone numbers.
+- Click each horizontal tab and confirm the header remains stable and the active state moves correctly.
+- Check browser console errors and responsive horizontal tab scrolling.
+
+**Comparison History**
+
+- Initial implementation: code and build verified; visual comparison unavailable, so no visual fix iteration could be completed.
 
 **Follow-up Polish**
-- [P3] The source design has stronger construction linework near the lower half; the implementation keeps it very faint to avoid competing with the form. Increase background contrast only if the login page feels too plain in real device preview.
-- [P3] The source visual uses a custom geometric logo. The implementation keeps the existing text-based "山" brand mark for consistency with the current project assets.
 
-final result: passed
+- Determine whether the “项目看板” control should navigate once a matching local destination exists.
+
+final result: blocked
