@@ -50,6 +50,7 @@ import {
   canAccessSystemWarnings,
   getDefaultAdminPath,
   getMenuKeysForUserRole,
+  resolveEffectiveRoleCode,
   shouldLoadRolePermissions,
   type MenuPermissionKey,
 } from "@/features/admin/data/rbac";
@@ -76,13 +77,14 @@ export function AppSidebar() {
     user?.role,
     shouldLoadAssignedRole
   );
+  const effectiveRole = resolveEffectiveRoleCode(user?.role, currentRolePermissions?.code);
   const roleConfigs = currentRolePermissions ? [currentRolePermissions] : [];
   const allowedMenus = new Set(
     shouldLoadAssignedRole && !currentRolePermissions
       ? []
-      : getMenuKeysForUserRole(user?.role, roleConfigs)
+      : getMenuKeysForUserRole(effectiveRole, roleConfigs)
   );
-  if (canAccessSystemWarnings(user?.role)) {
+  if (canAccessSystemWarnings(effectiveRole)) {
     allowedMenus.add("admin_overview");
     allowedMenus.add("system_warnings");
   }

@@ -382,6 +382,13 @@ export function shouldLoadRolePermissions(role?: string): boolean {
   return Boolean(role && role !== "admin");
 }
 
+export function resolveEffectiveRoleCode(
+  sessionRole?: string,
+  permissionRole?: string
+): string | undefined {
+  return permissionRole || sessionRole;
+}
+
 export function getDefaultAdminPath(menuKeys: Iterable<MenuPermissionKey>): string {
   const allowedMenus = new Set(menuKeys);
   return (

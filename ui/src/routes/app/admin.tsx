@@ -19,6 +19,7 @@ import {
   getMenuPermissionForPath,
   getMenuKeysForUserRole,
   isAdminWorkspacePath,
+  resolveEffectiveRoleCode,
   shouldLoadRolePermissions,
 } from "@/features/admin/data/rbac";
 import { useCurrentRolePermissions } from "@/features/admin/hooks/use-roles";
@@ -61,15 +62,16 @@ function AdminContent() {
     isLoading: arePermissionsLoading,
     isError: isPermissionsError,
   } = useCurrentRolePermissions(user?.role, isRoleScopedUser);
+  const effectiveRole = resolveEffectiveRoleCode(user?.role, currentRolePermissions?.code);
   const allowedMenus = new Set(
     isRoleScopedUser && !currentRolePermissions
       ? []
       : getMenuKeysForUserRole(
-          user?.role,
+          effectiveRole,
           currentRolePermissions ? [currentRolePermissions] : []
         )
   );
-  const canUseSystemWarnings = canAccessSystemWarnings(user?.role);
+  const canUseSystemWarnings = canAccessSystemWarnings(effectiveRole);
   if (canUseSystemWarnings) {
     allowedMenus.add("admin_overview");
     allowedMenus.add("system_warnings");

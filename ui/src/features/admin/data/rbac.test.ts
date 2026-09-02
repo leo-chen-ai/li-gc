@@ -8,6 +8,7 @@ import {
   getMenuKeysForUserRole,
   isAdminWorkspacePath,
   menuPermissions,
+  resolveEffectiveRoleCode,
   shouldLoadRolePermissions,
 } from "./rbac.ts";
 
@@ -50,6 +51,11 @@ test("every non-admin account loads its assigned role permissions", () => {
   assert.equal(shouldLoadRolePermissions("project_manager"), true);
   assert.equal(shouldLoadRolePermissions("admin"), false);
   assert.equal(shouldLoadRolePermissions(undefined), false);
+});
+
+test("fresh role permissions override a stale login-session role", () => {
+  assert.equal(resolveEffectiveRoleCode("user", "xzy02"), "xzy02");
+  assert.equal(resolveEffectiveRoleCode("user", undefined), "user");
 });
 
 test("all configured admin pages resolve to their menu permission", () => {
