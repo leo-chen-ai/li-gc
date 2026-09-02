@@ -255,16 +255,6 @@ type WorkerTreeUnitNode = {
   teamCount: number;
   teams: WorkerTreeTeamNode[];
 };
-type FaceIssueSummary = {
-  deviceCount: number;
-  onlineDeviceCount: number;
-  activeWorkerCount: number;
-  missingAvatarWorkerCount: number;
-  fullyIssuedWorkerCount: number;
-  incompleteWorkerCount: number;
-  successTargetCount: number;
-  totalTargetCount: number;
-};
 type TablePaginationConfig = {
   page: number;
   pageSize: number;
@@ -678,34 +668,6 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       attendance: tableAttendance,
     });
   }, [projectMetrics, projectTeams, projectWorkers, tableAttendance, units]);
-  const faceIssueSummary = useMemo<FaceIssueSummary>(() => {
-    const deviceCount = attendanceDevicesQuery.data?.total ?? attendanceDevices.length;
-    const onlineDeviceCount = attendanceDevices.filter((device) => device.online_status === "online").length;
-    const activeWorkers = projectWorkers.filter((worker) => worker.status === "在场");
-    const totalTargetCount = deviceCount * activeWorkers.length;
-    const successTargetCount = activeWorkers.reduce(
-      (sum, worker) => sum + Math.min(worker.issuedDeviceSuccessCount ?? 0, deviceCount),
-      0
-    );
-    const fullyIssuedWorkerCount =
-      deviceCount > 0
-        ? activeWorkers.filter((worker) => Boolean(worker.avatar) && (worker.issuedDeviceSuccessCount ?? 0) >= deviceCount).length
-        : 0;
-
-    return {
-      deviceCount,
-      onlineDeviceCount,
-      activeWorkerCount: activeWorkers.length,
-      missingAvatarWorkerCount: activeWorkers.filter((worker) => !worker.avatar).length,
-      fullyIssuedWorkerCount,
-      incompleteWorkerCount:
-        deviceCount > 0
-          ? activeWorkers.filter((worker) => !worker.avatar || (worker.issuedDeviceSuccessCount ?? 0) < deviceCount).length
-          : 0,
-      successTargetCount,
-      totalTargetCount,
-    };
-  }, [attendanceDevices, attendanceDevicesQuery.data?.total, projectWorkers]);
   const [activeTab, setActiveTab] = useState<DetailTab>(DEFAULT_PROJECT_DETAIL_TAB);
   const [dialogMode, setDialogMode] = useState<DetailDialogMode>("create");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -1381,12 +1343,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
             ) : null}
       </div>
 
-      <section
-        className={cn(
-          "overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-border dark:bg-card",
-          activeTab === "项目基本信息" && "hidden"
-        )}
-      >
+      <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-border dark:bg-card">
         {activeTab !== "项目基本信息" && activeTab !== "考勤机模式" && (
           <div
             className={cn(
@@ -1436,11 +1393,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
           {activeTab === "项目基本信息" && (
             <ProjectInfoTab
               project={projectMetrics}
-              unitCount={projectMetrics.unitCount}
-              teamCount={projectMetrics.teamCount}
-              workerCount={projectMetrics.workerCount}
               audit={overviewAudit}
-              faceIssueSummary={faceIssueSummary}
               reportingPlatforms={projectQuery.data?.reporting_platforms}
               showReportingPlatforms={isSystemAdmin}
             />
@@ -2703,20 +2656,12 @@ function buildAdvancedExportScopePayload(
 
 function ProjectInfoTab({
   project,
-  unitCount,
-  teamCount,
-  workerCount,
   audit,
-  faceIssueSummary,
   reportingPlatforms,
   showReportingPlatforms,
 }: {
   project: Project;
-  unitCount: number;
-  teamCount: number;
-  workerCount: number;
   audit: ProjectOverviewAudit | null;
-  faceIssueSummary: FaceIssueSummary;
   reportingPlatforms: ConstructionProject["reporting_platforms"];
   showReportingPlatforms: boolean;
 }) {
@@ -2737,17 +2682,7 @@ function ProjectInfoTab({
   ];
 
   return (
-    <div className="space-y-3">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <MetricCell label="参建单位" value={`${unitCount} 家`} helper="单位档案" compact />
-        <MetricCell label="班组数量" value={`${teamCount} 个`} helper="班组台账" compact />
-        <MetricCell label="项目工人" value={`${workerCount} 人`} helper="实名名册" accent="teal" compact />
-        <MetricCell label="今日考勤" value={`${project.attendanceToday} 人`} helper="现场打卡" accent="teal" compact />
-        <MetricCell label="实名考勤率" value={`${project.attendanceRate}%`} helper="考勤覆盖" accent="amber" compact />
-      </div>
-
-      <FaceIssueSummaryPanel summary={faceIssueSummary} />
-
+    <div>
       <div className="grid gap-3 lg:grid-cols-[1.2fr_0.8fr]">
         <div className="grid gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 dark:border-border dark:bg-border sm:grid-cols-2">
           {items.map(([label, value, fullValue], index) => (
@@ -2789,70 +2724,6 @@ function ProjectInfoTab({
             <CheckLine label="今日考勤异常" value={audit?.attendanceExceptions.value ?? "待核对"} attention={audit?.attendanceExceptions.attention} />
           </div>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function FaceIssueSummaryPanel({ summary }: { summary: FaceIssueSummary }) {
-  const deviceHelper =
-    summary.deviceCount > 0
-      ? `${summary.onlineDeviceCount} 台在线`
-      : "请先绑定考勤机";
-  const incompleteHelper =
-    summary.deviceCount > 0
-      ? `含无头像 ${summary.missingAvatarWorkerCount} 人`
-      : "暂无下发目标";
-  const statusLabel =
-    summary.deviceCount === 0
-      ? "未配置"
-      : summary.incompleteWorkerCount > 0
-        ? "待处理"
-        : "已完成";
-
-  return (
-    <div className="rounded-lg border border-slate-200 bg-[#fbfcfc] p-3 dark:border-border dark:bg-card">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <div className="text-sm font-semibold text-slate-900 dark:text-foreground">考勤机人脸下发</div>
-          <div className="mt-0.5 text-xs text-slate-500 dark:text-muted-foreground">
-            统计在场工人头像下发到项目考勤机的最新成功情况。
-          </div>
-        </div>
-        <span
-          className={cn(
-            "rounded-md border px-2 py-1 text-xs font-semibold",
-            summary.deviceCount === 0 || summary.incompleteWorkerCount > 0
-              ? "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300"
-              : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300"
-          )}
-        >
-          {statusLabel}
-        </span>
-      </div>
-      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <MetricCell label="绑定考勤机" value={`${summary.deviceCount} 台`} helper={deviceHelper} compact />
-        <MetricCell
-          label="下发成功"
-          value={`${summary.successTargetCount}/${summary.totalTargetCount}`}
-          helper="成功/应下发"
-          accent="teal"
-          compact
-        />
-        <MetricCell
-          label="未成功人员"
-          value={`${summary.incompleteWorkerCount} 人`}
-          helper={incompleteHelper}
-          accent={summary.incompleteWorkerCount > 0 ? "amber" : "teal"}
-          compact
-        />
-        <MetricCell
-          label="全量完成人员"
-          value={`${summary.fullyIssuedWorkerCount}/${summary.activeWorkerCount}`}
-          helper="在场工人"
-          accent="slate"
-          compact
-        />
       </div>
     </div>
   );
