@@ -180,7 +180,6 @@ import {
   summarizeWageRows,
 } from "../lib/project-table-operations";
 import { constructionProjectService } from "../services/construction-project-service";
-import { MetricCell } from "./MetricCell";
 import { ConstructionRecordForm } from "./ConstructionRecordForm";
 import { AttendanceGeneratorDialog } from "./AttendanceGeneratorDialog";
 import { ProjectStatusBadge } from "./ProjectStatusBadge";
