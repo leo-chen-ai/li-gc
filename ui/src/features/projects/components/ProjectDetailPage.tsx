@@ -1381,7 +1381,12 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
             ) : null}
       </div>
 
-      <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-border dark:bg-card">
+      <section
+        className={cn(
+          "overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-border dark:bg-card",
+          activeTab === "项目基本信息" && "hidden"
+        )}
+      >
         {activeTab !== "项目基本信息" && activeTab !== "考勤机模式" && (
           <div
             className={cn(

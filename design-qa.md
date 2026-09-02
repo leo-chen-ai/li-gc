@@ -2,7 +2,7 @@
 
 - Path: `/var/folders/dz/8rb0dzv57712vj2y3kv_nx700000gn/T/codex-clipboard-82bd1240-b009-4ca1-8cbb-d51c0acf5a48.png`
 - Source pixels: 2737 × 1343 (desktop screenshot; conversation preview was scaled to 2048 × 1005).
-- Target state: authenticated project detail page with the project summary header visible and “项目基本信息” selected.
+- Target state: authenticated project detail page with the project summary header visible and “项目基本信息” selected; no duplicate overview content below the action row.
 
 **Implementation Evidence**
 
