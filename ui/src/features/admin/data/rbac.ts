@@ -378,6 +378,10 @@ export function getMenuKeysForUserRole(
   ];
 }
 
+export function shouldLoadRolePermissions(role?: string): boolean {
+  return Boolean(role && role !== "admin");
+}
+
 export function getDefaultAdminPath(menuKeys: Iterable<MenuPermissionKey>): string {
   const allowedMenus = new Set(menuKeys);
   return (

@@ -6,7 +6,6 @@ import {
   ArrowRight,
   Building2,
   CalendarDays,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -2775,52 +2774,49 @@ function ProjectOperationGuide({
   ];
 
   return (
-    <div className="space-y-5">
-      <div>
-        <h2 className="text-base font-semibold">项目建设操作指引</h2>
-        <p className="mt-1 text-sm text-slate-500 dark:text-muted-foreground">按项目建设流程检查数据完善情况；有现成数据的模块显示数量，暂未建设的模块保留入口状态。</p>
-      </div>
-      <div className="space-y-2">
+    <div className="space-y-7 py-2">
+      <div className="space-y-4 px-2">
         {guideRows.map((row, rowIndex) => (
           <div key={rowIndex}>
-            <div className={cn("grid gap-5 sm:grid-cols-2", rowIndex < 2 ? "lg:grid-cols-5" : "lg:grid-cols-4 xl:grid-cols-7")}>
+            <div className={cn("grid gap-x-10 gap-y-5 sm:grid-cols-2", rowIndex < 2 ? "lg:grid-cols-5" : "lg:grid-cols-4 xl:grid-cols-7")}>
               {row.map((item, itemIndex) => (
-                <div key={item.label} className="relative flex min-h-32 flex-col rounded-xl border border-slate-200 bg-slate-50/70 p-3 dark:border-border dark:bg-muted/20">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex size-8 items-center justify-center rounded-lg bg-white text-[#0f6b5d] shadow-sm dark:bg-background dark:text-primary">
-                      {item.completed ? <CheckCircle2 className="size-4" /> : <Layers3 className="size-4" />}
-                    </div>
-                    <span className={cn("rounded-full px-2 py-0.5 text-[11px]", item.completed ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300" : "bg-slate-200 text-slate-500 dark:bg-muted dark:text-muted-foreground")}>
-                      {item.completed ? "已完善" : "待完善"}
-                    </span>
+                <div key={item.label} className="relative flex min-h-28 flex-col items-center">
+                  <div className="relative flex h-14 w-full items-center justify-center overflow-hidden rounded-md bg-[#f0f6ff] px-3 text-center text-sm font-medium text-[#596579] dark:bg-slate-800 dark:text-slate-200">
+                    {item.label}
+                    {item.completed ? (
+                      <span className="absolute right-0 top-0 rounded-bl-md bg-[#42d3a5] px-1.5 py-0.5 text-[9px] font-normal text-white">已完善</span>
+                    ) : null}
                   </div>
-                  <div className="mt-3 font-medium">{item.label}</div>
-                  <div className="mt-1 flex-1 text-xs leading-5 text-slate-500 dark:text-muted-foreground">{item.description}</div>
-                  {item.targetTab ? (
-                    <button type="button" onClick={() => onOpenTab(item.targetTab!)} className="mt-2 inline-flex items-center gap-1 self-start text-xs font-medium text-[#0f6b5d] hover:underline dark:text-primary">
-                      {item.completed ? "查看" : "去完善"}<ArrowRight className="size-3" />
-                    </button>
-                  ) : (
-                    <span className="mt-2 text-xs text-slate-400">暂无可维护数据</span>
-                  )}
+                  <div className="mt-2 flex min-h-7 items-center justify-center gap-2">
+                    {item.targetTab ? (
+                      <button type="button" onClick={() => onOpenTab(item.targetTab!)} className="h-6 rounded border border-[#4a91ff] bg-white px-3 text-[11px] text-[#3b82f6] hover:bg-blue-50 dark:bg-background">查看</button>
+                    ) : null}
+                    {!item.completed && item.targetTab ? (
+                      <button type="button" onClick={() => onOpenTab(item.targetTab!)} className="h-6 rounded border border-orange-300 bg-orange-50/40 px-3 text-[11px] text-orange-500 hover:bg-orange-50 dark:bg-background">去完善</button>
+                    ) : null}
+                    {!item.completed && !item.targetTab ? (
+                      <span className="h-6 rounded border border-emerald-300 bg-white px-3 py-1 text-[11px] text-emerald-500 dark:bg-background">添加</span>
+                    ) : null}
+                  </div>
+                  <div className="mt-1 min-h-4 text-center text-[11px] text-slate-400">{item.description}</div>
                   {itemIndex < row.length - 1 ? (
-                    <ArrowRight className={cn("absolute -right-4 top-1/2 z-10 hidden size-4 -translate-y-1/2 text-blue-500 lg:block", rowIndex === 1 && "rotate-180")} />
+                    <ArrowRight strokeWidth={4} className={cn("absolute -right-8 top-5 z-10 hidden size-6 text-[#3b8df5] lg:block", rowIndex === 1 && "rotate-180")} />
                   ) : null}
                 </div>
               ))}
             </div>
             {rowIndex < guideRows.length - 1 ? (
-              <div className={cn("flex h-8 items-center", rowIndex === 0 ? "justify-end pr-[9%]" : "justify-start pl-[9%]")}><ArrowDown className="size-5 text-blue-500" /></div>
+              <div className={cn("flex h-10 items-center", rowIndex === 0 ? "justify-end pr-[9%]" : "justify-start pl-[9%]")}><ArrowDown strokeWidth={4} className="size-7 text-[#3b8df5]" /></div>
             ) : null}
           </div>
         ))}
       </div>
-      <div className="rounded-xl border border-blue-200 bg-blue-50/30 p-4 dark:border-blue-900 dark:bg-blue-950/10">
-        <div className="mb-3 flex items-center gap-2 font-medium"><Building2 className="size-4 text-blue-500" />物联网监测能力</div>
-        <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-7">
+      <div className="rounded-md border border-[#69a6ff] bg-white px-5 py-5 dark:border-blue-800 dark:bg-card">
+        <div className="mb-4 flex items-center gap-2 text-sm font-medium text-[#596579]"><Building2 className="size-4 text-[#3b8df5]" />物联网监测能力</div>
+        <div className="grid gap-x-7 gap-y-10 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-7">
           {iotItems.map((label) => (
-            <div key={label} className="rounded-lg border border-blue-100 bg-white px-3 py-3 text-center text-sm text-slate-600 dark:border-blue-900 dark:bg-card dark:text-muted-foreground">
-              {label}<div className="mt-1 text-[11px] text-slate-400">暂无数据</div>
+            <div key={label} className="rounded-md bg-[#f0f6ff] px-3 py-3 text-center text-xs text-[#596579] dark:bg-slate-800 dark:text-slate-200">
+              {label}<div className="mt-1 text-[10px] text-slate-400">暂无数据</div>
             </div>
           ))}
         </div>

@@ -50,6 +50,7 @@ import {
   canAccessSystemWarnings,
   getDefaultAdminPath,
   getMenuKeysForUserRole,
+  shouldLoadRolePermissions,
   type MenuPermissionKey,
 } from "@/features/admin/data/rbac";
 import { useCurrentRolePermissions } from "@/features/admin/hooks/use-roles";
@@ -69,15 +70,15 @@ type SidebarSection = {
 
 export function AppSidebar() {
   const user = useAuthUser();
-  const shouldLoadCustomRole = Boolean(user?.role && user.role !== "admin" && user.role !== "user");
+  const shouldLoadAssignedRole = shouldLoadRolePermissions(user?.role);
   const location = useLocation();
   const { data: currentRolePermissions } = useCurrentRolePermissions(
     user?.role,
-    shouldLoadCustomRole
+    shouldLoadAssignedRole
   );
   const roleConfigs = currentRolePermissions ? [currentRolePermissions] : [];
   const allowedMenus = new Set(
-    shouldLoadCustomRole && !currentRolePermissions
+    shouldLoadAssignedRole && !currentRolePermissions
       ? []
       : getMenuKeysForUserRole(user?.role, roleConfigs)
   );

@@ -8,6 +8,7 @@ import {
   getMenuKeysForUserRole,
   isAdminWorkspacePath,
   menuPermissions,
+  shouldLoadRolePermissions,
 } from "./rbac.ts";
 
 test("data reporting role cannot access homepage warnings", () => {
@@ -42,6 +43,13 @@ test("custom roles receive their configured menus", () => {
     ]),
     ["projects", "data_reporting"]
   );
+});
+
+test("every non-admin account loads its assigned role permissions", () => {
+  assert.equal(shouldLoadRolePermissions("user"), true);
+  assert.equal(shouldLoadRolePermissions("project_manager"), true);
+  assert.equal(shouldLoadRolePermissions("admin"), false);
+  assert.equal(shouldLoadRolePermissions(undefined), false);
 });
 
 test("all configured admin pages resolve to their menu permission", () => {

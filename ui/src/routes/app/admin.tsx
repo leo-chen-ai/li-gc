@@ -19,6 +19,7 @@ import {
   getMenuPermissionForPath,
   getMenuKeysForUserRole,
   isAdminWorkspacePath,
+  shouldLoadRolePermissions,
 } from "@/features/admin/data/rbac";
 import { useCurrentRolePermissions } from "@/features/admin/hooks/use-roles";
 import { HeaderUserMenu } from "@/components/layout/HeaderUserMenu";
@@ -54,14 +55,14 @@ function AdminContent() {
   const location = useLocation();
   const navigate = useNavigate();
   const user = useAuthUser();
-  const isCustomRole = Boolean(user?.role && user.role !== "admin" && user.role !== "user");
+  const isRoleScopedUser = shouldLoadRolePermissions(user?.role);
   const {
     data: currentRolePermissions,
     isLoading: arePermissionsLoading,
     isError: isPermissionsError,
-  } = useCurrentRolePermissions(user?.role, isCustomRole);
+  } = useCurrentRolePermissions(user?.role, isRoleScopedUser);
   const allowedMenus = new Set(
-    isCustomRole && !currentRolePermissions
+    isRoleScopedUser && !currentRolePermissions
       ? []
       : getMenuKeysForUserRole(
           user?.role,
@@ -88,11 +89,11 @@ function AdminContent() {
   // Note: Authenticated guard is handled by app.tsx 
 
   // Redirect standard users to their workspace
-  if (isCustomRole && arePermissionsLoading && !isUniversalPage) {
+  if (isRoleScopedUser && arePermissionsLoading && !isUniversalPage) {
     return null;
   }
 
-  if (isCustomRole && isPermissionsError && !isUniversalPage) {
+  if (isRoleScopedUser && isPermissionsError && !isUniversalPage) {
     return (
       <div className="flex min-h-screen items-center justify-center p-6 text-sm text-muted-foreground">
         无法读取当前角色权限，请刷新页面后重试。
