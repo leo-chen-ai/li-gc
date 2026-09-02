@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   canAccessSystemWarnings,
   getDefaultAdminPath,
+  getMenuPermissionForPath,
   getMenuKeysForUserRole,
   isAdminWorkspacePath,
   menuPermissions,
@@ -41,6 +42,15 @@ test("custom roles receive their configured menus", () => {
     ]),
     ["projects", "data_reporting"]
   );
+});
+
+test("all configured admin pages resolve to their menu permission", () => {
+  for (const menu of menuPermissions) {
+    assert.equal(getMenuPermissionForPath(menu.path)?.key, menu.key);
+  }
+
+  assert.equal(getMenuPermissionForPath("/app/admin/quality-safety/detail")?.key, "quality_safety");
+  assert.equal(getMenuPermissionForPath("/app/admin/unknown"), undefined);
 });
 
 test("report-only roles land directly in the data reporting center", () => {

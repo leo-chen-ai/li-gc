@@ -9,70 +9,70 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppRouteImport } from './routes/app'
+import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppIndexRouteImport } from './routes/app/index'
-import { Route as AppAdminRouteImport } from './routes/app/admin'
-import { Route as AppDataScreenRouteImport } from './routes/app/data-screen'
-import { Route as AppLoginRouteImport } from './routes/app/login'
-import { Route as AppRegisterRouteImport } from './routes/app/register'
 import { Route as AppSettingsRouteImport } from './routes/app/settings'
-import { Route as AppAdminIndexRouteImport } from './routes/app/admin/index'
-import { Route as AppAdminApiKeysRouteImport } from './routes/app/admin/api-keys'
-import { Route as AppAdminAttendanceAlertsRouteImport } from './routes/app/admin/attendance-alerts'
-import { Route as AppAdminAttendanceDeviceIssueReportsRouteImport } from './routes/app/admin/attendance-device-issue-reports'
-import { Route as AppAdminAttendanceDevicesRouteImport } from './routes/app/admin/attendance-devices'
-import { Route as AppAdminConstructionSiteRouteImport } from './routes/app/admin/construction-site'
-import { Route as AppAdminContractTemplatesRouteImport } from './routes/app/admin/contract-templates'
-import { Route as AppAdminDataReportingRouteImport } from './routes/app/admin/data-reporting'
-import { Route as AppAdminEmergencyManagementRouteImport } from './routes/app/admin/emergency-management'
-import { Route as AppAdminEnterpriseCollectionsRouteImport } from './routes/app/admin/enterprise-collections'
-import { Route as AppAdminEnterpriseCustomersRouteImport } from './routes/app/admin/enterprise-customers'
-import { Route as AppAdminEnterpriseIssuedInvoicesRouteImport } from './routes/app/admin/enterprise-issued-invoices'
-import { Route as AppAdminEnterpriseOwnEntitiesRouteImport } from './routes/app/admin/enterprise-own-entities'
-import { Route as AppAdminEnterprisePaymentsRouteImport } from './routes/app/admin/enterprise-payments'
-import { Route as AppAdminEnterpriseProjectsRouteImport } from './routes/app/admin/enterprise-projects'
-import { Route as AppAdminEnterpriseReceivedInvoicesRouteImport } from './routes/app/admin/enterprise-received-invoices'
-import { Route as AppAdminEnvironmentMonitoringRouteImport } from './routes/app/admin/environment-monitoring'
-import { Route as AppAdminManagedAttendanceRouteImport } from './routes/app/admin/managed-attendance'
-import { Route as AppAdminMaterialManagementRouteImport } from './routes/app/admin/material-management'
-import { Route as AppAdminPartyBuildingRouteImport } from './routes/app/admin/party-building'
-import { Route as AppAdminPersonnelApproversRouteImport } from './routes/app/admin/personnel-approvers'
-import { Route as AppAdminPersonnelBadRecordsRouteImport } from './routes/app/admin/personnel-bad-records'
-import { Route as AppAdminPersonnelContractsRouteImport } from './routes/app/admin/personnel-contracts'
-import { Route as AppAdminPersonnelQualificationsRouteImport } from './routes/app/admin/personnel-qualifications'
-import { Route as AppAdminPersonnelRegistrationsRouteImport } from './routes/app/admin/personnel-registrations'
-import { Route as AppAdminPersonnelWorkersRouteImport } from './routes/app/admin/personnel-workers'
-import { Route as AppAdminPlatformIntegrationsRouteImport } from './routes/app/admin/platform-integrations'
-import { Route as AppAdminProjectsRouteImport } from './routes/app/admin/projects'
-import { Route as AppAdminQualitySafetyRouteImport } from './routes/app/admin/quality-safety'
-import { Route as AppAdminRegistrationLeadsRouteImport } from './routes/app/admin/registration-leads'
-import { Route as AppAdminRolesRouteImport } from './routes/app/admin/roles'
-import { Route as AppAdminSafetyManagementRouteImport } from './routes/app/admin/safety-management'
-import { Route as AppAdminSupplementalAttendanceRouteImport } from './routes/app/admin/supplemental-attendance'
-import { Route as AppAdminUploadsRouteImport } from './routes/app/admin/uploads'
-import { Route as AppAdminUsersRouteImport } from './routes/app/admin/users'
-import { Route as AppAdminVideoMonitoringRouteImport } from './routes/app/admin/video-monitoring'
-import { Route as AppAdminWarningsRouteImport } from './routes/app/admin/warnings'
-import { Route as AppAdminWorkHourConfigsRouteImport } from './routes/app/admin/work-hour-configs'
-import { Route as AppDataScreenIndexRouteImport } from './routes/app/data-screen/index'
+import { Route as AppRegisterRouteImport } from './routes/app/register'
+import { Route as AppLoginRouteImport } from './routes/app/login'
+import { Route as AppDataScreenRouteImport } from './routes/app/data-screen'
+import { Route as AppAdminRouteImport } from './routes/app/admin'
 import { Route as AppSettingsIndexRouteImport } from './routes/app/settings/index'
-import { Route as AppSettingsProfileRouteImport } from './routes/app/settings/profile'
-import { Route as AppSettingsSecurityRouteImport } from './routes/app/settings/security'
+import { Route as AppDataScreenIndexRouteImport } from './routes/app/data-screen/index'
+import { Route as AppAdminIndexRouteImport } from './routes/app/admin/index'
 import { Route as AppSettingsSessionsRouteImport } from './routes/app/settings/sessions'
-import { Route as AppAdminEnterpriseCustomersCustomerIdRouteImport } from './routes/app/admin/enterprise-customers.$customerId'
-import { Route as AppAdminEnterpriseProjectsProjectIdRouteImport } from './routes/app/admin/enterprise-projects.$projectId'
-import { Route as AppAdminProjectsProjectIdRouteImport } from './routes/app/admin/projects.$projectId'
+import { Route as AppSettingsSecurityRouteImport } from './routes/app/settings/security'
+import { Route as AppSettingsProfileRouteImport } from './routes/app/settings/profile'
+import { Route as AppAdminWorkHourConfigsRouteImport } from './routes/app/admin/work-hour-configs'
+import { Route as AppAdminWarningsRouteImport } from './routes/app/admin/warnings'
+import { Route as AppAdminVideoMonitoringRouteImport } from './routes/app/admin/video-monitoring'
+import { Route as AppAdminUsersRouteImport } from './routes/app/admin/users'
+import { Route as AppAdminUploadsRouteImport } from './routes/app/admin/uploads'
+import { Route as AppAdminSupplementalAttendanceRouteImport } from './routes/app/admin/supplemental-attendance'
+import { Route as AppAdminSafetyManagementRouteImport } from './routes/app/admin/safety-management'
+import { Route as AppAdminRolesRouteImport } from './routes/app/admin/roles'
+import { Route as AppAdminRegistrationLeadsRouteImport } from './routes/app/admin/registration-leads'
+import { Route as AppAdminQualitySafetyRouteImport } from './routes/app/admin/quality-safety'
+import { Route as AppAdminProjectsRouteImport } from './routes/app/admin/projects'
+import { Route as AppAdminPlatformIntegrationsRouteImport } from './routes/app/admin/platform-integrations'
+import { Route as AppAdminPersonnelWorkersRouteImport } from './routes/app/admin/personnel-workers'
+import { Route as AppAdminPersonnelRegistrationsRouteImport } from './routes/app/admin/personnel-registrations'
+import { Route as AppAdminPersonnelQualificationsRouteImport } from './routes/app/admin/personnel-qualifications'
+import { Route as AppAdminPersonnelContractsRouteImport } from './routes/app/admin/personnel-contracts'
+import { Route as AppAdminPersonnelBadRecordsRouteImport } from './routes/app/admin/personnel-bad-records'
+import { Route as AppAdminPersonnelApproversRouteImport } from './routes/app/admin/personnel-approvers'
+import { Route as AppAdminPartyBuildingRouteImport } from './routes/app/admin/party-building'
+import { Route as AppAdminMaterialManagementRouteImport } from './routes/app/admin/material-management'
+import { Route as AppAdminManagedAttendanceRouteImport } from './routes/app/admin/managed-attendance'
+import { Route as AppAdminEnvironmentMonitoringRouteImport } from './routes/app/admin/environment-monitoring'
+import { Route as AppAdminEnterpriseReceivedInvoicesRouteImport } from './routes/app/admin/enterprise-received-invoices'
+import { Route as AppAdminEnterpriseProjectsRouteImport } from './routes/app/admin/enterprise-projects'
+import { Route as AppAdminEnterprisePaymentsRouteImport } from './routes/app/admin/enterprise-payments'
+import { Route as AppAdminEnterpriseOwnEntitiesRouteImport } from './routes/app/admin/enterprise-own-entities'
+import { Route as AppAdminEnterpriseIssuedInvoicesRouteImport } from './routes/app/admin/enterprise-issued-invoices'
+import { Route as AppAdminEnterpriseCustomersRouteImport } from './routes/app/admin/enterprise-customers'
+import { Route as AppAdminEnterpriseCollectionsRouteImport } from './routes/app/admin/enterprise-collections'
+import { Route as AppAdminEmergencyManagementRouteImport } from './routes/app/admin/emergency-management'
+import { Route as AppAdminDataReportingRouteImport } from './routes/app/admin/data-reporting'
+import { Route as AppAdminContractTemplatesRouteImport } from './routes/app/admin/contract-templates'
+import { Route as AppAdminConstructionSiteRouteImport } from './routes/app/admin/construction-site'
+import { Route as AppAdminAttendanceDevicesRouteImport } from './routes/app/admin/attendance-devices'
+import { Route as AppAdminAttendanceDeviceIssueReportsRouteImport } from './routes/app/admin/attendance-device-issue-reports'
+import { Route as AppAdminAttendanceAlertsRouteImport } from './routes/app/admin/attendance-alerts'
+import { Route as AppAdminApiKeysRouteImport } from './routes/app/admin/api-keys'
 import { Route as AppDataScreenProjectProjectIdRouteImport } from './routes/app/data-screen/project/$projectId'
+import { Route as AppAdminProjectsProjectIdRouteImport } from './routes/app/admin/projects.$projectId'
+import { Route as AppAdminEnterpriseProjectsProjectIdRouteImport } from './routes/app/admin/enterprise-projects.$projectId'
+import { Route as AppAdminEnterpriseCustomersCustomerIdRouteImport } from './routes/app/admin/enterprise-customers.$customerId'
 
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const AppRoute = AppRouteImport.update({
   id: '/app',
   path: '/app',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppIndexRoute = AppIndexRouteImport.update({
@@ -80,19 +80,9 @@ const AppIndexRoute = AppIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppRoute,
 } as any)
-const AppAdminRoute = AppAdminRouteImport.update({
-  id: '/admin',
-  path: '/admin',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppDataScreenRoute = AppDataScreenRouteImport.update({
-  id: '/data-screen',
-  path: '/data-screen',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppLoginRoute = AppLoginRouteImport.update({
-  id: '/login',
-  path: '/login',
+const AppSettingsRoute = AppSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => AppRoute,
 } as any)
 const AppRegisterRoute = AppRegisterRouteImport.update({
@@ -100,177 +90,91 @@ const AppRegisterRoute = AppRegisterRouteImport.update({
   path: '/register',
   getParentRoute: () => AppRoute,
 } as any)
-const AppSettingsRoute = AppSettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
+const AppLoginRoute = AppLoginRouteImport.update({
+  id: '/login',
+  path: '/login',
   getParentRoute: () => AppRoute,
+} as any)
+const AppDataScreenRoute = AppDataScreenRouteImport.update({
+  id: '/data-screen',
+  path: '/data-screen',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAdminRoute = AppAdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
+const AppDataScreenIndexRoute = AppDataScreenIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppDataScreenRoute,
 } as any)
 const AppAdminIndexRoute = AppAdminIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AppAdminRoute,
 } as any)
-const AppAdminApiKeysRoute = AppAdminApiKeysRouteImport.update({
-  id: '/api-keys',
-  path: '/api-keys',
+const AppSettingsSessionsRoute = AppSettingsSessionsRouteImport.update({
+  id: '/sessions',
+  path: '/sessions',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
+const AppSettingsSecurityRoute = AppSettingsSecurityRouteImport.update({
+  id: '/security',
+  path: '/security',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
+const AppSettingsProfileRoute = AppSettingsProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
+const AppAdminWorkHourConfigsRoute = AppAdminWorkHourConfigsRouteImport.update({
+  id: '/work-hour-configs',
+  path: '/work-hour-configs',
   getParentRoute: () => AppAdminRoute,
 } as any)
-const AppAdminAttendanceAlertsRoute =
-  AppAdminAttendanceAlertsRouteImport.update({
-    id: '/attendance-alerts',
-    path: '/attendance-alerts',
-    getParentRoute: () => AppAdminRoute,
-  } as any)
-const AppAdminAttendanceDeviceIssueReportsRoute =
-  AppAdminAttendanceDeviceIssueReportsRouteImport.update({
-    id: '/attendance-device-issue-reports',
-    path: '/attendance-device-issue-reports',
-    getParentRoute: () => AppAdminRoute,
-  } as any)
-const AppAdminAttendanceDevicesRoute =
-  AppAdminAttendanceDevicesRouteImport.update({
-    id: '/attendance-devices',
-    path: '/attendance-devices',
-    getParentRoute: () => AppAdminRoute,
-  } as any)
-const AppAdminConstructionSiteRoute =
-  AppAdminConstructionSiteRouteImport.update({
-    id: '/construction-site',
-    path: '/construction-site',
-    getParentRoute: () => AppAdminRoute,
-  } as any)
-const AppAdminContractTemplatesRoute =
-  AppAdminContractTemplatesRouteImport.update({
-    id: '/contract-templates',
-    path: '/contract-templates',
-    getParentRoute: () => AppAdminRoute,
-  } as any)
-const AppAdminDataReportingRoute = AppAdminDataReportingRouteImport.update({
-  id: '/data-reporting',
-  path: '/data-reporting',
+const AppAdminWarningsRoute = AppAdminWarningsRouteImport.update({
+  id: '/warnings',
+  path: '/warnings',
   getParentRoute: () => AppAdminRoute,
 } as any)
-const AppAdminEmergencyManagementRoute =
-  AppAdminEmergencyManagementRouteImport.update({
-    id: '/emergency-management',
-    path: '/emergency-management',
-    getParentRoute: () => AppAdminRoute,
-  } as any)
-const AppAdminEnterpriseCollectionsRoute =
-  AppAdminEnterpriseCollectionsRouteImport.update({
-    id: '/enterprise-collections',
-    path: '/enterprise-collections',
-    getParentRoute: () => AppAdminRoute,
-  } as any)
-const AppAdminEnterpriseCustomersRoute =
-  AppAdminEnterpriseCustomersRouteImport.update({
-    id: '/enterprise-customers',
-    path: '/enterprise-customers',
-    getParentRoute: () => AppAdminRoute,
-  } as any)
-const AppAdminEnterpriseIssuedInvoicesRoute =
-  AppAdminEnterpriseIssuedInvoicesRouteImport.update({
-    id: '/enterprise-issued-invoices',
-    path: '/enterprise-issued-invoices',
-    getParentRoute: () => AppAdminRoute,
-  } as any)
-const AppAdminEnterpriseOwnEntitiesRoute =
-  AppAdminEnterpriseOwnEntitiesRouteImport.update({
-    id: '/enterprise-own-entities',
-    path: '/enterprise-own-entities',
-    getParentRoute: () => AppAdminRoute,
-  } as any)
-const AppAdminEnterprisePaymentsRoute =
-  AppAdminEnterprisePaymentsRouteImport.update({
-    id: '/enterprise-payments',
-    path: '/enterprise-payments',
-    getParentRoute: () => AppAdminRoute,
-  } as any)
-const AppAdminEnterpriseProjectsRoute =
-  AppAdminEnterpriseProjectsRouteImport.update({
-    id: '/enterprise-projects',
-    path: '/enterprise-projects',
-    getParentRoute: () => AppAdminRoute,
-  } as any)
-const AppAdminEnterpriseReceivedInvoicesRoute =
-  AppAdminEnterpriseReceivedInvoicesRouteImport.update({
-    id: '/enterprise-received-invoices',
-    path: '/enterprise-received-invoices',
-    getParentRoute: () => AppAdminRoute,
-  } as any)
-const AppAdminEnvironmentMonitoringRoute =
-  AppAdminEnvironmentMonitoringRouteImport.update({
-    id: '/environment-monitoring',
-    path: '/environment-monitoring',
-    getParentRoute: () => AppAdminRoute,
-  } as any)
-const AppAdminManagedAttendanceRoute =
-  AppAdminManagedAttendanceRouteImport.update({
-    id: '/managed-attendance',
-    path: '/managed-attendance',
-    getParentRoute: () => AppAdminRoute,
-  } as any)
-const AppAdminMaterialManagementRoute =
-  AppAdminMaterialManagementRouteImport.update({
-    id: '/material-management',
-    path: '/material-management',
-    getParentRoute: () => AppAdminRoute,
-  } as any)
-const AppAdminPartyBuildingRoute = AppAdminPartyBuildingRouteImport.update({
-  id: '/party-building',
-  path: '/party-building',
+const AppAdminVideoMonitoringRoute = AppAdminVideoMonitoringRouteImport.update({
+  id: '/video-monitoring',
+  path: '/video-monitoring',
   getParentRoute: () => AppAdminRoute,
 } as any)
-const AppAdminPersonnelApproversRoute =
-  AppAdminPersonnelApproversRouteImport.update({
-    id: '/personnel-approvers',
-    path: '/personnel-approvers',
-    getParentRoute: () => AppAdminRoute,
-  } as any)
-const AppAdminPersonnelBadRecordsRoute =
-  AppAdminPersonnelBadRecordsRouteImport.update({
-    id: '/personnel-bad-records',
-    path: '/personnel-bad-records',
-    getParentRoute: () => AppAdminRoute,
-  } as any)
-const AppAdminPersonnelContractsRoute =
-  AppAdminPersonnelContractsRouteImport.update({
-    id: '/personnel-contracts',
-    path: '/personnel-contracts',
-    getParentRoute: () => AppAdminRoute,
-  } as any)
-const AppAdminPersonnelQualificationsRoute =
-  AppAdminPersonnelQualificationsRouteImport.update({
-    id: '/personnel-qualifications',
-    path: '/personnel-qualifications',
-    getParentRoute: () => AppAdminRoute,
-  } as any)
-const AppAdminPersonnelRegistrationsRoute =
-  AppAdminPersonnelRegistrationsRouteImport.update({
-    id: '/personnel-registrations',
-    path: '/personnel-registrations',
-    getParentRoute: () => AppAdminRoute,
-  } as any)
-const AppAdminPersonnelWorkersRoute =
-  AppAdminPersonnelWorkersRouteImport.update({
-    id: '/personnel-workers',
-    path: '/personnel-workers',
-    getParentRoute: () => AppAdminRoute,
-  } as any)
-const AppAdminPlatformIntegrationsRoute =
-  AppAdminPlatformIntegrationsRouteImport.update({
-    id: '/platform-integrations',
-    path: '/platform-integrations',
-    getParentRoute: () => AppAdminRoute,
-  } as any)
-const AppAdminProjectsRoute = AppAdminProjectsRouteImport.update({
-  id: '/projects',
-  path: '/projects',
+const AppAdminUsersRoute = AppAdminUsersRouteImport.update({
+  id: '/users',
+  path: '/users',
   getParentRoute: () => AppAdminRoute,
 } as any)
-const AppAdminQualitySafetyRoute = AppAdminQualitySafetyRouteImport.update({
-  id: '/quality-safety',
-  path: '/quality-safety',
+const AppAdminUploadsRoute = AppAdminUploadsRouteImport.update({
+  id: '/uploads',
+  path: '/uploads',
+  getParentRoute: () => AppAdminRoute,
+} as any)
+const AppAdminSupplementalAttendanceRoute =
+  AppAdminSupplementalAttendanceRouteImport.update({
+    id: '/supplemental-attendance',
+    path: '/supplemental-attendance',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminSafetyManagementRoute =
+  AppAdminSafetyManagementRouteImport.update({
+    id: '/safety-management',
+    path: '/safety-management',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminRolesRoute = AppAdminRolesRouteImport.update({
+  id: '/roles',
+  path: '/roles',
   getParentRoute: () => AppAdminRoute,
 } as any)
 const AppAdminRegistrationLeadsRoute =
@@ -279,84 +183,174 @@ const AppAdminRegistrationLeadsRoute =
     path: '/registration-leads',
     getParentRoute: () => AppAdminRoute,
   } as any)
-const AppAdminRolesRoute = AppAdminRolesRouteImport.update({
-  id: '/roles',
-  path: '/roles',
+const AppAdminQualitySafetyRoute = AppAdminQualitySafetyRouteImport.update({
+  id: '/quality-safety',
+  path: '/quality-safety',
   getParentRoute: () => AppAdminRoute,
 } as any)
-const AppAdminSafetyManagementRoute =
-  AppAdminSafetyManagementRouteImport.update({
-    id: '/safety-management',
-    path: '/safety-management',
+const AppAdminProjectsRoute = AppAdminProjectsRouteImport.update({
+  id: '/projects',
+  path: '/projects',
+  getParentRoute: () => AppAdminRoute,
+} as any)
+const AppAdminPlatformIntegrationsRoute =
+  AppAdminPlatformIntegrationsRouteImport.update({
+    id: '/platform-integrations',
+    path: '/platform-integrations',
     getParentRoute: () => AppAdminRoute,
   } as any)
-const AppAdminSupplementalAttendanceRoute =
-  AppAdminSupplementalAttendanceRouteImport.update({
-    id: '/supplemental-attendance',
-    path: '/supplemental-attendance',
+const AppAdminPersonnelWorkersRoute =
+  AppAdminPersonnelWorkersRouteImport.update({
+    id: '/personnel-workers',
+    path: '/personnel-workers',
     getParentRoute: () => AppAdminRoute,
   } as any)
-const AppAdminUploadsRoute = AppAdminUploadsRouteImport.update({
-  id: '/uploads',
-  path: '/uploads',
-  getParentRoute: () => AppAdminRoute,
-} as any)
-const AppAdminUsersRoute = AppAdminUsersRouteImport.update({
-  id: '/users',
-  path: '/users',
-  getParentRoute: () => AppAdminRoute,
-} as any)
-const AppAdminVideoMonitoringRoute = AppAdminVideoMonitoringRouteImport.update({
-  id: '/video-monitoring',
-  path: '/video-monitoring',
-  getParentRoute: () => AppAdminRoute,
-} as any)
-const AppAdminWarningsRoute = AppAdminWarningsRouteImport.update({
-  id: '/warnings',
-  path: '/warnings',
-  getParentRoute: () => AppAdminRoute,
-} as any)
-const AppAdminWorkHourConfigsRoute = AppAdminWorkHourConfigsRouteImport.update({
-  id: '/work-hour-configs',
-  path: '/work-hour-configs',
-  getParentRoute: () => AppAdminRoute,
-} as any)
-const AppDataScreenIndexRoute = AppDataScreenIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => AppDataScreenRoute,
-} as any)
-const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => AppSettingsRoute,
-} as any)
-const AppSettingsProfileRoute = AppSettingsProfileRouteImport.update({
-  id: '/profile',
-  path: '/profile',
-  getParentRoute: () => AppSettingsRoute,
-} as any)
-const AppSettingsSecurityRoute = AppSettingsSecurityRouteImport.update({
-  id: '/security',
-  path: '/security',
-  getParentRoute: () => AppSettingsRoute,
-} as any)
-const AppSettingsSessionsRoute = AppSettingsSessionsRouteImport.update({
-  id: '/sessions',
-  path: '/sessions',
-  getParentRoute: () => AppSettingsRoute,
-} as any)
-const AppAdminEnterpriseCustomersCustomerIdRoute =
-  AppAdminEnterpriseCustomersCustomerIdRouteImport.update({
-    id: '/$customerId',
-    path: '/$customerId',
-    getParentRoute: () => AppAdminEnterpriseCustomersRoute,
+const AppAdminPersonnelRegistrationsRoute =
+  AppAdminPersonnelRegistrationsRouteImport.update({
+    id: '/personnel-registrations',
+    path: '/personnel-registrations',
+    getParentRoute: () => AppAdminRoute,
   } as any)
-const AppAdminEnterpriseProjectsProjectIdRoute =
-  AppAdminEnterpriseProjectsProjectIdRouteImport.update({
-    id: '/$projectId',
-    path: '/$projectId',
-    getParentRoute: () => AppAdminEnterpriseProjectsRoute,
+const AppAdminPersonnelQualificationsRoute =
+  AppAdminPersonnelQualificationsRouteImport.update({
+    id: '/personnel-qualifications',
+    path: '/personnel-qualifications',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminPersonnelContractsRoute =
+  AppAdminPersonnelContractsRouteImport.update({
+    id: '/personnel-contracts',
+    path: '/personnel-contracts',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminPersonnelBadRecordsRoute =
+  AppAdminPersonnelBadRecordsRouteImport.update({
+    id: '/personnel-bad-records',
+    path: '/personnel-bad-records',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminPersonnelApproversRoute =
+  AppAdminPersonnelApproversRouteImport.update({
+    id: '/personnel-approvers',
+    path: '/personnel-approvers',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminPartyBuildingRoute = AppAdminPartyBuildingRouteImport.update({
+  id: '/party-building',
+  path: '/party-building',
+  getParentRoute: () => AppAdminRoute,
+} as any)
+const AppAdminMaterialManagementRoute =
+  AppAdminMaterialManagementRouteImport.update({
+    id: '/material-management',
+    path: '/material-management',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminManagedAttendanceRoute =
+  AppAdminManagedAttendanceRouteImport.update({
+    id: '/managed-attendance',
+    path: '/managed-attendance',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminEnvironmentMonitoringRoute =
+  AppAdminEnvironmentMonitoringRouteImport.update({
+    id: '/environment-monitoring',
+    path: '/environment-monitoring',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminEnterpriseReceivedInvoicesRoute =
+  AppAdminEnterpriseReceivedInvoicesRouteImport.update({
+    id: '/enterprise-received-invoices',
+    path: '/enterprise-received-invoices',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminEnterpriseProjectsRoute =
+  AppAdminEnterpriseProjectsRouteImport.update({
+    id: '/enterprise-projects',
+    path: '/enterprise-projects',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminEnterprisePaymentsRoute =
+  AppAdminEnterprisePaymentsRouteImport.update({
+    id: '/enterprise-payments',
+    path: '/enterprise-payments',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminEnterpriseOwnEntitiesRoute =
+  AppAdminEnterpriseOwnEntitiesRouteImport.update({
+    id: '/enterprise-own-entities',
+    path: '/enterprise-own-entities',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminEnterpriseIssuedInvoicesRoute =
+  AppAdminEnterpriseIssuedInvoicesRouteImport.update({
+    id: '/enterprise-issued-invoices',
+    path: '/enterprise-issued-invoices',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminEnterpriseCustomersRoute =
+  AppAdminEnterpriseCustomersRouteImport.update({
+    id: '/enterprise-customers',
+    path: '/enterprise-customers',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminEnterpriseCollectionsRoute =
+  AppAdminEnterpriseCollectionsRouteImport.update({
+    id: '/enterprise-collections',
+    path: '/enterprise-collections',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminEmergencyManagementRoute =
+  AppAdminEmergencyManagementRouteImport.update({
+    id: '/emergency-management',
+    path: '/emergency-management',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminDataReportingRoute = AppAdminDataReportingRouteImport.update({
+  id: '/data-reporting',
+  path: '/data-reporting',
+  getParentRoute: () => AppAdminRoute,
+} as any)
+const AppAdminContractTemplatesRoute =
+  AppAdminContractTemplatesRouteImport.update({
+    id: '/contract-templates',
+    path: '/contract-templates',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminConstructionSiteRoute =
+  AppAdminConstructionSiteRouteImport.update({
+    id: '/construction-site',
+    path: '/construction-site',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminAttendanceDevicesRoute =
+  AppAdminAttendanceDevicesRouteImport.update({
+    id: '/attendance-devices',
+    path: '/attendance-devices',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminAttendanceDeviceIssueReportsRoute =
+  AppAdminAttendanceDeviceIssueReportsRouteImport.update({
+    id: '/attendance-device-issue-reports',
+    path: '/attendance-device-issue-reports',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminAttendanceAlertsRoute =
+  AppAdminAttendanceAlertsRouteImport.update({
+    id: '/attendance-alerts',
+    path: '/attendance-alerts',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
+const AppAdminApiKeysRoute = AppAdminApiKeysRouteImport.update({
+  id: '/api-keys',
+  path: '/api-keys',
+  getParentRoute: () => AppAdminRoute,
+} as any)
+const AppDataScreenProjectProjectIdRoute =
+  AppDataScreenProjectProjectIdRouteImport.update({
+    id: '/project/$projectId',
+    path: '/project/$projectId',
+    getParentRoute: () => AppDataScreenRoute,
   } as any)
 const AppAdminProjectsProjectIdRoute =
   AppAdminProjectsProjectIdRouteImport.update({
@@ -364,11 +358,17 @@ const AppAdminProjectsProjectIdRoute =
     path: '/$projectId',
     getParentRoute: () => AppAdminProjectsRoute,
   } as any)
-const AppDataScreenProjectProjectIdRoute =
-  AppDataScreenProjectProjectIdRouteImport.update({
-    id: '/project/$projectId',
-    path: '/project/$projectId',
-    getParentRoute: () => AppDataScreenRoute,
+const AppAdminEnterpriseProjectsProjectIdRoute =
+  AppAdminEnterpriseProjectsProjectIdRouteImport.update({
+    id: '/$projectId',
+    path: '/$projectId',
+    getParentRoute: () => AppAdminEnterpriseProjectsRoute,
+  } as any)
+const AppAdminEnterpriseCustomersCustomerIdRoute =
+  AppAdminEnterpriseCustomersCustomerIdRouteImport.update({
+    id: '/$customerId',
+    path: '/$customerId',
+    getParentRoute: () => AppAdminEnterpriseCustomersRoute,
   } as any)
 
 export interface FileRoutesByFullPath {
@@ -716,18 +716,18 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/app': {
       id: '/app'
       path: '/app'
       fullPath: '/app'
       preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/app/': {
@@ -737,25 +737,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppIndexRouteImport
       parentRoute: typeof AppRoute
     }
-    '/app/admin': {
-      id: '/app/admin'
-      path: '/admin'
-      fullPath: '/app/admin'
-      preLoaderRoute: typeof AppAdminRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/data-screen': {
-      id: '/app/data-screen'
-      path: '/data-screen'
-      fullPath: '/app/data-screen'
-      preLoaderRoute: typeof AppDataScreenRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/login': {
-      id: '/app/login'
-      path: '/login'
-      fullPath: '/app/login'
-      preLoaderRoute: typeof AppLoginRouteImport
+    '/app/settings': {
+      id: '/app/settings'
+      path: '/settings'
+      fullPath: '/app/settings'
+      preLoaderRoute: typeof AppSettingsRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/register': {
@@ -765,285 +751,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppRegisterRouteImport
       parentRoute: typeof AppRoute
     }
-    '/app/settings': {
-      id: '/app/settings'
-      path: '/settings'
-      fullPath: '/app/settings'
-      preLoaderRoute: typeof AppSettingsRouteImport
+    '/app/login': {
+      id: '/app/login'
+      path: '/login'
+      fullPath: '/app/login'
+      preLoaderRoute: typeof AppLoginRouteImport
       parentRoute: typeof AppRoute
     }
-    '/app/admin/': {
-      id: '/app/admin/'
-      path: '/'
-      fullPath: '/app/admin/'
-      preLoaderRoute: typeof AppAdminIndexRouteImport
-      parentRoute: typeof AppAdminRoute
+    '/app/data-screen': {
+      id: '/app/data-screen'
+      path: '/data-screen'
+      fullPath: '/app/data-screen'
+      preLoaderRoute: typeof AppDataScreenRouteImport
+      parentRoute: typeof AppRoute
     }
-    '/app/admin/api-keys': {
-      id: '/app/admin/api-keys'
-      path: '/api-keys'
-      fullPath: '/app/admin/api-keys'
-      preLoaderRoute: typeof AppAdminApiKeysRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/attendance-alerts': {
-      id: '/app/admin/attendance-alerts'
-      path: '/attendance-alerts'
-      fullPath: '/app/admin/attendance-alerts'
-      preLoaderRoute: typeof AppAdminAttendanceAlertsRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/attendance-device-issue-reports': {
-      id: '/app/admin/attendance-device-issue-reports'
-      path: '/attendance-device-issue-reports'
-      fullPath: '/app/admin/attendance-device-issue-reports'
-      preLoaderRoute: typeof AppAdminAttendanceDeviceIssueReportsRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/attendance-devices': {
-      id: '/app/admin/attendance-devices'
-      path: '/attendance-devices'
-      fullPath: '/app/admin/attendance-devices'
-      preLoaderRoute: typeof AppAdminAttendanceDevicesRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/construction-site': {
-      id: '/app/admin/construction-site'
-      path: '/construction-site'
-      fullPath: '/app/admin/construction-site'
-      preLoaderRoute: typeof AppAdminConstructionSiteRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/contract-templates': {
-      id: '/app/admin/contract-templates'
-      path: '/contract-templates'
-      fullPath: '/app/admin/contract-templates'
-      preLoaderRoute: typeof AppAdminContractTemplatesRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/data-reporting': {
-      id: '/app/admin/data-reporting'
-      path: '/data-reporting'
-      fullPath: '/app/admin/data-reporting'
-      preLoaderRoute: typeof AppAdminDataReportingRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/emergency-management': {
-      id: '/app/admin/emergency-management'
-      path: '/emergency-management'
-      fullPath: '/app/admin/emergency-management'
-      preLoaderRoute: typeof AppAdminEmergencyManagementRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/enterprise-collections': {
-      id: '/app/admin/enterprise-collections'
-      path: '/enterprise-collections'
-      fullPath: '/app/admin/enterprise-collections'
-      preLoaderRoute: typeof AppAdminEnterpriseCollectionsRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/enterprise-customers': {
-      id: '/app/admin/enterprise-customers'
-      path: '/enterprise-customers'
-      fullPath: '/app/admin/enterprise-customers'
-      preLoaderRoute: typeof AppAdminEnterpriseCustomersRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/enterprise-issued-invoices': {
-      id: '/app/admin/enterprise-issued-invoices'
-      path: '/enterprise-issued-invoices'
-      fullPath: '/app/admin/enterprise-issued-invoices'
-      preLoaderRoute: typeof AppAdminEnterpriseIssuedInvoicesRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/enterprise-own-entities': {
-      id: '/app/admin/enterprise-own-entities'
-      path: '/enterprise-own-entities'
-      fullPath: '/app/admin/enterprise-own-entities'
-      preLoaderRoute: typeof AppAdminEnterpriseOwnEntitiesRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/enterprise-payments': {
-      id: '/app/admin/enterprise-payments'
-      path: '/enterprise-payments'
-      fullPath: '/app/admin/enterprise-payments'
-      preLoaderRoute: typeof AppAdminEnterprisePaymentsRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/enterprise-projects': {
-      id: '/app/admin/enterprise-projects'
-      path: '/enterprise-projects'
-      fullPath: '/app/admin/enterprise-projects'
-      preLoaderRoute: typeof AppAdminEnterpriseProjectsRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/enterprise-received-invoices': {
-      id: '/app/admin/enterprise-received-invoices'
-      path: '/enterprise-received-invoices'
-      fullPath: '/app/admin/enterprise-received-invoices'
-      preLoaderRoute: typeof AppAdminEnterpriseReceivedInvoicesRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/environment-monitoring': {
-      id: '/app/admin/environment-monitoring'
-      path: '/environment-monitoring'
-      fullPath: '/app/admin/environment-monitoring'
-      preLoaderRoute: typeof AppAdminEnvironmentMonitoringRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/managed-attendance': {
-      id: '/app/admin/managed-attendance'
-      path: '/managed-attendance'
-      fullPath: '/app/admin/managed-attendance'
-      preLoaderRoute: typeof AppAdminManagedAttendanceRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/material-management': {
-      id: '/app/admin/material-management'
-      path: '/material-management'
-      fullPath: '/app/admin/material-management'
-      preLoaderRoute: typeof AppAdminMaterialManagementRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/party-building': {
-      id: '/app/admin/party-building'
-      path: '/party-building'
-      fullPath: '/app/admin/party-building'
-      preLoaderRoute: typeof AppAdminPartyBuildingRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/personnel-approvers': {
-      id: '/app/admin/personnel-approvers'
-      path: '/personnel-approvers'
-      fullPath: '/app/admin/personnel-approvers'
-      preLoaderRoute: typeof AppAdminPersonnelApproversRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/personnel-bad-records': {
-      id: '/app/admin/personnel-bad-records'
-      path: '/personnel-bad-records'
-      fullPath: '/app/admin/personnel-bad-records'
-      preLoaderRoute: typeof AppAdminPersonnelBadRecordsRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/personnel-contracts': {
-      id: '/app/admin/personnel-contracts'
-      path: '/personnel-contracts'
-      fullPath: '/app/admin/personnel-contracts'
-      preLoaderRoute: typeof AppAdminPersonnelContractsRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/personnel-qualifications': {
-      id: '/app/admin/personnel-qualifications'
-      path: '/personnel-qualifications'
-      fullPath: '/app/admin/personnel-qualifications'
-      preLoaderRoute: typeof AppAdminPersonnelQualificationsRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/personnel-registrations': {
-      id: '/app/admin/personnel-registrations'
-      path: '/personnel-registrations'
-      fullPath: '/app/admin/personnel-registrations'
-      preLoaderRoute: typeof AppAdminPersonnelRegistrationsRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/personnel-workers': {
-      id: '/app/admin/personnel-workers'
-      path: '/personnel-workers'
-      fullPath: '/app/admin/personnel-workers'
-      preLoaderRoute: typeof AppAdminPersonnelWorkersRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/platform-integrations': {
-      id: '/app/admin/platform-integrations'
-      path: '/platform-integrations'
-      fullPath: '/app/admin/platform-integrations'
-      preLoaderRoute: typeof AppAdminPlatformIntegrationsRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/projects': {
-      id: '/app/admin/projects'
-      path: '/projects'
-      fullPath: '/app/admin/projects'
-      preLoaderRoute: typeof AppAdminProjectsRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/quality-safety': {
-      id: '/app/admin/quality-safety'
-      path: '/quality-safety'
-      fullPath: '/app/admin/quality-safety'
-      preLoaderRoute: typeof AppAdminQualitySafetyRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/registration-leads': {
-      id: '/app/admin/registration-leads'
-      path: '/registration-leads'
-      fullPath: '/app/admin/registration-leads'
-      preLoaderRoute: typeof AppAdminRegistrationLeadsRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/roles': {
-      id: '/app/admin/roles'
-      path: '/roles'
-      fullPath: '/app/admin/roles'
-      preLoaderRoute: typeof AppAdminRolesRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/safety-management': {
-      id: '/app/admin/safety-management'
-      path: '/safety-management'
-      fullPath: '/app/admin/safety-management'
-      preLoaderRoute: typeof AppAdminSafetyManagementRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/supplemental-attendance': {
-      id: '/app/admin/supplemental-attendance'
-      path: '/supplemental-attendance'
-      fullPath: '/app/admin/supplemental-attendance'
-      preLoaderRoute: typeof AppAdminSupplementalAttendanceRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/uploads': {
-      id: '/app/admin/uploads'
-      path: '/uploads'
-      fullPath: '/app/admin/uploads'
-      preLoaderRoute: typeof AppAdminUploadsRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/users': {
-      id: '/app/admin/users'
-      path: '/users'
-      fullPath: '/app/admin/users'
-      preLoaderRoute: typeof AppAdminUsersRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/video-monitoring': {
-      id: '/app/admin/video-monitoring'
-      path: '/video-monitoring'
-      fullPath: '/app/admin/video-monitoring'
-      preLoaderRoute: typeof AppAdminVideoMonitoringRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/warnings': {
-      id: '/app/admin/warnings'
-      path: '/warnings'
-      fullPath: '/app/admin/warnings'
-      preLoaderRoute: typeof AppAdminWarningsRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/admin/work-hour-configs': {
-      id: '/app/admin/work-hour-configs'
-      path: '/work-hour-configs'
-      fullPath: '/app/admin/work-hour-configs'
-      preLoaderRoute: typeof AppAdminWorkHourConfigsRouteImport
-      parentRoute: typeof AppAdminRoute
-    }
-    '/app/data-screen/': {
-      id: '/app/data-screen/'
-      path: '/'
-      fullPath: '/app/data-screen/'
-      preLoaderRoute: typeof AppDataScreenIndexRouteImport
-      parentRoute: typeof AppDataScreenRoute
+    '/app/admin': {
+      id: '/app/admin'
+      path: '/admin'
+      fullPath: '/app/admin'
+      preLoaderRoute: typeof AppAdminRouteImport
+      parentRoute: typeof AppRoute
     }
     '/app/settings/': {
       id: '/app/settings/'
@@ -1052,11 +779,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsIndexRouteImport
       parentRoute: typeof AppSettingsRoute
     }
-    '/app/settings/profile': {
-      id: '/app/settings/profile'
-      path: '/profile'
-      fullPath: '/app/settings/profile'
-      preLoaderRoute: typeof AppSettingsProfileRouteImport
+    '/app/data-screen/': {
+      id: '/app/data-screen/'
+      path: '/'
+      fullPath: '/app/data-screen/'
+      preLoaderRoute: typeof AppDataScreenIndexRouteImport
+      parentRoute: typeof AppDataScreenRoute
+    }
+    '/app/admin/': {
+      id: '/app/admin/'
+      path: '/'
+      fullPath: '/app/admin/'
+      preLoaderRoute: typeof AppAdminIndexRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/settings/sessions': {
+      id: '/app/settings/sessions'
+      path: '/sessions'
+      fullPath: '/app/settings/sessions'
+      preLoaderRoute: typeof AppSettingsSessionsRouteImport
       parentRoute: typeof AppSettingsRoute
     }
     '/app/settings/security': {
@@ -1066,26 +807,278 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsSecurityRouteImport
       parentRoute: typeof AppSettingsRoute
     }
-    '/app/settings/sessions': {
-      id: '/app/settings/sessions'
-      path: '/sessions'
-      fullPath: '/app/settings/sessions'
-      preLoaderRoute: typeof AppSettingsSessionsRouteImport
+    '/app/settings/profile': {
+      id: '/app/settings/profile'
+      path: '/profile'
+      fullPath: '/app/settings/profile'
+      preLoaderRoute: typeof AppSettingsProfileRouteImport
       parentRoute: typeof AppSettingsRoute
     }
-    '/app/admin/enterprise-customers/$customerId': {
-      id: '/app/admin/enterprise-customers/$customerId'
-      path: '/$customerId'
-      fullPath: '/app/admin/enterprise-customers/$customerId'
-      preLoaderRoute: typeof AppAdminEnterpriseCustomersCustomerIdRouteImport
-      parentRoute: typeof AppAdminEnterpriseCustomersRoute
+    '/app/admin/work-hour-configs': {
+      id: '/app/admin/work-hour-configs'
+      path: '/work-hour-configs'
+      fullPath: '/app/admin/work-hour-configs'
+      preLoaderRoute: typeof AppAdminWorkHourConfigsRouteImport
+      parentRoute: typeof AppAdminRoute
     }
-    '/app/admin/enterprise-projects/$projectId': {
-      id: '/app/admin/enterprise-projects/$projectId'
-      path: '/$projectId'
-      fullPath: '/app/admin/enterprise-projects/$projectId'
-      preLoaderRoute: typeof AppAdminEnterpriseProjectsProjectIdRouteImport
-      parentRoute: typeof AppAdminEnterpriseProjectsRoute
+    '/app/admin/warnings': {
+      id: '/app/admin/warnings'
+      path: '/warnings'
+      fullPath: '/app/admin/warnings'
+      preLoaderRoute: typeof AppAdminWarningsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/video-monitoring': {
+      id: '/app/admin/video-monitoring'
+      path: '/video-monitoring'
+      fullPath: '/app/admin/video-monitoring'
+      preLoaderRoute: typeof AppAdminVideoMonitoringRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/users': {
+      id: '/app/admin/users'
+      path: '/users'
+      fullPath: '/app/admin/users'
+      preLoaderRoute: typeof AppAdminUsersRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/uploads': {
+      id: '/app/admin/uploads'
+      path: '/uploads'
+      fullPath: '/app/admin/uploads'
+      preLoaderRoute: typeof AppAdminUploadsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/supplemental-attendance': {
+      id: '/app/admin/supplemental-attendance'
+      path: '/supplemental-attendance'
+      fullPath: '/app/admin/supplemental-attendance'
+      preLoaderRoute: typeof AppAdminSupplementalAttendanceRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/safety-management': {
+      id: '/app/admin/safety-management'
+      path: '/safety-management'
+      fullPath: '/app/admin/safety-management'
+      preLoaderRoute: typeof AppAdminSafetyManagementRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/roles': {
+      id: '/app/admin/roles'
+      path: '/roles'
+      fullPath: '/app/admin/roles'
+      preLoaderRoute: typeof AppAdminRolesRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/registration-leads': {
+      id: '/app/admin/registration-leads'
+      path: '/registration-leads'
+      fullPath: '/app/admin/registration-leads'
+      preLoaderRoute: typeof AppAdminRegistrationLeadsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/quality-safety': {
+      id: '/app/admin/quality-safety'
+      path: '/quality-safety'
+      fullPath: '/app/admin/quality-safety'
+      preLoaderRoute: typeof AppAdminQualitySafetyRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/projects': {
+      id: '/app/admin/projects'
+      path: '/projects'
+      fullPath: '/app/admin/projects'
+      preLoaderRoute: typeof AppAdminProjectsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/platform-integrations': {
+      id: '/app/admin/platform-integrations'
+      path: '/platform-integrations'
+      fullPath: '/app/admin/platform-integrations'
+      preLoaderRoute: typeof AppAdminPlatformIntegrationsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/personnel-workers': {
+      id: '/app/admin/personnel-workers'
+      path: '/personnel-workers'
+      fullPath: '/app/admin/personnel-workers'
+      preLoaderRoute: typeof AppAdminPersonnelWorkersRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/personnel-registrations': {
+      id: '/app/admin/personnel-registrations'
+      path: '/personnel-registrations'
+      fullPath: '/app/admin/personnel-registrations'
+      preLoaderRoute: typeof AppAdminPersonnelRegistrationsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/personnel-qualifications': {
+      id: '/app/admin/personnel-qualifications'
+      path: '/personnel-qualifications'
+      fullPath: '/app/admin/personnel-qualifications'
+      preLoaderRoute: typeof AppAdminPersonnelQualificationsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/personnel-contracts': {
+      id: '/app/admin/personnel-contracts'
+      path: '/personnel-contracts'
+      fullPath: '/app/admin/personnel-contracts'
+      preLoaderRoute: typeof AppAdminPersonnelContractsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/personnel-bad-records': {
+      id: '/app/admin/personnel-bad-records'
+      path: '/personnel-bad-records'
+      fullPath: '/app/admin/personnel-bad-records'
+      preLoaderRoute: typeof AppAdminPersonnelBadRecordsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/personnel-approvers': {
+      id: '/app/admin/personnel-approvers'
+      path: '/personnel-approvers'
+      fullPath: '/app/admin/personnel-approvers'
+      preLoaderRoute: typeof AppAdminPersonnelApproversRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/party-building': {
+      id: '/app/admin/party-building'
+      path: '/party-building'
+      fullPath: '/app/admin/party-building'
+      preLoaderRoute: typeof AppAdminPartyBuildingRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/material-management': {
+      id: '/app/admin/material-management'
+      path: '/material-management'
+      fullPath: '/app/admin/material-management'
+      preLoaderRoute: typeof AppAdminMaterialManagementRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/managed-attendance': {
+      id: '/app/admin/managed-attendance'
+      path: '/managed-attendance'
+      fullPath: '/app/admin/managed-attendance'
+      preLoaderRoute: typeof AppAdminManagedAttendanceRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/environment-monitoring': {
+      id: '/app/admin/environment-monitoring'
+      path: '/environment-monitoring'
+      fullPath: '/app/admin/environment-monitoring'
+      preLoaderRoute: typeof AppAdminEnvironmentMonitoringRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/enterprise-received-invoices': {
+      id: '/app/admin/enterprise-received-invoices'
+      path: '/enterprise-received-invoices'
+      fullPath: '/app/admin/enterprise-received-invoices'
+      preLoaderRoute: typeof AppAdminEnterpriseReceivedInvoicesRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/enterprise-projects': {
+      id: '/app/admin/enterprise-projects'
+      path: '/enterprise-projects'
+      fullPath: '/app/admin/enterprise-projects'
+      preLoaderRoute: typeof AppAdminEnterpriseProjectsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/enterprise-payments': {
+      id: '/app/admin/enterprise-payments'
+      path: '/enterprise-payments'
+      fullPath: '/app/admin/enterprise-payments'
+      preLoaderRoute: typeof AppAdminEnterprisePaymentsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/enterprise-own-entities': {
+      id: '/app/admin/enterprise-own-entities'
+      path: '/enterprise-own-entities'
+      fullPath: '/app/admin/enterprise-own-entities'
+      preLoaderRoute: typeof AppAdminEnterpriseOwnEntitiesRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/enterprise-issued-invoices': {
+      id: '/app/admin/enterprise-issued-invoices'
+      path: '/enterprise-issued-invoices'
+      fullPath: '/app/admin/enterprise-issued-invoices'
+      preLoaderRoute: typeof AppAdminEnterpriseIssuedInvoicesRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/enterprise-customers': {
+      id: '/app/admin/enterprise-customers'
+      path: '/enterprise-customers'
+      fullPath: '/app/admin/enterprise-customers'
+      preLoaderRoute: typeof AppAdminEnterpriseCustomersRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/enterprise-collections': {
+      id: '/app/admin/enterprise-collections'
+      path: '/enterprise-collections'
+      fullPath: '/app/admin/enterprise-collections'
+      preLoaderRoute: typeof AppAdminEnterpriseCollectionsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/emergency-management': {
+      id: '/app/admin/emergency-management'
+      path: '/emergency-management'
+      fullPath: '/app/admin/emergency-management'
+      preLoaderRoute: typeof AppAdminEmergencyManagementRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/data-reporting': {
+      id: '/app/admin/data-reporting'
+      path: '/data-reporting'
+      fullPath: '/app/admin/data-reporting'
+      preLoaderRoute: typeof AppAdminDataReportingRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/contract-templates': {
+      id: '/app/admin/contract-templates'
+      path: '/contract-templates'
+      fullPath: '/app/admin/contract-templates'
+      preLoaderRoute: typeof AppAdminContractTemplatesRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/construction-site': {
+      id: '/app/admin/construction-site'
+      path: '/construction-site'
+      fullPath: '/app/admin/construction-site'
+      preLoaderRoute: typeof AppAdminConstructionSiteRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/attendance-devices': {
+      id: '/app/admin/attendance-devices'
+      path: '/attendance-devices'
+      fullPath: '/app/admin/attendance-devices'
+      preLoaderRoute: typeof AppAdminAttendanceDevicesRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/attendance-device-issue-reports': {
+      id: '/app/admin/attendance-device-issue-reports'
+      path: '/attendance-device-issue-reports'
+      fullPath: '/app/admin/attendance-device-issue-reports'
+      preLoaderRoute: typeof AppAdminAttendanceDeviceIssueReportsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/attendance-alerts': {
+      id: '/app/admin/attendance-alerts'
+      path: '/attendance-alerts'
+      fullPath: '/app/admin/attendance-alerts'
+      preLoaderRoute: typeof AppAdminAttendanceAlertsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/api-keys': {
+      id: '/app/admin/api-keys'
+      path: '/api-keys'
+      fullPath: '/app/admin/api-keys'
+      preLoaderRoute: typeof AppAdminApiKeysRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/data-screen/project/$projectId': {
+      id: '/app/data-screen/project/$projectId'
+      path: '/project/$projectId'
+      fullPath: '/app/data-screen/project/$projectId'
+      preLoaderRoute: typeof AppDataScreenProjectProjectIdRouteImport
+      parentRoute: typeof AppDataScreenRoute
     }
     '/app/admin/projects/$projectId': {
       id: '/app/admin/projects/$projectId'
@@ -1094,12 +1087,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdminProjectsProjectIdRouteImport
       parentRoute: typeof AppAdminProjectsRoute
     }
-    '/app/data-screen/project/$projectId': {
-      id: '/app/data-screen/project/$projectId'
-      path: '/project/$projectId'
-      fullPath: '/app/data-screen/project/$projectId'
-      preLoaderRoute: typeof AppDataScreenProjectProjectIdRouteImport
-      parentRoute: typeof AppDataScreenRoute
+    '/app/admin/enterprise-projects/$projectId': {
+      id: '/app/admin/enterprise-projects/$projectId'
+      path: '/$projectId'
+      fullPath: '/app/admin/enterprise-projects/$projectId'
+      preLoaderRoute: typeof AppAdminEnterpriseProjectsProjectIdRouteImport
+      parentRoute: typeof AppAdminEnterpriseProjectsRoute
+    }
+    '/app/admin/enterprise-customers/$customerId': {
+      id: '/app/admin/enterprise-customers/$customerId'
+      path: '/$customerId'
+      fullPath: '/app/admin/enterprise-customers/$customerId'
+      preLoaderRoute: typeof AppAdminEnterpriseCustomersCustomerIdRouteImport
+      parentRoute: typeof AppAdminEnterpriseCustomersRoute
     }
   }
 }

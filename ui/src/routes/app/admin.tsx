@@ -16,9 +16,9 @@ import { useAuthUser } from "@/stores/use-auth-store";
 import {
   canAccessSystemWarnings,
   getDefaultAdminPath,
+  getMenuPermissionForPath,
   getMenuKeysForUserRole,
   isAdminWorkspacePath,
-  type MenuPermissionKey,
 } from "@/features/admin/data/rbac";
 import { useCurrentRolePermissions } from "@/features/admin/hooks/use-roles";
 import { HeaderUserMenu } from "@/components/layout/HeaderUserMenu";
@@ -74,38 +74,15 @@ function AdminContent() {
     allowedMenus.add("system_warnings");
   }
   const unreadCount = notifications.filter((n) => n.unread).length;
-  const scopedUserPages = [
-    { path: "/app/admin/warnings", menuKey: "system_warnings" },
-    { path: "/app/admin", menuKey: "admin_overview" },
-    { path: "/app/admin/projects", menuKey: "projects" },
-    { path: "/app/admin/data-reporting", menuKey: "data_reporting" },
-    { path: "/app/admin/attendance-devices", menuKey: "attendance_devices" },
-    {
-      path: "/app/admin/attendance-device-issue-reports",
-      menuKey: "attendance_device_issue_reports",
-    },
-    {
-      path: "/app/admin/supplemental-attendance",
-      menuKey: "supplemental_attendance",
-    },
-    { path: "/app/admin/personnel-workers", menuKey: "personnel_workers" },
-  ] satisfies Array<{ path: string; menuKey: MenuPermissionKey }>;
-  const currentScopedPage = scopedUserPages.find(
-    ({ path }) =>
-      location.pathname === path ||
-      (path !== "/app/admin" && location.pathname.startsWith(`${path}/`))
-  );
+  const currentScopedPage = getMenuPermissionForPath(location.pathname);
   const canUseScopedPage = Boolean(
-    currentScopedPage && allowedMenus.has(currentScopedPage.menuKey)
+    currentScopedPage && allowedMenus.has(currentScopedPage.key)
   );
   const isUniversalPage = canUseSystemWarnings && (
     location.pathname === "/app/admin" ||
     location.pathname === "/app/admin/" ||
     location.pathname === "/app/admin/warnings" ||
     location.pathname.startsWith("/app/admin/warnings/"));
-  const firstAllowedScopedPage = scopedUserPages.find(({ menuKey }) =>
-    allowedMenus.has(menuKey)
-  );
   const defaultAdminPath = getDefaultAdminPath(allowedMenus);
 
   // Note: Authenticated guard is handled by app.tsx 
@@ -128,8 +105,8 @@ function AdminContent() {
     isAdminWorkspacePath(location.pathname) &&
     !canUseScopedPage
   ) {
-    if (firstAllowedScopedPage) {
-      navigate({ to: firstAllowedScopedPage.path });
+    if (defaultAdminPath !== "/app/admin") {
+      navigate({ to: defaultAdminPath });
       return null;
     }
 

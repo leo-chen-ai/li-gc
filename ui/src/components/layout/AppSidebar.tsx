@@ -60,7 +60,6 @@ type SidebarItem = {
   title: string;
   href: string;
   icon: LucideIcon;
-  enabled?: boolean;
 };
 
 type SidebarSection = {
@@ -70,7 +69,6 @@ type SidebarSection = {
 
 export function AppSidebar() {
   const user = useAuthUser();
-  const isAdmin = user?.role === "admin";
   const shouldLoadCustomRole = Boolean(user?.role && user.role !== "admin" && user.role !== "user");
   const location = useLocation();
   const { data: currentRolePermissions } = useCurrentRolePermissions(
@@ -92,62 +90,64 @@ export function AppSidebar() {
     {
       title: "工作台",
       items: [
-        { key: "admin_overview", title: "首页", href: "/app/admin", icon: BarChart3, enabled: true },
+        { key: "admin_overview", title: "首页", href: "/app/admin", icon: BarChart3 },
       ],
     },
     {
       title: "数据报送",
       items: [
-        { key: "data_reporting", title: "数据报送中心", href: "/app/admin/data-reporting", icon: Send, enabled: true },
+        { key: "data_reporting", title: "数据报送中心", href: "/app/admin/data-reporting", icon: Send },
       ],
     },
     {
       title: "劳务管理",
       items: [
-        { key: "system_warnings", title: "预警管理", href: "/app/admin/warnings", icon: ShieldAlert, enabled: true },
-        { key: "projects", title: "项目列表", href: "/app/admin/projects", icon: Building2, enabled: true },
-        { key: "contract_templates", title: "劳务分包合同模板", href: "/app/admin/contract-templates", icon: FileText, enabled: isAdmin },
-        { key: "work_hour_configs", title: "工时配置", href: "/app/admin/work-hour-configs", icon: Clock3, enabled: isAdmin },
-        { key: "platform_integrations", title: "平台对接管理", href: "/app/admin/platform-integrations", icon: Link2, enabled: isAdmin },
-        { key: "attendance_devices", title: "考勤机绑定", href: "/app/admin/attendance-devices", icon: Fingerprint, enabled: true },
-        { key: "attendance_device_issue_reports", title: "考勤机人员下发报告", href: "/app/admin/attendance-device-issue-reports", icon: FileClock, enabled: true },
-        { key: "supplemental_attendance", title: "考勤托管", href: "/app/admin/supplemental-attendance", icon: CalendarClock, enabled: true },
-        { key: "environment_monitoring", title: "环境检测", href: "/app/admin/environment-monitoring", icon: Leaf, enabled: isAdmin },
-        { key: "video_monitoring", title: "视频监控", href: "/app/admin/video-monitoring", icon: Camera, enabled: isAdmin },
+        { key: "system_warnings", title: "预警管理", href: "/app/admin/warnings", icon: ShieldAlert },
+        { key: "projects", title: "项目列表", href: "/app/admin/projects", icon: Building2 },
+        { key: "contract_templates", title: "劳务分包合同模板", href: "/app/admin/contract-templates", icon: FileText },
+        { key: "work_hour_configs", title: "工时配置", href: "/app/admin/work-hour-configs", icon: Clock3 },
+        { key: "platform_integrations", title: "平台对接管理", href: "/app/admin/platform-integrations", icon: Link2 },
+        { key: "attendance_devices", title: "考勤机绑定", href: "/app/admin/attendance-devices", icon: Fingerprint },
+        { key: "attendance_device_issue_reports", title: "考勤机人员下发报告", href: "/app/admin/attendance-device-issue-reports", icon: FileClock },
+        { key: "attendance_alerts", title: "考勤预警", href: "/app/admin/attendance-alerts", icon: AlertCircle },
+        { key: "managed_attendance", title: "考勤托管（配置）", href: "/app/admin/managed-attendance", icon: CalendarClock },
+        { key: "supplemental_attendance", title: "考勤托管", href: "/app/admin/supplemental-attendance", icon: CalendarClock },
+        { key: "environment_monitoring", title: "环境检测", href: "/app/admin/environment-monitoring", icon: Leaf },
+        { key: "video_monitoring", title: "视频监控", href: "/app/admin/video-monitoring", icon: Camera },
       ],
     },
     {
       title: "施工管理",
       items: [
-        { key: "quality_safety", title: "质安管理", href: "/app/admin/quality-safety", icon: ClipboardCheck, enabled: isAdmin },
-        { key: "safety_management", title: "安全管理", href: "/app/admin/safety-management", icon: ShieldAlert, enabled: isAdmin },
-        { key: "material_management", title: "材料管理", href: "/app/admin/material-management", icon: Package, enabled: isAdmin },
-        { key: "construction_site", title: "施工现场", href: "/app/admin/construction-site", icon: HardHat, enabled: isAdmin },
-        { key: "party_building", title: "智慧党建", href: "/app/admin/party-building", icon: Landmark, enabled: isAdmin },
-        { key: "emergency_management", title: "应急管理", href: "/app/admin/emergency-management", icon: Siren, enabled: isAdmin },
+        { key: "quality_safety", title: "质安管理", href: "/app/admin/quality-safety", icon: ClipboardCheck },
+        { key: "safety_management", title: "安全管理", href: "/app/admin/safety-management", icon: ShieldAlert },
+        { key: "material_management", title: "材料管理", href: "/app/admin/material-management", icon: Package },
+        { key: "construction_site", title: "施工现场", href: "/app/admin/construction-site", icon: HardHat },
+        { key: "party_building", title: "智慧党建", href: "/app/admin/party-building", icon: Landmark },
+        { key: "emergency_management", title: "应急管理", href: "/app/admin/emergency-management", icon: Siren },
       ],
     },
     {
       title: "人员管理",
       items: [
-        { key: "personnel_workers", title: "人员信息列表", href: "/app/admin/personnel-workers", icon: Users, enabled: true },
-        { key: "personnel_contracts", title: "人员合同信息", href: "/app/admin/personnel-contracts", icon: FileText, enabled: isAdmin },
-        { key: "personnel_qualifications", title: "人员资格信息", href: "/app/admin/personnel-qualifications", icon: ShieldCheck, enabled: isAdmin },
-        { key: "personnel_registrations", title: "人员注册信息", href: "/app/admin/personnel-registrations", icon: ClipboardCheck, enabled: isAdmin },
-        { key: "personnel_bad_records", title: "人员不良信息", href: "/app/admin/personnel-bad-records", icon: AlertCircle, enabled: isAdmin },
-        { key: "personnel_approvers", title: "审批人员设置", href: "/app/admin/personnel-approvers", icon: UserCog, enabled: isAdmin },
+        { key: "personnel_workers", title: "人员信息列表", href: "/app/admin/personnel-workers", icon: Users },
+        { key: "personnel_contracts", title: "人员合同信息", href: "/app/admin/personnel-contracts", icon: FileText },
+        { key: "personnel_qualifications", title: "人员资格信息", href: "/app/admin/personnel-qualifications", icon: ShieldCheck },
+        { key: "personnel_registrations", title: "人员注册信息", href: "/app/admin/personnel-registrations", icon: ClipboardCheck },
+        { key: "personnel_bad_records", title: "人员不良信息", href: "/app/admin/personnel-bad-records", icon: AlertCircle },
+        { key: "personnel_approvers", title: "审批人员设置", href: "/app/admin/personnel-approvers", icon: UserCog },
       ],
     },
     {
       title: "企业经营管理",
       items: [
-        { key: "enterprise_customers", title: "往来单位管理", href: "/app/admin/enterprise-customers", icon: Users, enabled: isAdmin },
-        { key: "enterprise_own_entities", title: "我方主体管理", href: "/app/admin/enterprise-own-entities", icon: Building2, enabled: isAdmin },
-        { key: "enterprise_projects", title: "往来单位关联项目管理", href: "/app/admin/enterprise-projects", icon: BriefcaseBusiness, enabled: isAdmin },
-        { key: "enterprise_issued_invoices", title: "开票管理", href: "/app/admin/enterprise-issued-invoices", icon: ReceiptText, enabled: isAdmin },
-        { key: "enterprise_received_invoices", title: "收票管理", href: "/app/admin/enterprise-received-invoices", icon: FileInput, enabled: isAdmin },
-        { key: "enterprise_collections", title: "回款管理", href: "/app/admin/enterprise-collections", icon: WalletMinimal, enabled: isAdmin },
-        { key: "enterprise_payments", title: "付款管理", href: "/app/admin/enterprise-payments", icon: WalletCards, enabled: isAdmin },
+        { key: "enterprise_customers", title: "往来单位管理", href: "/app/admin/enterprise-customers", icon: Users },
+        { key: "enterprise_own_entities", title: "我方主体管理", href: "/app/admin/enterprise-own-entities", icon: Building2 },
+        { key: "enterprise_projects", title: "往来单位关联项目管理", href: "/app/admin/enterprise-projects", icon: BriefcaseBusiness },
+        { key: "enterprise_issued_invoices", title: "开票管理", href: "/app/admin/enterprise-issued-invoices", icon: ReceiptText },
+        { key: "enterprise_received_invoices", title: "收票管理", href: "/app/admin/enterprise-received-invoices", icon: FileInput },
+        { key: "enterprise_collections", title: "回款管理", href: "/app/admin/enterprise-collections", icon: WalletMinimal },
+        { key: "enterprise_payments", title: "付款管理", href: "/app/admin/enterprise-payments", icon: WalletCards },
       ],
     },
     {
@@ -171,7 +171,7 @@ export function AppSidebar() {
   const visibleSections = sections
     .map((section) => ({
       ...section,
-      items: section.items.filter((item) => (item.enabled ?? isAdmin) && allowedMenus.has(item.key)),
+      items: section.items.filter((item) => allowedMenus.has(item.key)),
     }))
     .filter((section) => section.items.length > 0);
   const homePath = getDefaultAdminPath(allowedMenus);

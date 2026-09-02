@@ -385,6 +385,14 @@ export function getDefaultAdminPath(menuKeys: Iterable<MenuPermissionKey>): stri
   );
 }
 
+export function getMenuPermissionForPath(pathname: string): MenuPermission | undefined {
+  return menuPermissions.find(
+    (menu) =>
+      pathname === menu.path ||
+      (menu.path !== "/app/admin" && pathname.startsWith(`${menu.path}/`))
+  );
+}
+
 export function isAdminWorkspacePath(pathname: string): boolean {
   return pathname === "/app/admin" || pathname.startsWith("/app/admin/");
 }
