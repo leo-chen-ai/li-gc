@@ -36,8 +36,4 @@
 
 - Initial implementation: code and build verified; visual comparison unavailable, so no visual fix iteration could be completed.
 
-**Follow-up Polish**
-
-- Determine whether the “项目看板” control should navigate once a matching local destination exists.
-
 final result: blocked

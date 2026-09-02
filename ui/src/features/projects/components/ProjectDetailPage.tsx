@@ -1279,9 +1279,6 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                   编辑
                 </button>
               </div>
-              <div className="mt-3 inline-flex rounded-sm bg-[#f5a623] px-4 py-1.5 text-sm font-medium text-white">
-                项目看板
-              </div>
             </div>
             <Button asChild size="sm" className="bg-[#409eff] text-white hover:bg-[#337ecc]">
               <Link to="/app/admin/projects">
@@ -1291,7 +1288,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
             </Button>
           </div>
 
-          <dl className="mt-4 grid gap-x-10 gap-y-3 text-sm text-[#4b5563] sm:grid-cols-2 xl:grid-cols-3">
+          <dl className="mt-3 grid gap-x-10 gap-y-3 text-sm text-[#4b5563] sm:grid-cols-2 xl:grid-cols-3">
             <div className="flex gap-2"><dt className="shrink-0 text-[#303133]">项目编号：</dt><dd className="min-w-0 break-all">{project.code || "-"}</dd></div>
             <div className="flex gap-2"><dt className="shrink-0 text-[#303133]">项目所在地：</dt><dd>{project.location || project.address || "-"}</dd></div>
             <div className="flex gap-2"><dt className="shrink-0 text-[#303133]">项目分类：</dt><dd>{getFieldOptionLabel(projectFormFields, "category", projectQuery.data?.category) || "-"}</dd></div>
