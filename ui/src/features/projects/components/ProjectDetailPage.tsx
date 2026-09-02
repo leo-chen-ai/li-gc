@@ -10,6 +10,7 @@ import {
   Download,
   Eye,
   FileDown,
+  LayoutDashboard,
   Layers3,
   List,
   LogIn,
@@ -1241,12 +1242,20 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                 </button>
               </div>
             </div>
-            <Button asChild size="sm" className="bg-[#409eff] text-white hover:bg-[#337ecc]">
-              <Link to="/app/admin/projects">
-                <ArrowLeft className="size-4" />
-                返回上一步
-              </Link>
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button asChild size="sm" variant="outline" className="border-[#409eff] text-[#409eff] hover:bg-[#409eff] hover:text-white">
+                <Link to="/app/data-screen/project/$projectId" params={{ projectId }}>
+                  <LayoutDashboard className="size-4" />
+                  项目看板
+                </Link>
+              </Button>
+              <Button asChild size="sm" className="bg-[#409eff] text-white hover:bg-[#337ecc]">
+                <Link to="/app/admin/projects">
+                  <ArrowLeft className="size-4" />
+                  返回上一步
+                </Link>
+              </Button>
+            </div>
           </div>
 
           <dl className="mt-3 grid gap-x-10 gap-y-3 text-sm text-[#4b5563] sm:grid-cols-2 xl:grid-cols-3">

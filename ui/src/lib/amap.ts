@@ -77,17 +77,22 @@ declare global {
 
 let amapPromise: Promise<AMapConstructor> | null = null;
 
+// 浏览器端 Key 属于公开信息（嵌入 HTML script 标签），此处硬编码兜底
+// 防止协作者发版时未传 VITE_AMAP_KEY build-arg 导致地图功能不可用
+const DEFAULT_AMAP_KEY = "142205c95a53b57e404de95f31be67d8";
+const DEFAULT_AMAP_SECURITY_CODE = "1b7e6b992e0dcfafd2b80252a32ddaa8";
+
 export function loadAMap(): Promise<AMapConstructor> {
   if (amapPromise) return amapPromise;
 
-  const key = import.meta.env.VITE_AMAP_KEY;
+  const key = import.meta.env.VITE_AMAP_KEY || DEFAULT_AMAP_KEY;
   if (!key) {
     return Promise.reject(
       new Error("未配置高德地图 Key（VITE_AMAP_KEY），请在 ui/.env 中配置后重启前端")
     );
   }
 
-  const securityCode = import.meta.env.VITE_AMAP_SECURITY_CODE;
+  const securityCode = import.meta.env.VITE_AMAP_SECURITY_CODE || DEFAULT_AMAP_SECURITY_CODE;
   if (securityCode) {
     window._AMapSecurityConfig = { securityJsCode: securityCode };
   }
