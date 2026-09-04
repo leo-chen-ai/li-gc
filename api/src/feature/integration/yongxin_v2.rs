@@ -7,6 +7,8 @@ use reqwest::{Client, Url};
 use serde_json::Value;
 use thiserror::Error;
 
+use super::http_retry::{BufferedRequestError, send_buffered_with_network_retry};
+
 type Aes128CbcEnc = cbc::Encryptor<Aes128>;
 type Aes192CbcEnc = cbc::Encryptor<Aes192>;
 type Aes256CbcEnc = cbc::Encryptor<Aes256>;
@@ -253,28 +255,16 @@ async fn send(
     request_body: Value,
 ) -> Result<YongxinResponse, YongxinError> {
     let started = Instant::now();
-    let response = request
-        .send()
+    let response = send_buffered_with_network_retry(request, MAX_RESPONSE_BYTES)
         .await
-        .map_err(|error| YongxinError::Request(error.to_string()))?;
-    let status = response.status().as_u16();
-    if response
-        .content_length()
-        .is_some_and(|length| length > MAX_RESPONSE_BYTES as u64)
-    {
-        return Err(YongxinError::ResponseTooLarge);
-    }
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|error| YongxinError::Request(error.to_string()))?;
-    if bytes.len() > MAX_RESPONSE_BYTES {
-        return Err(YongxinError::ResponseTooLarge);
-    }
-    let body =
-        serde_json::from_slice::<Value>(&bytes).map_err(|_| YongxinError::InvalidResponse)?;
+        .map_err(|error| match error {
+            BufferedRequestError::Network(error) => YongxinError::Request(error.to_string()),
+            BufferedRequestError::ResponseTooLarge => YongxinError::ResponseTooLarge,
+        })?;
+    let body = serde_json::from_slice::<Value>(&response.body)
+        .map_err(|_| YongxinError::InvalidResponse)?;
     Ok(YongxinResponse {
-        status,
+        status: response.status.as_u16(),
         body,
         duration_ms: i32::try_from(started.elapsed().as_millis()).unwrap_or(i32::MAX),
         request_url,

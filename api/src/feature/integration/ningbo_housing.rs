@@ -6,6 +6,8 @@ use sha2::{Digest, Sha256};
 use std::{collections::HashSet, env, net::IpAddr, time::Duration};
 use thiserror::Error;
 
+use super::http_retry::{BufferedRequestError, send_buffered_with_network_retry};
+
 pub const PLATFORM_CODE: &str = "ningbo_housing";
 pub const DEFAULT_BASE_URL: &str = "http://183.136.157.18:7334";
 const OFFICIAL_HOST: &str = "183.136.157.18";
@@ -541,38 +543,28 @@ async fn send(
     credentials: &NingboHousingCredentials,
 ) -> Result<PlatformResponse, NingboHousingError> {
     let cur_time = current_cur_time();
-    let mut response = request
-        .header("AppKey", &credentials.app_key)
-        .header("CurTime", cur_time.to_string())
-        .header("Checksum", checksum(&credentials.app_secret, cur_time))
-        .send()
-        .await
-        .map_err(|error| NingboHousingError::Request(error.to_string()))?;
-    let status = response.status();
-    if response
-        .content_length()
-        .is_some_and(|length| length > MAX_RESPONSE_BYTES as u64)
-    {
-        return Err(NingboHousingError::ResponseTooLarge);
-    }
-    let mut bytes = Vec::new();
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|error| NingboHousingError::Request(error.to_string()))?
-    {
-        if bytes.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
-            return Err(NingboHousingError::ResponseTooLarge);
-        }
-        bytes.extend_from_slice(&chunk);
-    }
-    let body = if bytes.is_empty() {
+    let response = send_buffered_with_network_retry(
+        request
+            .header("AppKey", &credentials.app_key)
+            .header("CurTime", cur_time.to_string())
+            .header("Checksum", checksum(&credentials.app_secret, cur_time)),
+        MAX_RESPONSE_BYTES,
+    )
+    .await
+    .map_err(|error| match error {
+        BufferedRequestError::Network(error) => NingboHousingError::Request(error.to_string()),
+        BufferedRequestError::ResponseTooLarge => NingboHousingError::ResponseTooLarge,
+    })?;
+    let body = if response.body.is_empty() {
         Value::Null
     } else {
-        serde_json::from_slice(&bytes)
-            .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into_owned()))
+        serde_json::from_slice(&response.body)
+            .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&response.body).into_owned()))
     };
-    Ok(PlatformResponse { status, body })
+    Ok(PlatformResponse {
+        status: response.status,
+        body,
+    })
 }
 
 fn extract_team_list(body: &Value) -> Result<Vec<PlatformTeam>, NingboHousingError> {

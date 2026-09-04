@@ -1,4 +1,5 @@
 pub mod dispatcher;
+mod http_retry;
 pub mod ningbo_housing;
 pub mod outbox_worker;
 pub mod xinleda;
