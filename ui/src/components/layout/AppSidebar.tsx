@@ -112,6 +112,7 @@ export function AppSidebar() {
         { key: "platform_integrations", title: "平台对接管理", href: "/app/admin/platform-integrations", icon: Link2 },
         { key: "attendance_devices", title: "考勤机绑定", href: "/app/admin/attendance-devices", icon: Fingerprint },
         { key: "attendance_device_issue_reports", title: "考勤机人员下发报告", href: "/app/admin/attendance-device-issue-reports", icon: FileClock },
+        { key: "face_recognition_logs", title: "人脸识别日志", href: "/app/admin/face-recognition-logs", icon: FileClock },
         { key: "attendance_alerts", title: "考勤预警", href: "/app/admin/attendance-alerts", icon: AlertCircle },
         { key: "managed_attendance", title: "考勤托管（配置）", href: "/app/admin/managed-attendance", icon: CalendarClock },
         { key: "supplemental_attendance", title: "考勤托管", href: "/app/admin/supplemental-attendance", icon: CalendarClock },

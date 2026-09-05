@@ -15,6 +15,7 @@ export type MenuPermissionKey =
   | "platform_integrations"
   | "attendance_devices"
   | "attendance_device_issue_reports"
+  | "face_recognition_logs"
   | "attendance_alerts"
   | "managed_attendance"
   | "supplemental_attendance"
@@ -162,6 +163,13 @@ export const menuPermissions: MenuPermission[] = [
     group: "劳务管理",
     path: "/app/admin/attendance-device-issue-reports",
     description: "查看人员下发到考勤机的动作、时间和状态",
+  },
+  {
+    key: "face_recognition_logs",
+    name: "人脸识别日志",
+    group: "劳务管理",
+    path: "/app/admin/face-recognition-logs",
+    description: "查看人脸识别结果、失败原因和受保护的调试照片",
   },
   {
     key: "attendance_alerts",
@@ -333,6 +341,7 @@ export function getMenuKeysForUserRole(
     "platform_integrations",
     "attendance_devices",
     "attendance_device_issue_reports",
+    "face_recognition_logs",
     "attendance_alerts",
     "managed_attendance",
     "supplemental_attendance",
@@ -361,7 +370,7 @@ export function getMenuKeysForUserRole(
     if (role === "admin") {
       return Array.from(new Set([...adminDefaults, ...configuredKeys]));
     }
-    return configuredKeys;
+    return configuredKeys.filter((key) => key !== "face_recognition_logs");
   }
 
   if (role === "admin") {

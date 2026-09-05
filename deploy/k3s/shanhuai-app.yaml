@@ -220,6 +220,8 @@ spec:
           env:
             - name: FACE_SERVICE_PORT
               value: "7100"
+            - name: FACE_DET_THRESHOLD
+              value: "0.30"
             - name: FACE_DATA_DIR
               value: /data/faces
           volumeMounts:

@@ -187,14 +187,10 @@ import { ProjectStatusBadge } from "./ProjectStatusBadge";
 import { ProjectReportingPlatforms } from "./ProjectReportingPlatforms";
 import { AttendanceMachinePanel } from "./AttendanceMachinePanel";
 
-const allTabs = ["项目基本信息", "建设单位", "班组信息", "项目工人", "考勤记录", "考勤机模式", "工资统计"] as const;
+const allTabs = ["项目基本信息", "建设单位", "班组信息", "项目工人", "考勤记录", "移动人脸机", "工资统计"] as const;
 type DetailTab = (typeof allTabs)[number];
 
-// 考勤机模式（人脸考勤点）：功能开发中，暂时隐藏项目详情内的配置入口
-const SHOW_ATTENDANCE_MACHINE_TAB = false;
-const tabs: readonly DetailTab[] = SHOW_ATTENDANCE_MACHINE_TAB
-  ? allTabs
-  : allTabs.filter((tab) => tab !== "考勤机模式");
+const tabs: readonly DetailTab[] = allTabs;
 type DetailDialogMode = "create" | "edit";
 type DetailFormState = Record<string, string>;
 type WageFilters = {
@@ -1322,7 +1318,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                 考勤生成工具
               </Button>
             ) : null}
-            {activeTab !== "考勤机模式" ? (
+            {activeTab !== "移动人脸机" ? (
               <Button
                 size="sm"
                 variant="outline"
@@ -1333,7 +1329,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                 {getExportButtonLabel(activeTab)}
               </Button>
             ) : null}
-            {activeTab !== "考勤记录" && activeTab !== "考勤机模式" ? (
+            {activeTab !== "考勤记录" && activeTab !== "移动人脸机" ? (
               <Button
                 size="sm"
                 className="h-8 gap-2 bg-[#0f6b5d] text-white hover:bg-[#0b5148]"
@@ -1352,7 +1348,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       </div>
 
       <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-border dark:bg-card">
-        {activeTab !== "项目基本信息" && activeTab !== "考勤机模式" && (
+        {activeTab !== "项目基本信息" && activeTab !== "移动人脸机" && (
           <div
             className={cn(
               "border-b px-3 py-2",
@@ -1500,7 +1496,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
               editable
             />
           )}
-          {activeTab === "考勤机模式" && (
+          {activeTab === "移动人脸机" && (
             <AttendanceMachinePanel projectId={projectId} />
           )}
         </div>
@@ -3350,6 +3346,7 @@ function WorkerAttendanceDialog({
       direction: (record.direction === 1 ? "出场" : "进场") as AttendanceRecord["direction"],
       time: formatBeijingDateTime(record.trigger_time) || formatBeijingDateTime(record.original_time) || "",
       device: record.equipment_id ?? record.serial_number ?? "未填写",
+      location: record.location,
       photoUrl: normalizeAttendancePhoto(record.closeup_photo ?? record.photo_path ?? record.overall_photo),
       status: "有效" as const,
     }));
@@ -3392,7 +3389,7 @@ function WorkerAttendanceDialog({
         </div>
 
         <div className="max-h-[60vh] overflow-auto rounded-lg border border-slate-200 dark:border-border">
-          <Table className="min-w-[880px] table-fixed">
+          <Table className="min-w-[1120px] table-fixed">
             <TableHeader className="bg-[#f8faf9] dark:bg-muted/30">
               <TableRow>
                 <TableHead className="w-16 px-3 text-slate-500 dark:text-muted-foreground">照片</TableHead>
@@ -3403,24 +3400,25 @@ function WorkerAttendanceDialog({
                 <TableHead className="w-20 text-right text-slate-500 dark:text-muted-foreground">进出</TableHead>
                 <TableHead className="w-44 text-slate-500 dark:text-muted-foreground">考勤时间</TableHead>
                 <TableHead className="w-36 text-slate-500 dark:text-muted-foreground">设备</TableHead>
+                <TableHead className="w-64">定位点位 / 坐标</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {!isQueryEnabled ? null : attendanceQuery.isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="h-24 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={9} className="h-24 text-center text-sm text-muted-foreground">
                     考勤记录加载中...
                   </TableCell>
                 </TableRow>
               ) : attendanceQuery.isError ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="h-24 text-center text-sm text-red-600 dark:text-red-400">
+                  <TableCell colSpan={9} className="h-24 text-center text-sm text-red-600 dark:text-red-400">
                     考勤记录加载失败
                   </TableCell>
                 </TableRow>
               ) : records.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="h-24 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={9} className="h-24 text-center text-sm text-muted-foreground">
                     暂无考勤记录
                   </TableCell>
                 </TableRow>
@@ -3451,6 +3449,7 @@ function WorkerAttendanceDialog({
                     <TableCell className="truncate text-sm text-slate-600 dark:text-muted-foreground" title={record.device}>
                       {record.device}
                     </TableCell>
+                    <TableCell><AttendanceLocationInfo record={record} /></TableCell>
                   </TableRow>
                 ))
               )}
@@ -3845,7 +3844,7 @@ function AttendanceTab({
       {viewMode === "list" ? (
         <DataTable
           empty="暂无考勤记录"
-          headers={["照片", "工人", "班组名称", "工种", "工人类型", "考勤天数", "进出", "考勤时间", "来源", "设备", "甬薪状态"]}
+          headers={["照片", "工人", "班组名称", "工种", "工人类型", "考勤天数", "进出", "考勤时间", "来源", "设备", "定位点位 / 坐标", "甬薪状态"]}
           rows={records.map((record) => [
             <AttendancePhoto key={`${record.id}-photo`} src={record.photoUrl} alt={`${record.worker} 考勤照片`} />,
             record.worker,
@@ -3857,10 +3856,11 @@ function AttendanceTab({
             record.time,
             record.generated ? <span key={`${record.id}-generated`} className="rounded border border-violet-200 bg-violet-50 px-2 py-1 text-xs font-medium text-violet-700 dark:border-violet-900 dark:bg-violet-950/40 dark:text-violet-300">生成</span> : "设备",
             record.device,
+            <AttendanceLocationInfo key={`${record.id}-location`} record={record} />,
             <YongxinAttendanceStatus key={`${record.id}-yongxin`} record={record} />,
           ])}
-          tableClassName="min-w-[1220px]"
-          cellClassNames={["w-16", "w-24", "w-28", "w-24", "w-24", "w-20 text-right", "w-20", "w-44", "w-20", "w-36", "w-32"]}
+          tableClassName="min-w-[1460px]"
+          cellClassNames={["w-16", "w-24", "w-28", "w-24", "w-24", "w-20 text-right", "w-20", "w-44", "w-20", "w-36", "w-64", "w-32"]}
           scrollX
           pagination={pagination}
         />
@@ -5053,6 +5053,7 @@ function apiAttendanceToDetail(
     direction: record.direction === 1 ? "出场" : "进场",
     time: formatBeijingDateTime(record.trigger_time) || formatBeijingDateTime(record.original_time),
     device: record.equipment_id ?? record.serial_number ?? "未填写",
+    location: record.location,
     photoUrl: normalizeAttendancePhoto(record.closeup_photo ?? record.photo_path ?? record.overall_photo),
     generated: record.is_generated,
     status: "有效",
@@ -5066,6 +5067,17 @@ function apiAttendanceToDetail(
       updatedAt: record.yongxin_reporting.updated_at,
     } : undefined,
   };
+}
+
+function AttendanceLocationInfo({ record }: { record: AttendanceRecord }) {
+  const location = record.location;
+  if (!location) return <span className="text-muted-foreground">未记录定位</span>;
+  return <div className="min-w-56 text-xs leading-5">
+    <div>{location.point_name}</div>
+    <div>经度 {location.longitude.toFixed(6)}，纬度 {location.latitude.toFixed(6)}</div>
+    <div className="text-muted-foreground">GCJ-02{location.accuracy != null ? ` · 精度约 ${Math.round(location.accuracy)} 米` : ""}</div>
+    <div className="text-muted-foreground">定位于 {formatBeijingDateTime(location.captured_at)}</div>
+  </div>;
 }
 
 function normalizeAttendancePhoto(value: string | null | undefined) {

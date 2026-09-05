@@ -84,6 +84,7 @@ export type Worker = {
 };
 
 export type AttendanceRecord = {
+  location?: import("../types/construction-types").AttendanceLocation | null;
   id: string;
   projectId: string;
   workerId?: string;

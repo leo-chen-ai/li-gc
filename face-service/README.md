@@ -38,4 +38,10 @@ docker run -d -p 7100:7100 -v face_data:/data/faces shanhuai-face-service
 
 环境变量：`FACE_MODEL_DIR`、`FACE_DATA_DIR`、`FACE_SERVICE_PORT`、`FACE_REC_THRESHOLD`（默认 0.45）。
 
+`FACE_DET_THRESHOLD` 控制找人脸的最低置信度，默认 0.30（范围 0.1–0.9），不改变人员匹配阈值。
+识别时按检测框外扩 20% 裁剪、转换五官坐标后对齐提取特征；诊断返回检测峰值、阈值、人脸数、尺寸和裁剪图。
+API 将上传照片及裁剪图保存到受项目权限保护的调试日志，不上传公开 OSS；照片保留 7 天，日志保留 30 天。
+
 > 模型来自 InsightFace 开源发布，仅限内部/非商业研究使用。
+
+近距离大脸回退：首次 640×640 检测无人脸时，将输入内容缩小到 75% 并补黑边重试一次。框和关键点恢复到原图坐标；检测阈值及匹配阈值不变。日志 `detection_input_scale` 和 `detection_attempts` 记录实际检测尺度及尝试分数。

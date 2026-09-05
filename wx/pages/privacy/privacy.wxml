@@ -7,7 +7,7 @@
 
   <scroll-view class="doc-content" scroll-y="true">
     <view class="doc-title">山淮筑隐私政策</view>
-    <view class="doc-meta">更新日期：2025年1月1日 ｜ 生效日期：2025年1月1日</view>
+    <view class="doc-meta">更新日期：2026年9月5日 ｜ 生效日期：2026年9月5日</view>
     <view class="doc-meta">运营主体：宁波山淮科技有限公司</view>
 
     <view class="section">
@@ -26,6 +26,7 @@
       <view class="list-item">4. <strong>人脸照片</strong>：用于考勤机人脸识别比对，确保考勤记录的真实性和准确性。</view>
       <view class="list-item">5. <strong>签名信息</strong>：实名入职时您的手写签字，用于确认入职信息的真实性。</view>
       <view class="list-item">6. <strong>设备与日志信息</strong>：设备型号、操作系统版本、IP 地址、访问时间等，用于保障账号安全和改进服务质量。</view>
+      <view class="list-item">7. <strong>位置信息</strong>：进入移动人脸机页面或主动重新定位时，经您授权获取当前位置的经纬度、定位精度与采集时间，并随该页面内的打卡记录保存考勤点信息，用于核对打卡位置；未获得定位时仍可进行人脸机打卡，但该条记录不含定位坐标。</view>
     </view>
 
     <view class="section">

@@ -4,10 +4,7 @@ pub mod service;
 
 use axum::{Router, middleware, routing::get};
 
-use crate::{
-    infrastructure::web::middleware::auth_middleware,
-    state::AppState,
-};
+use crate::{infrastructure::web::middleware::auth_middleware, state::AppState};
 
 pub fn dashboard_routes() -> Router<AppState> {
     Router::new()

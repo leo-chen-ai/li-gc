@@ -12,6 +12,8 @@
 import base64
 import json
 import os
+import shutil
+import uuid
 import threading
 import time
 
@@ -26,6 +28,9 @@ DET_MODEL_PATH = os.path.join(MODEL_DIR, "scrfd_500m_bnkps_shape640x640.onnx")
 REC_MODEL_PATH = os.path.join(MODEL_DIR, "w600k_mbf.onnx")
 
 DET_INPUT_SIZE = 640
+DET_THRESHOLD = float(os.environ.get("FACE_DET_THRESHOLD", "0.30"))
+if not 0.1 <= DET_THRESHOLD <= 0.9:
+    raise ValueError("FACE_DET_THRESHOLD 必须在 0.1 至 0.9 之间")
 REC_THRESHOLD = float(os.environ.get("FACE_REC_THRESHOLD", "0.45"))
 MAX_IMAGE_BYTES = int(os.environ.get("FACE_MAX_IMAGE_BYTES", str(8 * 1024 * 1024)))
 
@@ -92,10 +97,12 @@ def _distance2kps(points, distance):
     return np.stack(preds, axis=-1)
 
 
-def detect_faces(image, score_threshold=0.5):
+def detect_faces(image, score_threshold=None, diagnostics=None, input_scale=1.0):
     """返回 [(bbox[x1,y1,x2,y2,score], kps[5,2]), ...]，按得分降序。"""
     ensure_models()
-    img, ratio = _letterbox(image, DET_INPUT_SIZE)
+    if score_threshold is None:
+        score_threshold = DET_THRESHOLD
+    img, ratio = _letterbox(image, DET_INPUT_SIZE, input_scale)
 
     blob = cv2.dnn.blobFromImage(
         img, 1.0 / 128.0, (DET_INPUT_SIZE, DET_INPUT_SIZE),
@@ -108,16 +115,26 @@ def detect_faces(image, score_threshold=0.5):
     strides = [8, 16, 32]
     scores_list, bboxes_list, kps_list = [], [], []
     use_kps = len(outputs) == fmc * 3
+    if diagnostics is not None:
+        diagnostics.update({
+            "detection_threshold": score_threshold,
+            "detection_input_scale": input_scale,
+            "detection_peak_score": round(max(float(np.max(o)) for o in outputs[:fmc]), 4),
+            "image_width": image.shape[1], "image_height": image.shape[0],
+            "model": "buffalo_sc", "face_count": 0,
+        })
 
     for idx, stride in enumerate(strides):
         scores = outputs[idx]
         bbox_preds = outputs[idx + fmc] * stride
         height = DET_INPUT_SIZE // stride
         width = DET_INPUT_SIZE // stride
-        anchor_x = (np.arange(width) + 0.5) * stride
-        anchor_y = (np.arange(height) + 0.5) * stride
+        # SCRFD buffalo_sc 每个网格有两个 anchor，中心位于网格整数坐标。
+        anchor_x = np.arange(width) * stride
+        anchor_y = np.arange(height) * stride
         xv, yv = np.meshgrid(anchor_x, anchor_y)
         anchors = np.stack([xv, yv], axis=-1).reshape(-1, 2)
+        anchors = np.repeat(anchors, 2, axis=0)
 
         pos = np.where(scores >= score_threshold)[0]
         scores_list.append(scores[pos])
@@ -133,21 +150,26 @@ def detect_faces(image, score_threshold=0.5):
     bboxes = np.concatenate(bboxes_list, axis=0) / ratio
     kps = np.concatenate(kps_list, axis=0) / ratio if use_kps else None
 
+    # OpenCV NMSBoxes 接收 x/y/宽/高，而解码结果为 x1/y1/x2/y2。
+    nms_boxes = bboxes[:, :4].copy()
+    nms_boxes[:, 2:4] -= nms_boxes[:, :2]
     keep = cv2.dnn.NMSBoxes(
-        bboxes[:, :4].tolist(), scores.tolist(), score_threshold, 0.4
+        nms_boxes.tolist(), scores.tolist(), score_threshold, 0.4
     )
     results = []
     for i in np.array(keep).ravel():
         box = np.concatenate([bboxes[i][:4], [scores[i]]])
         results.append((box, kps[i].reshape(5, 2) if kps is not None else None))
     results.sort(key=lambda item: item[0][4], reverse=True)
+    if diagnostics is not None:
+        diagnostics["face_count"] = len(results)
     return results
 
 
-def _letterbox(image, size):
+def _letterbox(image, size, input_scale=1.0):
     height, width = image.shape[:2]
-    ratio = float(size) / max(height, width)
-    new_w, new_h = int(round(width * ratio)), int(round(height * ratio))
+    ratio = float(size) * input_scale / max(height, width)
+    new_w, new_h = max(1, int(round(width * ratio))), max(1, int(round(height * ratio)))
     resized = cv2.resize(image, (new_w, new_h))
     canvas = np.zeros((size, size, 3), dtype=np.uint8)
     canvas[:new_h, :new_w] = resized
@@ -171,12 +193,52 @@ def align_face(image, kps):
 
 def face_embedding(image):
     """对图像中得分最高的人脸提取 512 维归一化特征；无人脸返回 None。"""
-    ensure_models()
-    faces = detect_faces(image)
-    if not faces:
+    embedding, aligned, _ = analyze_face(image)
+    return embedding, aligned
+
+
+def crop_face(image, box, kps):
+    """按检测框外扩 20% 裁剪，保持像素比例，并转换五官坐标。"""
+    height, width = image.shape[:2]
+    x1, y1, x2, y2 = box[:4]
+    margin_x, margin_y = (x2 - x1) * 0.2, (y2 - y1) * 0.2
+    left, top = max(0, int(np.floor(x1 - margin_x))), max(0, int(np.floor(y1 - margin_y)))
+    right, bottom = min(width, int(np.ceil(x2 + margin_x))), min(height, int(np.ceil(y2 + margin_y)))
+    if right <= left or bottom <= top:
         return None, None
-    _, kps = faces[0]
-    aligned = align_face(image, kps)
+    return image[top:bottom, left:right], None if kps is None else kps - [left, top]
+
+
+def analyze_face(image):
+    ensure_models()
+    diagnostics = {}
+    faces = detect_faces(image, diagnostics=diagnostics)
+    attempts = [{"input_scale": 1.0, "peak_score": diagnostics.get("detection_peak_score", 0)}]
+    if not faces:
+        # 近距离大脸可能超出当前检测尺度的适用范围；只补一次缩小检测，阈值保持不变。
+        retry = {}
+        faces = detect_faces(image, diagnostics=retry, input_scale=0.75)
+        attempts.append({"input_scale": 0.75, "peak_score": retry.get("detection_peak_score", 0)})
+        if faces or retry.get("detection_peak_score", 0) > diagnostics.get("detection_peak_score", 0):
+            diagnostics = retry
+    diagnostics["detection_attempts"] = attempts
+    if not faces:
+        return None, None, diagnostics
+    box, kps = faces[0]
+    cropped, crop_kps = crop_face(image, box, kps)
+    diagnostics["detection_score"] = round(float(box[4]), 4)
+    diagnostics["face_box"] = [round(float(v), 1) for v in box[:4]]
+    if cropped is None:
+        diagnostics["detection_error"] = "invalid_face_box"
+        return None, None, diagnostics
+    aligned = align_face(cropped, crop_kps)
+    preview = cropped
+    if max(preview.shape[:2]) > 640:
+        ratio = 640 / max(preview.shape[:2])
+        preview = cv2.resize(preview, (max(1, round(preview.shape[1] * ratio)), max(1, round(preview.shape[0] * ratio))))
+    ok, jpeg = cv2.imencode(".jpg", preview, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    if ok:
+        diagnostics["crop_image"] = base64.b64encode(jpeg).decode("ascii")
     blob = cv2.dnn.blobFromImage(
         aligned, 1.0 / 127.5, (112, 112), (127.5, 127.5, 127.5), swapRB=True
     )
@@ -184,20 +246,22 @@ def face_embedding(image):
     embedding = session.run(None, {session.get_inputs()[0].name: blob})[0][0]
     norm = np.linalg.norm(embedding)
     if norm <= 0:
-        return None, None
-    return (embedding / norm).astype(np.float32), aligned
+        diagnostics["detection_error"] = "invalid_embedding"
+        return None, None, diagnostics
+    return (embedding / norm).astype(np.float32), aligned, diagnostics
 
 
 # ---------------------------------------------------------------------------
 # 人脸库（按项目隔离，JSON + 图片持久化）
 # ---------------------------------------------------------------------------
 
-def _project_dir(project_id):
+def _project_dir(project_id, create=True):
     safe = "".join(c for c in str(project_id) if c.isalnum() or c in "-_")
     if not safe:
         raise ValueError("project_id 无效")
     path = os.path.join(DATA_DIR, safe)
-    os.makedirs(os.path.join(path, "images"), exist_ok=True)
+    if create:
+        os.makedirs(os.path.join(path, "images"), exist_ok=True)
     return path
 
 
@@ -206,7 +270,7 @@ def _library_path(project_id):
 
 
 def load_library(project_id):
-    path = _library_path(project_id)
+    path = os.path.join(_project_dir(project_id, create=False), "faces.json")
     if not os.path.exists(path):
         return {}
     with open(path, "r", encoding="utf-8") as fh:
@@ -266,6 +330,12 @@ def err(message, status=400, **extra):
     return jsonify(body), status
 
 
+@app.errorhandler(500)
+def internal_error(_error):
+    # Flask 会记录内部堆栈；对调用方统一返回JSON，不泄漏路径或模型内部信息。
+    return err("人脸模型处理异常，请检查人脸服务日志", status=500)
+
+
 # ---------------------------------------------------------------------------
 # API
 # ---------------------------------------------------------------------------
@@ -283,6 +353,7 @@ def status():
             "ok": models_ready,
             "models_ready": models_ready,
             "threshold": REC_THRESHOLD,
+            "detection_threshold": DET_THRESHOLD,
             "data_dir": DATA_DIR,
             "time": int(time.time()),
         }
@@ -327,10 +398,9 @@ def enroll_face():
         return err("未检测到人脸，注册失败", status=422, matched=False)
 
     photo_name = f"{person_id}.jpg"
-    photo_path = os.path.join(_project_dir(project_id), "images", photo_name)
-    cv2.imwrite(photo_path, aligned, [cv2.IMWRITE_JPEG_QUALITY, 92])
-
     with _library_lock:
+        photo_path = os.path.join(_project_dir(project_id), "images", photo_name)
+        cv2.imwrite(photo_path, aligned, [cv2.IMWRITE_JPEG_QUALITY, 92])
         library = load_library(project_id)
         library[person_id] = {
             "name": name,
@@ -341,6 +411,20 @@ def enroll_face():
         save_library(project_id, library)
         count = len(library)
     return jsonify({"ok": True, "person_id": person_id, "library_size": count})
+
+
+@app.post("/api/faces/clear-project")
+def clear_project_faces():
+    body = request.get_json(silent=True) or {}
+    try:
+        project_id = str(uuid.UUID(str(body.get("project_id", ""))))
+    except (ValueError, TypeError, AttributeError):
+        return err("project_id 必须是 UUID")
+    with _library_lock:
+        path = os.path.join(DATA_DIR, project_id)
+        if os.path.isdir(path):
+            shutil.rmtree(path)
+    return jsonify({"ok": True})
 
 
 @app.post("/api/faces/delete")
@@ -354,6 +438,11 @@ def delete_face():
         library = load_library(project_id)
         existed = library.pop(person_id, None) is not None
         save_library(project_id, library)
+        # 删除识别特征时同时释放对应裁剪照片占用的空间。
+        if person_id == os.path.basename(person_id) and person_id not in (".", ".."):
+            photo_path = os.path.join(_project_dir(project_id), "images", f"{person_id}.jpg")
+            if os.path.isfile(photo_path):
+                os.remove(photo_path)
         count = len(library)
     return jsonify({"ok": True, "existed": existed, "library_size": count})
 
@@ -372,18 +461,23 @@ def recognize():
         return err(error)
 
     started = time.time()
-    embedding, _ = face_embedding(image)
+    embedding, _, diagnostics = analyze_face(image)
     if embedding is None:
-        return jsonify({"ok": True, "matched": False, "reason": "no_face"})
+        return jsonify({"ok": True, "matched": False,
+                        "reason": diagnostics.get("detection_error", "no_face"),
+                        "threshold": threshold, "diagnostics": diagnostics, "candidates": [],
+                        "elapsed_ms": int((time.time() - started) * 1000)})
 
     with _library_lock:
         library = load_library(project_id)
 
-    best_person, best_score = None, -1.0
+    ranked = []
     for person_id, entry in library.items():
         score = float(np.dot(embedding, entry["embedding"]))
-        if score > best_score:
-            best_person, best_score = person_id, score
+        if np.isfinite(score):
+            ranked.append((person_id, score))
+    ranked.sort(key=lambda item: (-item[1], item[0]))
+    best_person, best_score = ranked[0] if ranked else (None, -1.0)
 
     matched = best_person is not None and best_score >= threshold
     result = {
@@ -393,6 +487,12 @@ def recognize():
         "threshold": threshold,
         "library_size": len(library),
         "elapsed_ms": int((time.time() - started) * 1000),
+        "diagnostics": diagnostics,
+        "candidates": [
+            {"person_id": person_id, "name": library[person_id].get("name", ""),
+             "score": round(score, 4)}
+            for person_id, score in ranked[:3]
+        ],
     }
     if matched:
         result["person_id"] = best_person

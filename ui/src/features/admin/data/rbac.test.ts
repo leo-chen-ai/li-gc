@@ -78,3 +78,10 @@ test("admin menu guard does not intercept the standalone data screen", () => {
   assert.equal(isAdminWorkspacePath("/app/data-screen"), false);
   assert.equal(isAdminWorkspacePath("/app/data-screen/project/project-id"), false);
 });
+
+test("face recognition logs are admin only even when assigned to another role", () => {
+  assert.equal(getMenuKeysForUserRole("admin").includes("face_recognition_logs"), true);
+  for (const code of ["user", "project_manager"]) {
+    assert.equal(getMenuKeysForUserRole(code, [{ code, menu_keys: ["projects", "face_recognition_logs"] }]).includes("face_recognition_logs"), false);
+  }
+});

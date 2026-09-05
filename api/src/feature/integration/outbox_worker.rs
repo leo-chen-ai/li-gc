@@ -402,13 +402,8 @@ async fn process_claimed_event(state: &AppState, event: ClaimedEvent) {
                 .and_then(Value::as_str)
                 .filter(|action| matches!(*action, "update" | "delete"))
                 .unwrap_or("update");
-            handler::reconcile_worker_to_attendance_devices(
-                state,
-                project_id,
-                aggregate_id,
-                action,
-            )
-            .await
+            handler::reconcile_worker_to_attendance_devices(state, project_id, aggregate_id, action)
+                .await
         }
         event_type if GENERIC_EVENTS.contains(&event_type) => dispatcher::dispatch(
             state.db.pool(),

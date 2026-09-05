@@ -9,6 +9,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::state::AppState;
+pub mod logs;
 
 #[derive(Debug, Serialize)]
 struct EnrollRequest<'a> {
@@ -25,7 +26,15 @@ pub struct EnrollResponse {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
+pub struct RecognitionCandidate {
+    pub person_id: String,
+    #[serde(default)]
+    pub name: String,
+    pub score: f64,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 pub struct RecognizeResponse {
     pub ok: bool,
     #[serde(default)]
@@ -40,6 +49,16 @@ pub struct RecognizeResponse {
     pub reason: Option<String>,
     #[serde(default)]
     pub error: Option<String>,
+    #[serde(default)]
+    pub threshold: Option<f64>,
+    #[serde(default)]
+    pub elapsed_ms: Option<i64>,
+    #[serde(default)]
+    pub library_size: Option<i64>,
+    #[serde(default)]
+    pub diagnostics: serde_json::Value,
+    #[serde(default)]
+    pub candidates: Option<Vec<RecognitionCandidate>>,
 }
 
 fn http_client(state: &AppState) -> reqwest::Client {
@@ -134,14 +153,24 @@ pub async fn recognize_face(
         .send()
         .await
         .map_err(|error| format!("人脸服务请求失败：{error}"))?;
+    let status = response.status();
     response
         .json::<RecognizeResponse>()
         .await
-        .map_err(|error| format!("人脸服务响应解析失败：{error}"))
+        .map_err(|error| format!("人脸服务响应解析失败（HTTP {status}）：{error}"))
 }
 
 /// 项目是否已开启至少一个考勤机模式考勤点。
 pub async fn project_machine_mode_enabled(pool: &PgPool, project_id: Uuid) -> bool {
+    project_machine_mode_enabled_checked(pool, project_id)
+        .await
+        .unwrap_or(false)
+}
+
+pub(crate) async fn project_machine_mode_enabled_checked(
+    pool: &PgPool,
+    project_id: Uuid,
+) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar::<_, bool>(
         r#"
         SELECT EXISTS (
@@ -153,10 +182,9 @@ pub async fn project_machine_mode_enabled(pool: &PgPool, project_id: Uuid) -> bo
     .bind(project_id)
     .fetch_one(pool)
     .await
-    .unwrap_or(false)
 }
 
-/// 写入人脸入库队列（幂等：同一工人同一动作存在待处理任务时跳过）。
+/// 合并同一工人同一动作的请求；版本递增确保处理中更新头像不会漏同步。
 pub async fn enqueue_face_enrollment(
     pool: &PgPool,
     project_id: Uuid,
@@ -169,7 +197,8 @@ pub async fn enqueue_face_enrollment(
         VALUES ($1, $2, $3)
         ON CONFLICT (worker_id, action)
             WHERE status IN ('pending', 'processing')
-            DO NOTHING
+            DO UPDATE SET revision = construction_face_enrollments.revision + 1,
+                          attempt_count = 0, last_error = NULL
         "#,
     )
     .bind(project_id)
@@ -206,8 +235,140 @@ pub async fn enqueue_project_face_enrollments(
 
 const MAX_ATTEMPTS: i32 = 5;
 
+/// 点位开关、入库及清库共用跨进程项目锁，防止清理后被正在执行的任务写回。
+pub async fn lock_project(
+    pool: &PgPool,
+    project_id: Uuid,
+) -> Result<sqlx::Transaction<'_, sqlx::Postgres>, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 7100))")
+        .bind(project_id.to_string())
+        .execute(&mut *tx)
+        .await?;
+    Ok(tx)
+}
+
+async fn clear_project(state: &AppState, project_id: Uuid) -> Result<(), String> {
+    let response = http_client(state)
+        .post(format!("{}/api/faces/clear-project", base_url(state)))
+        .json(&serde_json::json!({"project_id": project_id}))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .error_for_status()
+        .map_err(|e| e.to_string())?;
+    let result: EnrollResponse = response.json().await.map_err(|e| e.to_string())?;
+    if result.ok {
+        Ok(())
+    } else {
+        Err(result.error.unwrap_or_else(|| "清理人脸库失败".into()))
+    }
+}
+
+async fn cleanup_disabled_projects(state: &AppState) -> Result<(), sqlx::Error> {
+    // 包含已删除点位，确保最后一个点位删除后仍会清理；失败下轮继续。
+    let projects = sqlx::query_scalar::<_, Uuid>(
+        "SELECT DISTINCT p.project_id FROM construction_attendance_points p WHERE NOT EXISTS (SELECT 1 FROM construction_attendance_points active WHERE active.project_id=p.project_id AND active.is_deleted=FALSE AND active.machine_mode_enabled=TRUE)"
+    ).fetch_all(state.db.pool()).await?;
+    for project_id in projects {
+        let lock = lock_project(state.db.pool(), project_id).await?;
+        if !project_machine_mode_enabled_checked(state.db.pool(), project_id).await? {
+            match clear_project(state, project_id).await {
+                Ok(()) => {
+                    sqlx::query("UPDATE construction_face_enrollments SET status='cancelled', last_error='项目考勤机模式已关闭，人脸库已清理', updated_at=NOW() WHERE project_id=$1 AND status <> 'cancelled'")
+                        .bind(project_id).execute(state.db.pool()).await?;
+                }
+                Err(error) => {
+                    tracing::warn!(%project_id, %error, "project face cleanup failed; will retry")
+                }
+            }
+        }
+        lock.commit().await?;
+    }
+    Ok(())
+}
+
+pub async fn sync_summary(
+    state: &AppState,
+    project_id: Uuid,
+) -> Result<serde_json::Value, sqlx::Error> {
+    let enabled = project_machine_mode_enabled_checked(state.db.pool(), project_id).await?;
+    let rows = sqlx::query_as::<_, (Uuid, String, Option<String>, Option<i32>, Option<String>)>(
+        "SELECT w.id, COALESCE(w.name,''), latest.status, latest.attempt_count, latest.last_error FROM construction_workers w LEFT JOIN LATERAL (SELECT status, attempt_count, last_error FROM construction_face_enrollments e WHERE e.worker_id=w.id AND e.project_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1) latest ON TRUE WHERE w.project_id=$1 AND w.is_deleted=FALSE AND NULLIF(TRIM(COALESCE(w.avatar,'')),'') IS NOT NULL"
+    ).bind(project_id).fetch_all(state.db.pool()).await?;
+    let remote = async {
+        http_client(state)
+            .get(format!("{}/api/faces", base_url(state)))
+            .query(&[("project_id", project_id.to_string())])
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<serde_json::Value>()
+            .await
+    }
+    .await;
+    let (ids, service_error) = match remote {
+        Ok(value) if value["ok"] == true && value["items"].is_array() => (
+            Some(
+                value["items"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter_map(|item| item["person_id"].as_str().map(str::to_owned))
+                    .collect::<std::collections::HashSet<_>>(),
+            ),
+            None,
+        ),
+        Ok(_) => (None, Some("人脸服务返回异常，无法确认入库数量".to_owned())),
+        Err(_) => (None, Some("人脸服务暂不可用，无法确认入库数量".to_owned())),
+    };
+    let mut queued = 0;
+    let mut processing = 0;
+    let mut failures = Vec::new();
+    for (id, name, status, attempts, error) in &rows {
+        if !enabled {
+            continue;
+        }
+        match status.as_deref() {
+            Some("processing") => processing+=1,
+            Some("pending") => queued+=1,
+            Some("failed") if attempts.unwrap_or(0)<MAX_ATTEMPTS => queued+=1,
+            Some("failed") => failures.push(serde_json::json!({"worker_id":id,"name":name,"reason":error.as_deref().unwrap_or("人脸同步失败")})),
+            _ => (),
+        }
+    }
+    let synced = ids.as_ref().map(|ids| {
+        rows.iter()
+            .filter(|(id, _, _, _, _)| ids.contains(&id.to_string()))
+            .count()
+    });
+    Ok(
+        serde_json::json!({"enabled":enabled,"total":rows.len(),"synced":synced,"queued":queued,"processing":processing,"failed":failures.len(),"failures":failures,"service_error":service_error,"cleanup_pending":!enabled && ids.as_ref().is_some_and(|ids| !ids.is_empty())}),
+    )
+}
+
 /// 后台 worker：轮询人脸入库队列并推送到 face-service。
 pub fn spawn_face_enrollment_worker(state: AppState) {
+    let log_state = state.clone();
+    tokio::spawn(async move {
+        let mut timer = tokio::time::interval(std::time::Duration::from_secs(3600));
+        loop {
+            timer.tick().await;
+            if let Err(error) = logs::cleanup(log_state.db.pool()).await {
+                tracing::error!(%error, "face recognition log retention failed");
+            }
+        }
+    });
+    let cleanup_state = state.clone();
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(30));
+        loop {
+            ticker.tick().await;
+            if let Err(error) = cleanup_disabled_projects(&cleanup_state).await {
+                tracing::error!(%error, "face cleanup tick failed; will retry");
+            }
+        }
+    });
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(std::time::Duration::from_secs(5));
         loop {
@@ -221,29 +382,14 @@ pub fn spawn_face_enrollment_worker(state: AppState) {
 
 async fn process_pending_enrollments(state: &AppState) -> Result<(), sqlx::Error> {
     let pool = state.db.pool();
-    // 工人已被删除的 upsert 任务直接标记失败，避免队列堆积（delete 动作不受影响）。
-    sqlx::query(
-        r#"
-        UPDATE construction_face_enrollments fe
-        SET status = 'failed', last_error = '工人已删除', attempt_count = 99, updated_at = NOW()
-        WHERE fe.status IN ('pending', 'failed')
-          AND fe.action <> 'delete'
-          AND NOT EXISTS (
-              SELECT 1 FROM construction_workers w
-              WHERE w.id = fe.worker_id AND w.is_deleted = FALSE
-          )
-        "#,
-    )
-    .execute(pool)
-    .await?;
-
-    let tasks = sqlx::query_as::<_, (Uuid, Uuid, Uuid, String, i32, Option<String>, Option<String>)>(
+    let tasks = sqlx::query_as::<_, (Uuid, Uuid, Uuid)>(
         r#"
         WITH due AS (
             SELECT id
             FROM construction_face_enrollments
-            WHERE status IN ('pending', 'failed')
+            WHERE (status IN ('pending', 'failed') OR (status='processing' AND updated_at < NOW()-INTERVAL '10 minutes'))
               AND attempt_count < $1
+              AND EXISTS (SELECT 1 FROM construction_attendance_points p WHERE p.project_id=construction_face_enrollments.project_id AND p.is_deleted=FALSE AND p.machine_mode_enabled=TRUE)
             ORDER BY created_at
             LIMIT 20
             FOR UPDATE SKIP LOCKED
@@ -252,28 +398,39 @@ async fn process_pending_enrollments(state: &AppState) -> Result<(), sqlx::Error
         SET status = 'processing', updated_at = NOW()
         FROM due
         WHERE fe.id = due.id
-          AND (
-              fe.action = 'delete'
-              OR EXISTS (
-                  SELECT 1 FROM construction_workers w
-                  WHERE w.id = fe.worker_id AND w.is_deleted = FALSE
-              )
-          )
-        RETURNING fe.id, fe.project_id, fe.worker_id, fe.action, fe.attempt_count,
-                  (SELECT w.name FROM construction_workers w WHERE w.id = fe.worker_id),
-                  (SELECT w.avatar FROM construction_workers w WHERE w.id = fe.worker_id)
+        RETURNING fe.id, fe.project_id, fe.worker_id
         "#,
     )
     .bind(MAX_ATTEMPTS)
     .fetch_all(pool)
     .await?;
 
-    for (task_id, project_id, worker_id, action, attempt_count, worker_name, avatar) in tasks {
+    for (task_id, project_id, worker_id) in tasks {
+        let lock = lock_project(pool, project_id).await?;
+        // 已领取任务可能在等待项目锁期间被清库流程取消。
+        let still_processing = sqlx::query_scalar::<_, bool>("SELECT EXISTS (SELECT 1 FROM construction_face_enrollments WHERE id=$1 AND status='processing')")
+            .bind(task_id).fetch_one(pool).await?;
+        if !still_processing {
+            lock.commit().await?;
+            continue;
+        }
+        if !project_machine_mode_enabled_checked(pool, project_id).await? {
+            sqlx::query("UPDATE construction_face_enrollments SET status='cancelled',updated_at=NOW() WHERE id=$1")
+                .bind(task_id).execute(pool).await?;
+            lock.commit().await?;
+            continue;
+        }
+        // 获取锁后才读取最新人员信息，旧的 delete/upsert 任务均以当前状态为准。
+        let current = sqlx::query_as::<_, (i64, Option<String>, Option<String>, bool)>(
+            "SELECT e.revision,w.name,w.avatar,w.is_deleted FROM construction_face_enrollments e JOIN construction_workers w ON w.id=e.worker_id AND w.project_id=e.project_id WHERE e.id=$1 AND e.status='processing'"
+        ).bind(task_id).fetch_optional(pool).await?;
+        let Some((revision, worker_name, avatar, deleted)) = current else {
+            lock.commit().await?;
+            continue;
+        };
         let avatar = avatar.unwrap_or_default();
-        let result = if action == "delete" {
+        let result = if deleted || avatar.trim().is_empty() {
             delete_face(state, project_id, worker_id).await
-        } else if avatar.trim().is_empty() {
-            Err("工人头像为空，无法入库".to_string())
         } else {
             match crate::feature::admin::construction::handler::load_worker_image_base64(
                 state,
@@ -297,31 +454,30 @@ async fn process_pending_enrollments(state: &AppState) -> Result<(), sqlx::Error
             }
         };
 
-        match result {
-            Ok(()) => {
-                sqlx::query(
-                    "UPDATE construction_face_enrollments SET status='synced', synced_at=NOW(), last_error=NULL, updated_at=NOW() WHERE id=$1",
-                )
-                .bind(task_id)
-                .execute(pool)
-                .await?;
-            }
-            Err(error) => {
-                let next_status = if attempt_count + 1 >= MAX_ATTEMPTS {
-                    "failed"
-                } else {
-                    "pending"
-                };
-                sqlx::query(
-                    "UPDATE construction_face_enrollments SET status=$2, attempt_count=attempt_count+1, last_error=$3, updated_at=NOW() WHERE id=$1",
-                )
-                .bind(task_id)
-                .bind(next_status)
-                .bind(error)
-                .execute(pool)
-                .await?;
-            }
-        }
+        finish_enrollment(pool, task_id, revision, result.err()).await?;
+        lock.commit().await?;
     }
+    Ok(())
+}
+
+/// 原子结算；同步期间头像发生变化时，旧结果只会将任务重新排队。
+pub async fn finish_enrollment(
+    pool: &PgPool,
+    task_id: Uuid,
+    revision: i64,
+    error: Option<String>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(r#"
+        UPDATE construction_face_enrollments SET
+            status = CASE WHEN revision <> $2 THEN 'pending'
+                          WHEN $3::text IS NULL THEN 'synced'
+                          WHEN attempt_count + 1 >= $4 THEN 'failed' ELSE 'pending' END,
+            attempt_count = CASE WHEN revision <> $2 THEN 0
+                                 WHEN $3::text IS NOT NULL THEN attempt_count + 1 ELSE attempt_count END,
+            last_error = CASE WHEN revision <> $2 THEN NULL ELSE $3 END,
+            synced_at = CASE WHEN revision = $2 AND $3::text IS NULL THEN NOW() ELSE synced_at END,
+            updated_at = NOW()
+        WHERE id = $1 AND status = 'processing'
+    "#).bind(task_id).bind(revision).bind(error).bind(MAX_ATTEMPTS).execute(pool).await?;
     Ok(())
 }

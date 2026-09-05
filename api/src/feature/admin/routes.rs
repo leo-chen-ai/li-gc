@@ -62,6 +62,14 @@ fn report_forward_routes() -> Router<AppState> {
 
 pub fn admin_routes() -> Router<AppState> {
     Router::new()
+        .route(
+            "/face-recognition-logs",
+            get(crate::feature::face::logs::list),
+        )
+        .route(
+            "/face-recognition-logs/{id}/photos",
+            get(crate::feature::face::logs::photos),
+        )
         .merge(report_forward_routes())
         .route("/log/level", post(log::handler::set_log_level))
         .route(
@@ -227,6 +235,14 @@ pub fn admin_routes() -> Router<AppState> {
             "/projects/{project_id}/attendance-points",
             get(construction::handler::list_attendance_points)
                 .post(construction::handler::create_attendance_point),
+        )
+        .route(
+            "/projects/{project_id}/attendance-face-summary",
+            get(construction::handler::attendance_face_summary),
+        )
+        .route(
+            "/projects/{project_id}/attendance-face-retry",
+            post(construction::handler::retry_attendance_faces),
         )
         .route(
             "/projects/{project_id}/attendance-points/{point_id}",
@@ -480,6 +496,14 @@ pub fn management_routes(state: AppState) -> Router<AppState> {
     Router::new()
         .merge(permitted_report_forward_routes)
         .route(
+            "/face-recognition-logs",
+            get(crate::feature::face::logs::list),
+        )
+        .route(
+            "/face-recognition-logs/{id}/photos",
+            get(crate::feature::face::logs::photos),
+        )
+        .route(
             "/role-permissions",
             get(role::handler::current_role_permissions),
         )
@@ -622,6 +646,14 @@ pub fn management_routes(state: AppState) -> Router<AppState> {
                 .post(construction::handler::create_attendance_point),
         )
         .route(
+            "/projects/{project_id}/attendance-face-summary",
+            get(construction::handler::attendance_face_summary),
+        )
+        .route(
+            "/projects/{project_id}/attendance-face-retry",
+            post(construction::handler::retry_attendance_faces),
+        )
+        .route(
             "/projects/{project_id}/attendance-points/{point_id}",
             get(construction::handler::get_attendance_point)
                 .put(construction::handler::update_attendance_point)
@@ -729,6 +761,12 @@ fn allowed_menu_keys_for_management_path(path: &str) -> Option<&'static [&'stati
         .map(|(_, suffix)| suffix)
         .unwrap_or(path);
 
+    if management_path == "/face-recognition-logs"
+        || management_path.starts_with("/face-recognition-logs/")
+    {
+        return Some(&["face_recognition_logs"]);
+    }
+
     if management_path == "/projects" || management_path == "/projects/options" {
         return Some(&[
             "projects",
@@ -768,6 +806,17 @@ mod management_permission_tests {
 
     #[test]
     fn management_paths_map_to_their_menu_permissions() {
+        for path in [
+            "/face-recognition-logs",
+            "/face-recognition-logs/123/photos",
+            "/api/v1/management/face-recognition-logs",
+            "/api/v1/management/face-recognition-logs/123/photos",
+        ] {
+            assert_eq!(
+                allowed_menu_keys_for_management_path(path),
+                Some(&["face_recognition_logs"][..])
+            );
+        }
         assert_eq!(
             allowed_menu_keys_for_management_path("/api/v1/management/projects/123/workers"),
             Some(&["projects"][..])

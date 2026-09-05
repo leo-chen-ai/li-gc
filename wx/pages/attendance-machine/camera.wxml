@@ -3,7 +3,7 @@
     <view class="back-button" bind:tap="goBack">‹</view>
     <view class="camera-title-wrap">
       <view class="camera-title">{{pointName}}</view>
-      <view class="camera-subtitle">考勤机模式 · 刷脸打卡</view>
+      <view class="camera-subtitle">移动人脸机 · 刷脸打卡</view>
     </view>
   </view>
 
@@ -14,6 +14,7 @@
       flash="off"
       binderror="onCameraError"
       bindstop="onCameraStop"
+      bindinitdone="onCameraInitDone"
       wx:if="{{!cameraBlocked && cameraAlive}}"
     ></camera>
     <view class="camera-blocked" wx:if="{{cameraBlocked}}">
@@ -43,19 +44,33 @@
     <view class="camera-position-tag">当前：{{cameraPosition === 'front' ? '前置' : '后置'}}</view>
   </view>
 
-  <view class="capture-area">
-    <view class="result-banner {{lastResult.ok ? 'ok' : 'fail'}}" wx:if="{{lastResult}}">
-      <view class="result-title">{{lastResult.title}}</view>
-      <view class="result-note">{{lastResult.note}}</view>
+  <view class="zoom-toolbar">
+    <text class="zoom-label">画面倍率</text>
+    <button wx:for="{{zoomOptions}}" wx:key="*this" class="zoom-button {{zoom === item ? 'selected' : ''}}" data-zoom="{{item}}" bindtap="selectZoom" disabled="{{!cameraReady || recognizing || zoomChanging || item > maxZoom}}">{{item}}×</button>
+    <text class="zoom-current">当前 {{zoom}}×</text>
+  </view>
+  <view class="zoom-note">{{maxZoom <= 1 && cameraReady ? '当前摄像头仅支持 1×' : '倍率自动保存，前后摄像头分别记忆'}}</view>
+
+  <view class="location-panel">
+    <view>{{pointName}} · {{locationText}}</view>
+    <view class="location-actions">
+      <button size="mini" bindtap="refreshLocation" disabled="{{locating || recognizing}}">{{locating ? '定位中' : '重新定位'}}</button>
+      <button wx:if="{{!location && !locating}}" size="mini" bindtap="openSystemSetting">定位授权</button>
     </view>
+  </view>
+  <view class="capture-area">
     <button
       class="capture-button {{recognizing ? 'disabled' : ''}}"
       bind:tap="captureAndRecognize"
-      disabled="{{recognizing || cameraBlocked}}"
+      disabled="{{recognizing || cameraBlocked || !cameraReady || zoomChanging}}"
     >
       <view class="capture-button-inner">{{recognizing ? '识别中' : '点击识别'}}</view>
     </button>
     <view class="capture-hint">请正对摄像头，保持面部在取景框内</view>
+    <view class="result-banner {{lastResult.ok ? 'ok' : 'fail'}}" wx:if="{{lastResult}}">
+      <view class="result-title">{{lastResult.title}}</view>
+      <view class="result-note">{{lastResult.note}}</view>
+    </view>
   </view>
 
   <view class="today-section">
@@ -79,13 +94,18 @@
     </view>
   </view>
 
+  <cover-view wx:if="{{successVisible}}" class="punch-success">
+    <cover-view class="punch-success-title">打卡成功</cover-view>
+    <cover-view class="punch-success-name">{{successName}}</cover-view>
+  </cover-view>
+
   <view class="privacy-mask" wx:if="{{privacyVisible}}">
     <view class="privacy-modal">
       <view class="privacy-title">用户隐私保护提示</view>
       <view class="privacy-content">
-        考勤机模式需要使用你的摄像头进行人脸识别打卡。请仔细阅读
+        移动人脸机需要使用你的摄像头和当前位置进行人脸识别打卡。请仔细阅读
         <text class="privacy-link" bind:tap="openPrivacyContract">{{privacyContractName}}</text>
-        ，同意后我们将调用摄像头完成刷脸考勤。
+        ，同意后我们将调用摄像头完成刷脸考勤，并在考勤记录中保存定位坐标和考勤点信息。
       </view>
       <view class="privacy-actions">
         <view class="privacy-btn privacy-btn-reject" bind:tap="handlePrivacyDisagree">不同意</view>

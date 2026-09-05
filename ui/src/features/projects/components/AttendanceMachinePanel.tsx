@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, RotateCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { apiClient, API_ENDPOINTS } from "@/lib/api";
@@ -48,6 +48,18 @@ interface AttendancePointList {
   total: number;
 }
 
+interface FaceSummary {
+  enabled: boolean;
+  total: number;
+  synced: number | null;
+  queued: number;
+  processing: number;
+  failed: number;
+  failures: { worker_id: string; name: string; reason: string }[];
+  service_error: string | null;
+  cleanup_pending: boolean;
+}
+
 interface PointFormState {
   name: string;
   location: string;
@@ -74,6 +86,15 @@ export function AttendanceMachinePanel({ projectId }: { projectId: string }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingPoint, setEditingPoint] = useState<AttendancePoint | null>(null);
   const [form, setForm] = useState<PointFormState>(emptyForm);
+  const faceQuery = useQuery({
+    queryKey: ["construction-face-summary", projectId],
+    queryFn: async () => {
+      const url = API_ENDPOINTS.MANAGEMENT.PROJECT_ATTENDANCE_POINTS(projectId).replace(/attendance-points$/, "attendance-face-summary");
+      const response = await apiClient.get<ApiResponse<FaceSummary>>(url);
+      return unwrap(response.data, "获取人脸同步进度失败");
+    },
+    refetchInterval: 5000,
+  });
 
   const pointsQuery = useQuery({
     queryKey: ["construction-attendance-points", projectId],
@@ -86,8 +107,23 @@ export function AttendanceMachinePanel({ projectId }: { projectId: string }) {
     },
   });
 
-  const invalidate = () =>
-    queryClient.invalidateQueries({ queryKey: ["construction-attendance-points", projectId] });
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: ["construction-face-summary", projectId] });
+    return queryClient.invalidateQueries({ queryKey: ["construction-attendance-points", projectId] });
+  };
+
+  const retryMutation = useMutation({
+    mutationFn: async () => {
+      const url = API_ENDPOINTS.MANAGEMENT.PROJECT_ATTENDANCE_POINTS(projectId).replace(/attendance-points$/, "attendance-face-retry");
+      const response = await apiClient.post<ApiResponse<{ queued: number }>>(url);
+      return unwrap(response.data, "提交人脸重试失败");
+    },
+    onSuccess: ({ queued }) => {
+      toast.success(queued > 0 ? `已安排 ${queued} 人异步同步` : "暂无新增任务，有头像的人员已在队列中或正在同步");
+      void invalidate();
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "提交人脸重试失败"),
+  });
 
   const saveMutation = useMutation({
     mutationFn: async (payload: PointFormState) => {
@@ -122,14 +158,14 @@ export function AttendanceMachinePanel({ projectId }: { projectId: string }) {
         API_ENDPOINTS.MANAGEMENT.PROJECT_ATTENDANCE_POINT(projectId, point.id),
         { machine_mode_enabled: !point.machine_mode_enabled }
       );
-      return unwrap(response.data, "切换考勤机模式失败");
+      return unwrap(response.data, "切换移动人脸机失败");
     },
     onSuccess: (point) => {
-      toast.success(point.machine_mode_enabled ? "已开启考勤机模式" : "已关闭考勤机模式");
+      toast.success(point.machine_mode_enabled ? "已开启移动人脸机" : "已关闭移动人脸机");
       void invalidate();
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "切换考勤机模式失败");
+      toast.error(error instanceof Error ? error.message : "切换移动人脸机失败");
     },
   });
 
@@ -177,7 +213,7 @@ export function AttendanceMachinePanel({ projectId }: { projectId: string }) {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div className="text-sm text-slate-500 dark:text-muted-foreground">
-          考勤机模式：在考勤点开启后，小程序可通过摄像头人脸识别打卡，打卡记录类型为「考勤点考勤」。
+          移动人脸机：在考勤点开启后，小程序可通过摄像头人脸识别打卡，打卡记录类型为「考勤点考勤」。
           开启时会自动将项目内已录入头像的工人异步同步到人脸库。
         </div>
         <Button
@@ -190,13 +226,48 @@ export function AttendanceMachinePanel({ projectId }: { projectId: string }) {
         </Button>
       </div>
 
+      <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs dark:bg-muted/30" aria-live="polite">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <span className="font-medium">项目人脸库</span>
+        {faceQuery.isError ? <span className="text-red-600">进度获取失败，请稍后重试</span> : !faceQuery.data ? <span>正在获取同步进度…</span> : <>
+            <span>已入库 <strong>{faceQuery.data.synced ?? "—"}/{faceQuery.data.total}</strong></span>
+            <span>排队中 {faceQuery.data.queued}</span>
+            <span>同步中 {faceQuery.data.processing}</span>
+            <span className={faceQuery.data.failed ? "text-red-600" : ""}>失败 {faceQuery.data.failed}</span>
+        </>}
+        <Button
+          size="sm" variant="ghost" className="ml-auto h-6 gap-1 px-2 text-xs"
+          disabled={!faceQuery.data?.enabled || retryMutation.isPending}
+          onClick={() => retryMutation.mutate()}
+          title="按最新头像重新同步项目内有头像的人员，补回失败或缺失人脸；正在排队或同步的任务不会重复添加"
+        >
+          <RotateCw className={cn("h-3 w-3", retryMutation.isPending && "animate-spin")} />
+          {retryMutation.isPending ? "提交中…" : "一键重试"}
+        </Button>
+        <details>
+          <summary className="cursor-pointer text-slate-500">说明</summary>
+          <p className="mt-2 max-w-xl leading-relaxed">所有启用点位共享人脸库，关闭或删除最后一个启用点位后自动清理特征及照片。统计当前项目未删除且有头像的工人，每 5 秒刷新；更新中的旧人脸仍可能计入已入库。一键重试按最新头像重新同步有头像的人员，不清空已有可用人脸；无人脸或照片损坏需更换头像，保存后自动异步同步。</p>
+        </details>
+        </div>
+        {faceQuery.data && <>
+          {faceQuery.data.service_error && <p className="mt-2 text-amber-700">{faceQuery.data.service_error}</p>}
+          {!faceQuery.data.enabled && <p className="mt-2 text-amber-700">{faceQuery.data.cleanup_pending ? "等待清理人脸库" : "移动人脸机未开启"}</p>}
+          {faceQuery.data.failures.length > 0 && <details className="mt-1">
+            <summary className="cursor-pointer text-red-600">失败原因</summary>
+            <ul className="mt-2 max-h-60 space-y-2 overflow-auto">
+              {faceQuery.data.failures.map((failure) => <li key={failure.worker_id}><strong>{failure.name || "未命名工人"}</strong>：{failure.reason}</li>)}
+            </ul>
+          </details>}
+        </>}
+      </div>
+
       <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-border">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>考勤点名称</TableHead>
               <TableHead>位置</TableHead>
-              <TableHead>考勤机模式</TableHead>
+              <TableHead>移动人脸机</TableHead>
               <TableHead>备注</TableHead>
               <TableHead className="w-32 text-right">操作</TableHead>
             </TableRow>
@@ -228,7 +299,7 @@ export function AttendanceMachinePanel({ projectId }: { projectId: string }) {
                         "relative inline-flex h-6 w-11 items-center rounded-full transition-colors",
                         point.machine_mode_enabled ? "bg-[#0f6b5d]" : "bg-slate-300 dark:bg-muted"
                       )}
-                      title={point.machine_mode_enabled ? "点击关闭考勤机模式" : "点击开启考勤机模式"}
+                      title={point.machine_mode_enabled ? "点击关闭移动人脸机" : "点击开启移动人脸机"}
                     >
                       <span
                         className={cn(
@@ -275,7 +346,7 @@ export function AttendanceMachinePanel({ projectId }: { projectId: string }) {
           <DialogHeader>
             <DialogTitle>{editingPoint ? "编辑考勤点" : "添加考勤点"}</DialogTitle>
             <DialogDescription>
-              开启考勤机模式后，系统会将项目工人的头像人脸异步同步到人脸识别服务。
+              开启移动人脸机后，系统会将项目工人的头像人脸异步同步到人脸识别服务。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
@@ -299,7 +370,7 @@ export function AttendanceMachinePanel({ projectId }: { projectId: string }) {
             </div>
             <div className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 dark:border-border">
               <div>
-                <div className="text-sm font-medium">开启考勤机模式</div>
+                <div className="text-sm font-medium">开启移动人脸机</div>
                 <div className="text-xs text-slate-400">开启后小程序可在该考勤点刷脸打卡</div>
               </div>
               <button

@@ -3,6 +3,7 @@ const {
   clearSelectedProject,
   getSelectedProject,
   listProjectOptions,
+  listMachineAttendancePoints,
   listResource,
   setSelectedProject,
 } = require("../../utils/construction-api.js");
@@ -37,8 +38,6 @@ function countTodayAttendance(result, todayIso) {
 }
 
 function buildHomeModules(stats) {
-  // 考勤机模式（人脸考勤点）功能入口：功能开发中，暂时隐藏首页入口
-  const ENABLE_ATTENDANCE_MACHINE = false;
   const featureCards = [
     {
       key: "onboarding",
@@ -76,10 +75,17 @@ function buildHomeModules(stats) {
       tone: "tone-mint",
     },
     {
-      key: "machine",
-      title: "考勤机模式",
-      note: `${stats.pointCount}个考勤点`,
+      key: "device",
+      title: "考勤机",
+      note: `${stats.deviceCount}台设备`,
       image: assetPath("/assets/illustrations/module-device.png"),
+      tone: "tone-green",
+    },
+    {
+      key: "machine",
+      title: "移动人脸机",
+      note: `${stats.pointCount}个考勤点`,
+      image: assetPath("/assets/illustrations/module-mobile-face-v1.png"),
       tone: "tone-green",
     },
   ];
@@ -88,9 +94,7 @@ function buildHomeModules(stats) {
     primaryFeature: featureCards[0],
     miniFeatures: [featureCards[1], featureCards[2]],
     wideFeature: featureCards[3],
-    attendanceModules: ENABLE_ATTENDANCE_MACHINE
-      ? [featureCards[4], featureCards[5]]
-      : [featureCards[4]],
+    attendanceModules: [featureCards[4], featureCards[5], featureCards[6]],
     sectionMetric: `今日出勤${stats.todayAttendanceCount}人`,
   };
 }
@@ -230,7 +234,31 @@ Page({
   },
 
   openDevice() {
-    wx.navigateTo({ url: "/pages/attendance-machine/points" });
+    wx.navigateTo({ url: "/pages/device/device" });
+  },
+
+  async openMobileFaceMachine() {
+    const project = getSelectedProject();
+    if (!project || !project.id) {
+      wx.showToast({ title: "请先选择项目", icon: "none" });
+      return;
+    }
+    if (this._checkingMachineAccess) return;
+    this._checkingMachineAccess = true;
+    try {
+      const points = await listMachineAttendancePoints(project.id);
+      if (getSelectedProject()?.id !== project.id) return;
+      if (!Array.isArray(points)) throw new Error("获取开通状态失败，请重试");
+      if (!points.length) {
+        wx.showModal({ title: "暂未开通", content: "需要管理员授权开启", showCancel: false });
+        return;
+      }
+      wx.navigateTo({ url: "/pages/attendance-machine/points" });
+    } catch (error) {
+      wx.showToast({ title: error.message || "获取开通状态失败，请重试", icon: "none" });
+    } finally {
+      this._checkingMachineAccess = false;
+    }
   },
 
   async openWorkerEntry() {

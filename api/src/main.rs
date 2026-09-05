@@ -75,7 +75,12 @@ async fn main() -> eyre::Result<()> {
     // FACE_ENROLLMENT_WORKER_ENABLED=true
     if !background_workers_enabled {
         let face_worker_enabled = std::env::var("FACE_ENROLLMENT_WORKER_ENABLED")
-            .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "on"))
+            .map(|value| {
+                matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "on"
+                )
+            })
             .unwrap_or(false);
         if face_worker_enabled {
             info!("face enrollment worker enabled standalone (BACKGROUND_WORKERS_ENABLED=false)");

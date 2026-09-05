@@ -227,7 +227,6 @@ const ATTENDANCE_COLUMNS: &[ColumnSpec] = &[
     column("serial_number", ColumnKind::Text),
     column("photo_path", ColumnKind::Text),
     column("overall_photo", ColumnKind::Text),
-    column("closeup_photo", ColumnKind::Text),
     column("original_time", ColumnKind::Text),
     column("record_type", ColumnKind::Text),
     column("attendance_point_id", ColumnKind::Uuid),
@@ -2090,7 +2089,7 @@ SELECT
     COALESCE(r.serial_number, '') AS serial_number,
     COALESCE(r.photo_path, '') AS photo_path,
     COALESCE(r.overall_photo, overall_photo.photo_data, '') AS overall_photo,
-    COALESCE(r.closeup_photo, closeup_photo.photo_data, '') AS closeup_photo
+    COALESCE(closeup_photo.photo_data, '') AS closeup_photo
 FROM construction_attendance_records r
 JOIN construction_projects p ON p.id = r.project_id AND p.is_deleted = FALSE
 JOIN construction_workers w ON w.id = r.worker_id AND w.is_deleted = FALSE
@@ -2109,7 +2108,7 @@ LEFT JOIN LATERAL (
     FROM construction_attendance_record_photos photo
     WHERE photo.attendance_record_id = r.id
       AND photo.photo_kind = 'closeup'
-    ORDER BY photo.created_at DESC, photo.id DESC
+    ORDER BY (photo.source = 'admin_upload') DESC, photo.created_at DESC, photo.id DESC
     LIMIT 1
 ) closeup_photo ON TRUE
 WHERE r.is_deleted = FALSE
@@ -4906,7 +4905,7 @@ pub async fn create_worker(
         {
             tracing::warn!(%project_id, %worker_id, error = %error, "新增人员考勤机同步失败");
         }
-        enqueue_worker_face_enrollment_if_needed(&state, project_id, worker_id).await;
+        // 人脸任务由人员表触发器在新增事务中入队。
     }
 
     Ok(response)
@@ -7076,26 +7075,7 @@ pub async fn update_worker(
 
     let after_issue_fields =
         fetch_worker_issue_fields(state.db.pool(), project_id, worker_id).await?;
-    if let (Some(before), Some(after)) = (&before_issue_fields, &after_issue_fields) {
-        // 头像变化：考勤机模式下异步同步人脸库（清空头像则从人脸库删除）。
-        let before_avatar = before.avatar.as_deref().map(str::trim).unwrap_or("");
-        let after_avatar = after.avatar.as_deref().map(str::trim).unwrap_or("");
-        if before_avatar != after_avatar
-            && crate::feature::face::project_machine_mode_enabled(state.db.pool(), project_id).await
-        {
-            let action = if after_avatar.is_empty() { "delete" } else { "upsert" };
-            if let Err(error) = crate::feature::face::enqueue_face_enrollment(
-                state.db.pool(),
-                project_id,
-                worker_id,
-                action,
-            )
-            .await
-            {
-                tracing::error!(%worker_id, error = %error, "failed to enqueue face enrollment");
-            }
-        }
-    }
+    // 人脸同步由数据库触发器与头像修改同事务入队（含清空头像），避免保存成功但入队失败。
     if let (Some(before), Some(after)) = (before_issue_fields, after_issue_fields) {
         enqueue_worker_reissue_after_change(
             state.db.pool(),
@@ -7372,17 +7352,7 @@ pub async fn delete_worker(
     {
         tracing::error!(%worker_id, %project_id, error = %error, "Failed to enqueue Ningbo worker exit");
     }
-    if crate::feature::face::project_machine_mode_enabled(state.db.pool(), project_id).await
-        && let Err(error) = crate::feature::face::enqueue_face_enrollment(
-            state.db.pool(),
-            project_id,
-            worker_id,
-            "delete",
-        )
-        .await
-    {
-        tracing::error!(%worker_id, error = %error, "failed to enqueue face delete");
-    }
+    // is_deleted 的数据库触发器负责异步清理人脸。
     Ok(response)
 }
 
@@ -7429,7 +7399,7 @@ FROM (
     SELECT
         to_jsonb(r) || jsonb_build_object(
             'overall_photo', COALESCE(r.overall_photo, overall_photo.photo_data),
-            'closeup_photo', COALESCE(r.closeup_photo, closeup_photo.photo_data),
+            'closeup_photo', NULLIF(closeup_photo.photo_data, ''),
             'yongxin_reporting', jsonb_build_object(
                 'enabled', yongxin_config.enabled,
                 'job_id', yongxin_job.id,
@@ -7459,7 +7429,7 @@ FROM (
         FROM construction_attendance_record_photos photo
         WHERE photo.attendance_record_id = r.id
           AND photo.photo_kind = 'closeup'
-        ORDER BY photo.created_at DESC, photo.id DESC
+        ORDER BY (photo.source = 'admin_upload') DESC, photo.created_at DESC, photo.id DESC
         LIMIT 1
     ) closeup_photo ON TRUE
     LEFT JOIN LATERAL (
@@ -7788,7 +7758,9 @@ async fn list_attendance_stats(
     project_id: Uuid,
     params: &ResourceListParams,
 ) -> ApiResult<Value> {
-    let date = params.attendance_date.unwrap_or_else(|| chrono::Utc::now().date_naive());
+    let date = params
+        .attendance_date
+        .unwrap_or_else(|| chrono::Utc::now().date_naive());
 
     #[derive(sqlx::FromRow)]
     struct AttendanceStats {
@@ -7817,7 +7789,10 @@ async fn list_attendance_stats(
 
     let absent = (stats.total - stats.present).max(0);
     let rate = if stats.total > 0 {
-        format!("{}%", ((stats.present as f64 / stats.total as f64) * 1000.0).round() / 10.0)
+        format!(
+            "{}%",
+            ((stats.present as f64 / stats.total as f64) * 1000.0).round() / 10.0
+        )
     } else {
         "0%".to_string()
     };
@@ -7850,7 +7825,7 @@ async fn get_attendance_row(
         r#"
         SELECT to_jsonb(r) || jsonb_build_object(
             'overall_photo', COALESCE(r.overall_photo, overall_photo.photo_data),
-            'closeup_photo', COALESCE(r.closeup_photo, closeup_photo.photo_data)
+            'closeup_photo', NULLIF(closeup_photo.photo_data, '')
         )
         FROM construction_attendance_records r
         LEFT JOIN LATERAL (
@@ -7866,7 +7841,7 @@ async fn get_attendance_row(
             FROM construction_attendance_record_photos photo
             WHERE photo.attendance_record_id = r.id
               AND photo.photo_kind = 'closeup'
-            ORDER BY photo.created_at DESC, photo.id DESC
+            ORDER BY (photo.source = 'admin_upload') DESC, photo.created_at DESC, photo.id DESC
             LIMIT 1
         ) closeup_photo ON TRUE
         WHERE r.is_deleted = FALSE
@@ -7891,14 +7866,7 @@ pub async fn update_attendance(
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
-    update_row(
-        state.db.pool(),
-        "construction_attendance_records",
-        ATTENDANCE_COLUMNS,
-        &body,
-        &[("project_id", project_id), ("id", attendance_id)],
-    )
-    .await
+    save_attendance(state.db.pool(), project_id, Some(attendance_id), &body).await
 }
 
 pub async fn create_attendance(
@@ -7908,15 +7876,84 @@ pub async fn create_attendance(
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
-    create_row(
-        state.db.pool(),
-        "construction_attendance_records",
-        ATTENDANCE_COLUMNS,
-        &body,
-        &[("project_id", project_id)],
-        StatusCode::CREATED,
+    save_attendance(state.db.pool(), project_id, None, &body).await
+}
+
+// closeup_photo remains an API field, while its content lives only in the photo table.
+async fn save_attendance(
+    pool: &sqlx::PgPool,
+    project_id: Uuid,
+    attendance_id: Option<Uuid>,
+    body: &Value,
+) -> ApiResult<Value> {
+    let fields = extract_fields(body, ATTENDANCE_COLUMNS)?;
+    let mut tx = pool.begin().await.map_err(db_error)?;
+    let mut row = if let Some(id) = attendance_id {
+        // Lock even for photo-only edits, serializing concurrent updates on this record.
+        let current = sqlx::query_scalar::<_, Value>(
+            "SELECT to_jsonb(r) FROM construction_attendance_records r WHERE project_id=$1 AND id=$2 FOR UPDATE",
+        ).bind(project_id).bind(id).fetch_optional(&mut *tx).await.map_err(db_error)?.ok_or_else(not_found)?;
+        if fields.is_empty() {
+            if body.get("closeup_photo").is_none() {
+                return Err(invalid_input("No writable fields provided"));
+            }
+            current
+        } else {
+            update_row(
+                &mut *tx,
+                "construction_attendance_records",
+                ATTENDANCE_COLUMNS,
+                body,
+                &[("project_id", project_id), ("id", id)],
+            )
+            .await?
+            .data
+            .unwrap()
+        }
+    } else {
+        create_row(
+            &mut *tx,
+            "construction_attendance_records",
+            ATTENDANCE_COLUMNS,
+            body,
+            &[("project_id", project_id)],
+            StatusCode::CREATED,
+        )
+        .await?
+        .data
+        .unwrap()
+    };
+    let id = value_to_optional_uuid("id", &row["id"])?.ok_or_else(not_found)?;
+    if let Some(photo) = body.get("closeup_photo") {
+        // An empty override hides the previous photo without deleting device-source evidence.
+        let data = value_to_optional_text(photo).unwrap_or_default();
+        sqlx::query("INSERT INTO construction_attendance_record_photos
+            (attendance_record_id,project_id,worker_id,photo_kind,photo_data,source)
+            VALUES($1,$2,$3,'closeup',$4,'admin_upload')
+            ON CONFLICT(attendance_record_id,photo_kind,source)
+            DO UPDATE SET photo_data=EXCLUDED.photo_data,worker_id=EXCLUDED.worker_id,created_at=NOW()")
+            .bind(id).bind(project_id).bind(value_to_optional_uuid("worker_id", &row["worker_id"])?).bind(data)
+            .execute(&mut *tx).await.map_err(db_error)?;
+    }
+    let photo: Option<String> = sqlx::query_scalar(
+        "SELECT NULLIF(photo_data,'') FROM construction_attendance_record_photos
+        WHERE attendance_record_id=$1 AND photo_kind='closeup'
+        ORDER BY (source='admin_upload') DESC,created_at DESC,id DESC LIMIT 1",
     )
+    .bind(id)
+    .fetch_optional(&mut *tx)
     .await
+    .map_err(db_error)?
+    .flatten();
+    row["closeup_photo"] = photo.map(Value::String).unwrap_or(Value::Null);
+    tx.commit().await.map_err(db_error)?;
+    Ok(ApiSuccess::default()
+        .with_code(if attendance_id.is_some() {
+            StatusCode::OK
+        } else {
+            StatusCode::CREATED
+        })
+        .with_data(row))
 }
 
 pub async fn preview_generated_attendance(
@@ -8366,6 +8403,40 @@ pub async fn list_attendance_points(
     .await
 }
 
+pub async fn attendance_face_summary(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Path(project_id): Path<Uuid>,
+) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+    let summary = crate::feature::face::sync_summary(&state, project_id)
+        .await
+        .map_err(db_error)?;
+    Ok(ApiSuccess::default().with_data(summary))
+}
+
+pub async fn retry_attendance_faces(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Path(project_id): Path<Uuid>,
+) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+    if !crate::feature::face::project_machine_mode_enabled_checked(state.db.pool(), project_id)
+        .await
+        .map_err(db_error)?
+    {
+        return Err(ApiError::default()
+            .with_code(StatusCode::BAD_REQUEST)
+            .with_message("需要管理员授权开启移动人脸机后才能重试"));
+    }
+    // 只写队列：现有任务去重，不等待 Python，也不清空已有可用人脸。
+    let queued =
+        crate::feature::face::enqueue_project_face_enrollments(state.db.pool(), project_id)
+            .await
+            .map_err(db_error)?;
+    Ok(ApiSuccess::default().with_data(serde_json::json!({"queued": queued})))
+}
+
 pub async fn get_attendance_point(
     State(state): State<AppState>,
     Extension(auth_user): Extension<AuthUser>,
@@ -8388,6 +8459,9 @@ pub async fn create_attendance_point(
 ) -> ApiResult<Value> {
     ensure_attendance_device_admin(&auth_user)?;
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+    let _face_lock = crate::feature::face::lock_project(state.db.pool(), project_id)
+        .await
+        .map_err(db_error)?;
     let response = create_row(
         state.db.pool(),
         "construction_attendance_points",
@@ -8417,6 +8491,9 @@ pub async fn update_attendance_point(
 ) -> ApiResult<Value> {
     ensure_attendance_device_admin(&auth_user)?;
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+    let _face_lock = crate::feature::face::lock_project(state.db.pool(), project_id)
+        .await
+        .map_err(db_error)?;
 
     let was_enabled = sqlx::query_scalar::<_, bool>(
         "SELECT machine_mode_enabled FROM construction_attendance_points WHERE project_id = $1 AND id = $2 AND is_deleted = FALSE",
@@ -8455,41 +8532,15 @@ pub async fn delete_attendance_point(
 ) -> ApiResult<()> {
     ensure_attendance_device_admin(&auth_user)?;
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+    let _face_lock = crate::feature::face::lock_project(state.db.pool(), project_id)
+        .await
+        .map_err(db_error)?;
     delete_row(
         state.db.pool(),
         "construction_attendance_points",
         &[("project_id", project_id), ("id", point_id)],
     )
     .await
-}
-
-/// 工人头像存在且项目已开启考勤机模式时，安排人脸异步入库。
-async fn enqueue_worker_face_enrollment_if_needed(
-    state: &AppState,
-    project_id: Uuid,
-    worker_id: Uuid,
-) {
-    let pool = state.db.pool();
-    if !crate::feature::face::project_machine_mode_enabled(pool, project_id).await {
-        return;
-    }
-    let has_avatar = sqlx::query_scalar::<_, bool>(
-        "SELECT NULLIF(TRIM(COALESCE(avatar, '')), '') IS NOT NULL FROM construction_workers WHERE id = $1 AND is_deleted = FALSE",
-    )
-    .bind(worker_id)
-    .fetch_optional(pool)
-    .await
-    .ok()
-    .flatten()
-    .unwrap_or(false);
-    if !has_avatar {
-        return;
-    }
-    if let Err(error) =
-        crate::feature::face::enqueue_face_enrollment(pool, project_id, worker_id, "upsert").await
-    {
-        tracing::error!(%worker_id, error = %error, "failed to enqueue face enrollment");
-    }
 }
 
 async fn enqueue_project_face_enrollments_logged(pool: &sqlx::PgPool, project_id: Uuid) {
@@ -8539,13 +8590,26 @@ pub async fn list_machine_attendance_points(
     Ok(ApiSuccess::default().with_data(items))
 }
 
+#[derive(Debug, Deserialize, serde::Serialize)]
+pub struct AttendanceLocation {
+    pub latitude: f64,
+    pub longitude: f64,
+    pub accuracy: Option<f64>,
+    pub captured_at: chrono::DateTime<chrono::Utc>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct RecognizeAttendanceRequest {
+    pub location: Option<AttendanceLocation>,
     /// 摄像头拍照图片（Base64，可带 data:image 前缀）
     pub image: String,
     /// 0=进场 1=出场，默认按当日已有记录自动判断
     #[serde(default)]
     pub direction: Option<i16>,
+    #[serde(default)]
+    pub camera_position: Option<String>,
+    #[serde(default)]
+    pub camera_zoom: Option<f64>,
 }
 
 /// 考勤点人脸识别打卡：拍照 → 人脸服务 1:N 识别 → 写入考勤记录（考勤点考勤）。
@@ -8556,7 +8620,79 @@ pub async fn recognize_attendance_point(
     Json(body): Json<RecognizeAttendanceRequest>,
 ) -> ApiResult<Value> {
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+    if body.location.as_ref().is_some_and(|location| {
+        !location.latitude.is_finite()
+            || location.latitude.abs() > 90.0
+            || !location.longitude.is_finite()
+            || location.longitude.abs() > 180.0
+            || location.accuracy.is_some_and(|v| !v.is_finite() || v < 0.0)
+            || location.captured_at > chrono::Utc::now() + chrono::Duration::minutes(5)
+    }) {
+        return Err(invalid_input("定位信息无效，请重新定位"));
+    }
+    let started = std::time::Instant::now();
+    let log_id = crate::feature::face::logs::begin(
+        state.db.pool(),
+        project_id,
+        point_id,
+        auth_user.user_id,
+        &body.image,
+    )
+    .await?;
+    let mut diagnostics = serde_json::json!({"stage":"validate", "camera_position":body.camera_position.as_deref().map(|v|v.chars().take(16).collect::<String>()),"camera_zoom":body.camera_zoom,"location":body.location});
+    let result =
+        recognize_attendance_point_inner(&state, project_id, point_id, body, &mut diagnostics)
+            .await;
+    let (status, reason) = match &result {
+        Ok(response) => {
+            let data = response.data.clone().unwrap_or(Value::Null);
+            let matched = data["matched"] == true;
+            let reason = if matched {
+                "识别并打卡成功".to_owned()
+            } else {
+                match data["reason"].as_str().unwrap_or("unknown") {
+                    "no_face" => "未检测到人脸",
+                    "low_score" => "检测到人脸，但匹配分数不足",
+                    "empty_library" => "项目人脸库为空",
+                    "invalid_face_box" => "检测到的人脸框无效",
+                    "invalid_embedding" => "无法提取有效的人脸特征",
+                    _ => "识别服务未返回明确结果",
+                }
+                .to_owned()
+            };
+            diagnostics["result"] = serde_json::json!({"matched":matched,"reason":data["reason"],"score":data["score"],"worker_id":data["worker_id"],"worker_name":data["worker_name"],"record_id":data["record_id"]});
+            (if matched { "success" } else { "not_matched" }, reason)
+        }
+        Err(error) => ("error", error.message.clone()),
+    };
+    let saved = crate::feature::face::logs::finish(
+        state.db.pool(),
+        log_id,
+        status,
+        &reason,
+        diagnostics,
+        started.elapsed().as_millis() as i64,
+    )
+    .await;
+    if let Err(error) = &saved {
+        tracing::error!(%log_id,%error,"face recognition log finalization failed");
+    }
+    result.map(|mut response| {
+        if let Some(data) = response.data.as_mut().and_then(Value::as_object_mut) {
+            data.insert("log_id".into(), serde_json::json!(log_id));
+            data.insert("log_saved".into(), serde_json::json!(saved.is_ok()));
+        }
+        response
+    })
+}
 
+async fn recognize_attendance_point_inner(
+    state: &AppState,
+    project_id: Uuid,
+    point_id: Uuid,
+    body: RecognizeAttendanceRequest,
+    diagnostics: &mut Value,
+) -> ApiResult<Value> {
     let point = sqlx::query_as::<_, (String, bool)>(
         "SELECT name, machine_mode_enabled FROM construction_attendance_points WHERE project_id = $1 AND id = $2 AND is_deleted = FALSE",
     )
@@ -8577,9 +8713,16 @@ pub async fn recognize_attendance_point(
         return Err(invalid_column_value("image", "拍照图片不能为空"));
     }
 
-    let recognized = crate::feature::face::recognize_face(&state, project_id, &body.image)
+    diagnostics["stage"] = serde_json::json!("recognize");
+    let recognized = crate::feature::face::recognize_face(state, project_id, &body.image)
         .await
         .map_err(|error| ApiError::default().with_message(&error))?;
+    diagnostics["recognition"] = serde_json::to_value(&recognized).unwrap_or(Value::Null);
+    if !recognized.ok {
+        return Err(
+            ApiError::default().with_message(recognized.error.as_deref().unwrap_or("人脸服务异常"))
+        );
+    }
 
     if !recognized.matched {
         return Ok(ApiSuccess::default().with_data(serde_json::json!({
@@ -8594,6 +8737,7 @@ pub async fn recognize_attendance_point(
         .as_deref()
         .and_then(|value| Uuid::parse_str(value).ok())
         .ok_or_else(|| ApiError::default().with_message("人脸服务返回的人员 ID 无效"))?;
+    diagnostics["stage"] = serde_json::json!("write_attendance");
 
     // 确认工人仍属于当前项目且未删除。
     let worker = sqlx::query_as::<_, (String, Option<String>)>(
@@ -8632,26 +8776,29 @@ pub async fn recognize_attendance_point(
     };
 
     // 压缩拍照图片后存为特写照片（Base64）。
-    let closeup_photo = match load_worker_image_base64(
-        &state,
-        body.image.trim(),
-        1024 * 1024,
-        "打卡照片",
-    )
-    .await
-    {
-        Ok(encoded) => Some(format!("data:image/jpeg;base64,{encoded}")),
-        Err(_) => None,
-    };
+    let closeup_photo =
+        match load_worker_image_base64(&state, body.image.trim(), 1024 * 1024, "打卡照片").await
+        {
+            Ok(encoded) => Some(format!("data:image/jpeg;base64,{encoded}")),
+            Err(_) => None,
+        };
 
+    let location = body.location.as_ref().map(|value| {
+        serde_json::json!({
+            "latitude": value.latitude, "longitude": value.longitude,
+            "accuracy": value.accuracy, "captured_at": value.captured_at,
+            "coordinate_system": "gcj02", "point_id": point_id, "point_name": point.0,
+        })
+    });
     let record_id = Uuid::new_v4();
+    let mut tx = state.db.pool().begin().await.map_err(db_error)?;
     sqlx::query(
         r#"
         INSERT INTO construction_attendance_records (
             id, project_id, worker_id, direction, trigger_time,
-            equipment_id, record_type, attendance_point_id, closeup_photo, original_time
+            equipment_id, record_type, attendance_point_id, original_time, location
         )
-        VALUES ($1, $2, $3, $4, NOW(), $5, 'attendance_point', $6, $7, TO_CHAR(NOW() AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS'))
+        VALUES ($1, $2, $3, $4, NOW(), $5, 'attendance_point', $6, TO_CHAR(NOW() AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS'), $7)
         "#,
     )
     .bind(record_id)
@@ -8660,10 +8807,25 @@ pub async fn recognize_attendance_point(
     .bind(direction)
     .bind(format!("考勤点-{}", point.0))
     .bind(point_id)
-    .bind(closeup_photo)
-    .execute(state.db.pool())
+    .bind(&location)
+    .execute(&mut *tx)
     .await
     .map_err(db_error)?;
+    if let Some(photo) = closeup_photo {
+        sqlx::query(
+            "INSERT INTO construction_attendance_record_photos
+            (attendance_record_id,project_id,worker_id,photo_kind,photo_data,content_type,source)
+            VALUES($1,$2,$3,'closeup',$4,'image/jpeg','miniapp_face')",
+        )
+        .bind(record_id)
+        .bind(project_id)
+        .bind(worker_id)
+        .bind(photo)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_error)?;
+    }
+    tx.commit().await.map_err(db_error)?;
 
     Ok(ApiSuccess::default().with_data(serde_json::json!({
         "matched": true,
@@ -8675,6 +8837,7 @@ pub async fn recognize_attendance_point(
         "direction": direction,
         "trigger_time": chrono::Utc::now(),
         "point_name": point.0,
+        "location": location,
     })))
 }
 
@@ -8696,7 +8859,8 @@ pub async fn list_attendance_point_today_records(
                     'worker_avatar', COALESCE(w.avatar, ''),
                     'direction', r.direction,
                     'trigger_time', r.trigger_time,
-                    'closeup_photo', COALESCE(r.closeup_photo, '')
+                    'location', r.location,
+                    'closeup_photo', COALESCE(closeup_photo.photo_data, '')
                 )
                 ORDER BY r.trigger_time DESC
             ),
@@ -8704,6 +8868,11 @@ pub async fn list_attendance_point_today_records(
         )
         FROM construction_attendance_records r
         JOIN construction_workers w ON w.id = r.worker_id
+        LEFT JOIN LATERAL (
+            SELECT photo_data FROM construction_attendance_record_photos photo
+            WHERE photo.attendance_record_id=r.id AND photo.photo_kind='closeup'
+            ORDER BY (photo.source='admin_upload') DESC,photo.created_at DESC,photo.id DESC LIMIT 1
+        ) closeup_photo ON TRUE
         WHERE r.project_id = $1
           AND r.attendance_point_id = $2
           AND r.record_type = 'attendance_point'
@@ -8718,7 +8887,6 @@ pub async fn list_attendance_point_today_records(
     .map_err(db_error)?;
     Ok(ApiSuccess::default().with_data(items))
 }
-
 
 pub async fn list_attendance_device_issue_reports(
     State(state): State<AppState>,
@@ -14335,7 +14503,7 @@ async fn get_row(
 }
 
 async fn create_row(
-    pool: &sqlx::PgPool,
+    pool: impl sqlx::PgExecutor<'_>,
     table: &'static str,
     allowed_columns: &'static [ColumnSpec],
     body: &Value,
@@ -14386,7 +14554,7 @@ async fn create_row(
 }
 
 async fn update_row(
-    pool: &sqlx::PgPool,
+    pool: impl sqlx::PgExecutor<'_>,
     table: &'static str,
     allowed_columns: &'static [ColumnSpec],
     body: &Value,

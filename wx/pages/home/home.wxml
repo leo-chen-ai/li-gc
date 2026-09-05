@@ -53,7 +53,7 @@
       <view class="section-title">考勤统计</view>
       <view class="section-metric">{{sectionMetric}}</view>
     </view>
-    <view class="section-grid two">
+    <view class="section-grid three">
       <view class="section-item" catchtap="openAttendance">
         <view class="icon-disc">
           <image class="section-icon" src="{{attendanceModules[0].image}}" mode="aspectFit" />
@@ -61,12 +61,19 @@
         <view class="section-item-title">{{attendanceModules[0].title}}</view>
         <view class="section-item-note">{{attendanceModules[0].note}}</view>
       </view>
-      <view class="section-item" catchtap="openDevice" wx:if="{{attendanceModules[1]}}">
+      <view class="section-item" catchtap="openDevice">
         <view class="icon-disc">
           <image class="section-icon" src="{{attendanceModules[1].image}}" mode="aspectFit" />
         </view>
         <view class="section-item-title">{{attendanceModules[1].title}}</view>
         <view class="section-item-note">{{attendanceModules[1].note}}</view>
+      </view>
+      <view class="section-item" catchtap="openMobileFaceMachine">
+        <view class="icon-disc">
+          <image class="section-icon" src="{{attendanceModules[2].image}}" mode="aspectFit" />
+        </view>
+        <view class="section-item-title">{{attendanceModules[2].title}}</view>
+        <view class="section-item-note">{{attendanceModules[2].note}}</view>
       </view>
     </view>
   </view>

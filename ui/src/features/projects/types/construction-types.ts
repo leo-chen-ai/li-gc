@@ -272,7 +272,18 @@ export type ConstructionPersonnelWorker = ConstructionWorker & {
   team_name?: string | null;
 };
 
+export type AttendanceLocation = {
+  latitude: number;
+  longitude: number;
+  accuracy: number | null;
+  captured_at: string;
+  coordinate_system: string;
+  point_id: string;
+  point_name: string;
+};
+
 export type ConstructionAttendanceRecord = {
+  location?: AttendanceLocation | null;
   id: string;
   is_deleted: boolean;
   worker_id: string;

@@ -44,6 +44,7 @@ import { Route as AppAdminPersonnelApproversRouteImport } from './routes/app/adm
 import { Route as AppAdminPartyBuildingRouteImport } from './routes/app/admin/party-building'
 import { Route as AppAdminMaterialManagementRouteImport } from './routes/app/admin/material-management'
 import { Route as AppAdminManagedAttendanceRouteImport } from './routes/app/admin/managed-attendance'
+import { Route as AppAdminFaceRecognitionLogsRouteImport } from './routes/app/admin/face-recognition-logs'
 import { Route as AppAdminEnvironmentMonitoringRouteImport } from './routes/app/admin/environment-monitoring'
 import { Route as AppAdminEnterpriseReceivedInvoicesRouteImport } from './routes/app/admin/enterprise-received-invoices'
 import { Route as AppAdminEnterpriseProjectsRouteImport } from './routes/app/admin/enterprise-projects'
@@ -252,6 +253,12 @@ const AppAdminManagedAttendanceRoute =
     path: '/managed-attendance',
     getParentRoute: () => AppAdminRoute,
   } as any)
+const AppAdminFaceRecognitionLogsRoute =
+  AppAdminFaceRecognitionLogsRouteImport.update({
+    id: '/face-recognition-logs',
+    path: '/face-recognition-logs',
+    getParentRoute: () => AppAdminRoute,
+  } as any)
 const AppAdminEnvironmentMonitoringRoute =
   AppAdminEnvironmentMonitoringRouteImport.update({
     id: '/environment-monitoring',
@@ -396,6 +403,7 @@ export interface FileRoutesByFullPath {
   '/app/admin/enterprise-projects': typeof AppAdminEnterpriseProjectsRouteWithChildren
   '/app/admin/enterprise-received-invoices': typeof AppAdminEnterpriseReceivedInvoicesRoute
   '/app/admin/environment-monitoring': typeof AppAdminEnvironmentMonitoringRoute
+  '/app/admin/face-recognition-logs': typeof AppAdminFaceRecognitionLogsRoute
   '/app/admin/managed-attendance': typeof AppAdminManagedAttendanceRoute
   '/app/admin/material-management': typeof AppAdminMaterialManagementRoute
   '/app/admin/party-building': typeof AppAdminPartyBuildingRoute
@@ -449,6 +457,7 @@ export interface FileRoutesByTo {
   '/app/admin/enterprise-projects': typeof AppAdminEnterpriseProjectsRouteWithChildren
   '/app/admin/enterprise-received-invoices': typeof AppAdminEnterpriseReceivedInvoicesRoute
   '/app/admin/environment-monitoring': typeof AppAdminEnvironmentMonitoringRoute
+  '/app/admin/face-recognition-logs': typeof AppAdminFaceRecognitionLogsRoute
   '/app/admin/managed-attendance': typeof AppAdminManagedAttendanceRoute
   '/app/admin/material-management': typeof AppAdminMaterialManagementRoute
   '/app/admin/party-building': typeof AppAdminPartyBuildingRoute
@@ -507,6 +516,7 @@ export interface FileRoutesById {
   '/app/admin/enterprise-projects': typeof AppAdminEnterpriseProjectsRouteWithChildren
   '/app/admin/enterprise-received-invoices': typeof AppAdminEnterpriseReceivedInvoicesRoute
   '/app/admin/environment-monitoring': typeof AppAdminEnvironmentMonitoringRoute
+  '/app/admin/face-recognition-logs': typeof AppAdminFaceRecognitionLogsRoute
   '/app/admin/managed-attendance': typeof AppAdminManagedAttendanceRoute
   '/app/admin/material-management': typeof AppAdminMaterialManagementRoute
   '/app/admin/party-building': typeof AppAdminPartyBuildingRoute
@@ -566,6 +576,7 @@ export interface FileRouteTypes {
     | '/app/admin/enterprise-projects'
     | '/app/admin/enterprise-received-invoices'
     | '/app/admin/environment-monitoring'
+    | '/app/admin/face-recognition-logs'
     | '/app/admin/managed-attendance'
     | '/app/admin/material-management'
     | '/app/admin/party-building'
@@ -619,6 +630,7 @@ export interface FileRouteTypes {
     | '/app/admin/enterprise-projects'
     | '/app/admin/enterprise-received-invoices'
     | '/app/admin/environment-monitoring'
+    | '/app/admin/face-recognition-logs'
     | '/app/admin/managed-attendance'
     | '/app/admin/material-management'
     | '/app/admin/party-building'
@@ -676,6 +688,7 @@ export interface FileRouteTypes {
     | '/app/admin/enterprise-projects'
     | '/app/admin/enterprise-received-invoices'
     | '/app/admin/environment-monitoring'
+    | '/app/admin/face-recognition-logs'
     | '/app/admin/managed-attendance'
     | '/app/admin/material-management'
     | '/app/admin/party-building'
@@ -961,6 +974,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdminManagedAttendanceRouteImport
       parentRoute: typeof AppAdminRoute
     }
+    '/app/admin/face-recognition-logs': {
+      id: '/app/admin/face-recognition-logs'
+      path: '/face-recognition-logs'
+      fullPath: '/app/admin/face-recognition-logs'
+      preLoaderRoute: typeof AppAdminFaceRecognitionLogsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
     '/app/admin/environment-monitoring': {
       id: '/app/admin/environment-monitoring'
       path: '/environment-monitoring'
@@ -1162,6 +1182,7 @@ interface AppAdminRouteChildren {
   AppAdminEnterpriseProjectsRoute: typeof AppAdminEnterpriseProjectsRouteWithChildren
   AppAdminEnterpriseReceivedInvoicesRoute: typeof AppAdminEnterpriseReceivedInvoicesRoute
   AppAdminEnvironmentMonitoringRoute: typeof AppAdminEnvironmentMonitoringRoute
+  AppAdminFaceRecognitionLogsRoute: typeof AppAdminFaceRecognitionLogsRoute
   AppAdminManagedAttendanceRoute: typeof AppAdminManagedAttendanceRoute
   AppAdminMaterialManagementRoute: typeof AppAdminMaterialManagementRoute
   AppAdminPartyBuildingRoute: typeof AppAdminPartyBuildingRoute
@@ -1206,6 +1227,7 @@ const AppAdminRouteChildren: AppAdminRouteChildren = {
   AppAdminEnterpriseReceivedInvoicesRoute:
     AppAdminEnterpriseReceivedInvoicesRoute,
   AppAdminEnvironmentMonitoringRoute: AppAdminEnvironmentMonitoringRoute,
+  AppAdminFaceRecognitionLogsRoute: AppAdminFaceRecognitionLogsRoute,
   AppAdminManagedAttendanceRoute: AppAdminManagedAttendanceRoute,
   AppAdminMaterialManagementRoute: AppAdminMaterialManagementRoute,
   AppAdminPartyBuildingRoute: AppAdminPartyBuildingRoute,

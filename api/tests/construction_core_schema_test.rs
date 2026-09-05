@@ -342,7 +342,6 @@ async fn construction_core_tables_use_normalized_non_platform_fields() {
             "serial_number",
             "photo_path",
             "overall_photo",
-            "closeup_photo",
             "original_time",
         ],
     );
@@ -426,7 +425,7 @@ async fn construction_core_upload_and_address_fields_allow_long_text() {
     );
     assert_text_columns(
         &table_column_data_types(&pool, "construction_attendance_records").await,
-        &["photo_path", "overall_photo", "closeup_photo"],
+        &["photo_path", "overall_photo"],
     );
 }
 

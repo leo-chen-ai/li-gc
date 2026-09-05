@@ -6,7 +6,7 @@
     </view>
     <view class="hero-title-row">
       <view>
-        <view class="hero-title">考勤机模式</view>
+        <view class="hero-title">移动人脸机</view>
         <view class="hero-subtitle">选择考勤点后，刷脸即可完成上下班打卡</view>
       </view>
       <view class="hero-count">
@@ -33,14 +33,14 @@
         <view class="point-meta">{{item.location || '项目考勤点'}}</view>
         <view class="point-remark" wx:if="{{item.remark}}">{{item.remark}}</view>
       </view>
-      <view class="point-badge">考勤机模式</view>
+      <view class="point-badge">移动人脸机</view>
       <view class="point-arrow">›</view>
     </view>
   </view>
 
   <view class="empty-card" wx:elif="{{!loading}}">
     <view class="empty-title">暂无可用考勤点</view>
-    <view class="empty-note">请先在管理后台「项目详情 → 考勤机模式」中添加考勤点并开启考勤机模式</view>
+    <view class="empty-note">请先在管理后台「项目详情 → 移动人脸机」中添加考勤点并开启移动人脸机</view>
   </view>
 
   <view class="loading-card" wx:if="{{loading}}">考勤点加载中...</view>

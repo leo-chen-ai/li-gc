@@ -97,11 +97,11 @@ function listMachineAttendancePoints(projectId) {
 }
 
 // 考勤机模式：拍照人脸识别打卡
-function recognizeAttendancePoint(projectId, pointId, imageBase64) {
+function recognizeAttendancePoint(projectId, pointId, imageBase64, camera = {}) {
   return request({
     url: projectUrl(projectId, `attendance-points/${pointId}/recognize`),
     method: "POST",
-    data: { image: imageBase64 },
+    data: { image: imageBase64, camera_position: camera.position, camera_zoom: camera.zoom, location: camera.location },
   });
 }
 

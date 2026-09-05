@@ -106,10 +106,7 @@ async fn fetch_worker_stats(
     }
 }
 
-async fn fetch_today_attendance(
-    pool: &PgPool,
-    auth_user: &AuthUser,
-) -> Result<i64, sqlx::Error> {
+async fn fetch_today_attendance(pool: &PgPool, auth_user: &AuthUser) -> Result<i64, sqlx::Error> {
     let scope = if auth_user.roles.contains(&Role::Admin) {
         "WHERE a.is_deleted = FALSE AND p.is_deleted = FALSE \
          AND a.direction = 0 AND a.trigger_time >= CURRENT_DATE"
@@ -136,10 +133,7 @@ async fn fetch_today_attendance(
     }
 }
 
-async fn fetch_device_count(
-    pool: &PgPool,
-    auth_user: &AuthUser,
-) -> Result<i64, sqlx::Error> {
+async fn fetch_device_count(pool: &PgPool, auth_user: &AuthUser) -> Result<i64, sqlx::Error> {
     let scope = if auth_user.roles.contains(&Role::Admin) {
         "WHERE d.is_deleted = FALSE AND p.is_deleted = FALSE"
     } else {
@@ -182,18 +176,21 @@ pub async fn get_map_projects(
         .fetch_all(pool)
         .await?;
 
-    Ok(rows.into_iter().map(|r| MapProjectItem {
-        id: r.id,
-        name: r.name.unwrap_or_default(),
-        longitude: r.longitude,
-        latitude: r.latitude,
-        map_poi_name: r.map_poi_name,
-        map_address: r.map_address,
-        status: r.status,
-        general_contractor: r.contractor,
-        project_manager: r.manager,
-        project_manager_phone: r.manager_phone,
-    }).collect())
+    Ok(rows
+        .into_iter()
+        .map(|r| MapProjectItem {
+            id: r.id,
+            name: r.name.unwrap_or_default(),
+            longitude: r.longitude,
+            latitude: r.latitude,
+            map_poi_name: r.map_poi_name,
+            map_address: r.map_address,
+            status: r.status,
+            general_contractor: r.contractor,
+            project_manager: r.manager,
+            project_manager_phone: r.manager_phone,
+        })
+        .collect())
 }
 
 #[derive(sqlx::FromRow)]
@@ -346,7 +343,10 @@ pub async fn get_attendance_30d(
     }
     .map(|rows| {
         rows.into_iter()
-            .map(|r| Attendance30dPoint { date: r.date, count: r.count })
+            .map(|r| Attendance30dPoint {
+                date: r.date,
+                count: r.count,
+            })
             .collect()
     })
 }
@@ -405,7 +405,7 @@ async fn check_project_access(
                 SELECT 1 FROM construction_projects p \
                 JOIN user_managed_projects ump ON ump.project_id = p.id \
                 WHERE p.id = $1 AND p.is_deleted = FALSE AND ump.user_id = $2 \
-            )"
+            )",
         )
         .bind(project_id)
         .bind(auth_user.user_id)
@@ -498,27 +498,29 @@ async fn fetch_board_team_attendance(
              GROUP BY w.team_id \
          ) site ON site.team_id = t.id \
          WHERE t.project_id = $1 AND t.is_deleted = FALSE \
-         ORDER BY t.name"
+         ORDER BY t.name",
     )
     .bind(project_id)
     .fetch_all(pool)
     .await
     .map(|rows| {
-        rows.into_iter().map(|r| {
-            let total = r.total_count;
-            let rate = if total > 0 {
-                (r.attendance_count as f64 / total as f64 * 100.0).round()
-            } else {
-                0.0
-            };
-            BoardTeamAttendance {
-                team_name: r.team_name.unwrap_or_default(),
-                attendance_count: r.attendance_count,
-                on_site_count: r.on_site_count,
-                total_count: total,
-                attendance_rate: rate,
-            }
-        }).collect()
+        rows.into_iter()
+            .map(|r| {
+                let total = r.total_count;
+                let rate = if total > 0 {
+                    (r.attendance_count as f64 / total as f64 * 100.0).round()
+                } else {
+                    0.0
+                };
+                BoardTeamAttendance {
+                    team_name: r.team_name.unwrap_or_default(),
+                    attendance_count: r.attendance_count,
+                    on_site_count: r.on_site_count,
+                    total_count: total,
+                    attendance_rate: rate,
+                }
+            })
+            .collect()
     })
 }
 
@@ -538,24 +540,26 @@ async fn fetch_board_worker_types(
         "SELECT COALESCE(w.worker_type, 0) AS worker_type, COUNT(*)::bigint AS count \
          FROM construction_workers w \
          WHERE w.project_id = $1 AND w.is_deleted = FALSE AND w.work_status = 1 \
-         GROUP BY w.worker_type"
+         GROUP BY w.worker_type",
     )
     .bind(project_id)
     .fetch_all(pool)
     .await
     .map(|rows| {
-        rows.into_iter().map(|r| {
-            let name = match r.worker_type {
-                1 => "建筑工人",
-                1001 => "管理人员",
-                _ => "其他",
-            };
-            BoardWorkerTypeCount {
-                worker_type: r.worker_type,
-                worker_type_name: name.to_string(),
-                count: r.count,
-            }
-        }).collect()
+        rows.into_iter()
+            .map(|r| {
+                let name = match r.worker_type {
+                    1 => "建筑工人",
+                    1001 => "管理人员",
+                    _ => "其他",
+                };
+                BoardWorkerTypeCount {
+                    worker_type: r.worker_type,
+                    worker_type_name: name.to_string(),
+                    count: r.count,
+                }
+            })
+            .collect()
     })
 }
 
@@ -565,10 +569,7 @@ struct BoardWorkerTypeRow {
     count: i64,
 }
 
-async fn fetch_board_daily_avg(
-    pool: &PgPool,
-    project_id: Uuid,
-) -> Result<f64, sqlx::Error> {
+async fn fetch_board_daily_avg(pool: &PgPool, project_id: Uuid) -> Result<f64, sqlx::Error> {
     let row = sqlx::query_as::<_, (i64, i64)>(
         "SELECT \
             COALESCE(SUM(c.cnt), 0)::bigint AS total, \
@@ -579,24 +580,25 @@ async fn fetch_board_daily_avg(
              WHERE a.project_id = $1 AND a.is_deleted = FALSE AND a.direction = 0 \
                    AND a.trigger_time >= CURRENT_DATE - INTERVAL '29 days' \
              GROUP BY DATE(a.trigger_time) \
-         ) c"
+         ) c",
     )
     .bind(project_id)
     .fetch_one(pool)
     .await?;
 
-    Ok(if row.1 > 0 { row.0 as f64 / row.1 as f64 } else { 0.0 })
+    Ok(if row.1 > 0 {
+        row.0 as f64 / row.1 as f64
+    } else {
+        0.0
+    })
 }
 
-async fn fetch_board_today_count(
-    pool: &PgPool,
-    project_id: Uuid,
-) -> Result<i64, sqlx::Error> {
+async fn fetch_board_today_count(pool: &PgPool, project_id: Uuid) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(DISTINCT a.worker_id)::bigint \
          FROM construction_attendance_records a \
          WHERE a.project_id = $1 AND a.is_deleted = FALSE AND a.direction = 0 \
-               AND a.trigger_time >= CURRENT_DATE"
+               AND a.trigger_time >= CURRENT_DATE",
     )
     .bind(project_id)
     .fetch_one(pool)
@@ -686,7 +688,10 @@ pub async fn get_project_attendance_30d(
 
     Ok(Some(
         rows.into_iter()
-            .map(|r| ProjectAttendance30dPoint { date: r.date, count: r.count })
+            .map(|r| ProjectAttendance30dPoint {
+                date: r.date,
+                count: r.count,
+            })
             .collect(),
     ))
 }
@@ -711,7 +716,7 @@ pub async fn get_today_hourly(
          WHERE a.project_id = $1 AND a.is_deleted = FALSE AND a.direction = 0 \
                AND a.trigger_time >= CURRENT_DATE \
          GROUP BY EXTRACT(HOUR FROM a.trigger_time AT TIME ZONE 'Asia/Shanghai') \
-         ORDER BY hour"
+         ORDER BY hour",
     )
     .bind(project_id)
     .fetch_all(pool)
@@ -719,7 +724,10 @@ pub async fn get_today_hourly(
 
     Ok(Some(
         rows.into_iter()
-            .map(|r| TodayHourlyPoint { hour: r.hour, count: r.count })
+            .map(|r| TodayHourlyPoint {
+                hour: r.hour,
+                count: r.count,
+            })
             .collect(),
     ))
 }

@@ -1,7 +1,7 @@
 use axum::{
+    Extension,
     extract::{Path, Query, State},
     http::StatusCode,
-    Extension,
 };
 use serde::Deserialize;
 use uuid::Uuid;
@@ -57,9 +57,7 @@ pub async fn smart_site(
 }
 
 /// GET /api/v1/dashboard/alerts/30d
-pub async fn alerts_30d(
-    Extension(_auth_user): Extension<AuthUser>,
-) -> ApiResult<Alert30dResponse> {
+pub async fn alerts_30d(Extension(_auth_user): Extension<AuthUser>) -> ApiResult<Alert30dResponse> {
     let data = service::get_alerts_30d();
     Ok(ApiSuccess::default()
         .with_data(data)
