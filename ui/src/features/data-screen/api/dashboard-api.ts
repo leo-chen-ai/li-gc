@@ -91,8 +91,11 @@ export type ProjectBoard = {
 
 export type AttendanceFeedItem = {
   id: string;
+  workerId: string;
   workerName: string;
   workerPhotoUrl: string | null;
+  phone: string | null;
+  workType: number | null;
   triggerTime: string;
   equipmentName: string | null;
   direction: number;

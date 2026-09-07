@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect, useRef, memo } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import {
   XAxis,
@@ -13,7 +13,6 @@ import {
   CartesianGrid,
   Area,
   AreaChart,
-  LabelList,
 } from "recharts";
 import {
   useProjectBoard,
@@ -21,13 +20,29 @@ import {
   useTodayHourly,
   useDashboardProjectsMap,
 } from "../hooks/use-dashboard-queries";
-import { ParticleBackground } from "./ParticleBackground";
 import { ScreenStage } from "./ScreenStage";
-import type { AttendanceFeedItem } from "../api/dashboard-api";
+import { TodayAttendanceFeed } from "./TodayAttendanceFeed";
 
 const PIE_COLORS = [
-  "#22d3ee", "#38bdf8", "#60a5fa", "#818cf8", "#a78bfa",
-  "#c084fc", "#e879f9", "#fb7185", "#34d399", "#fbbf24",
+  "#2f6fd6",
+  "#7ddec8",
+  "#a8e05f",
+  "#e89a8a",
+  "#d4b896",
+  "#8eb8e8",
+  "#9b8ec4",
+  "#d4924a",
+  "#4ecdc4",
+  "#5ecf6a",
+  "#f0c75e",
+  "#6aa8ff",
+];
+
+const BAR_FILLS = [
+  { top: "#5ee7ff", bottom: "#1a6fb8" },
+  { top: "#ffb347", bottom: "#c46a12" },
+  { top: "#b07dff", bottom: "#5b3bb8" },
+  { top: "#ffd166", bottom: "#c48a18" },
 ];
 
 const TABS = [
@@ -49,6 +64,8 @@ const TABS = [
 
 const DEFAULT_TAB = "劳务实名制";
 
+const AXIS_TICK = { fill: "rgba(255,255,255,0.88)", fontSize: 11 };
+const GRID_STROKE = "rgba(180, 200, 230, 0.28)";
 const tooltipStyle = {
   background: "rgba(6,22,48,0.96)",
   border: "1px solid rgba(0,220,255,0.35)",
@@ -60,24 +77,25 @@ const tooltipStyle = {
 
 // ── Fullscreen toggle (shared pattern from MainDashboard) ──────────────
 
-function FullscreenBtn() {
-  const [isFs, setIsFs] = useState(false);
+function useBoardClock() {
+  const [now, setNow] = useState(new Date());
   useEffect(() => {
-    const onChange = () => setIsFs(!!document.fullscreenElement);
-    document.addEventListener("fullscreenchange", onChange);
-    return () => document.removeEventListener("fullscreenchange", onChange);
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
   }, []);
-  const toggle = () => {
-    if (document.fullscreenElement) {
-      document.exitFullscreen().catch(() => {});
-    } else {
-      document.documentElement.requestFullscreen().catch(() => {});
-    }
-  };
+  return now;
+}
+
+function BoardClock() {
+  const now = useBoardClock();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const timeStr = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  const weekdays = ["星期天", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
   return (
-    <button className="db-header-back" onClick={toggle} title={isFs ? "退出全屏" : "进入全屏"}>
-      {isFs ? "✕ 退出全屏" : "⛶ 全屏"}
-    </button>
+    <div className="db-header-time">
+      {dateStr} {timeStr} {weekdays[now.getDay()]}
+    </div>
   );
 }
 
@@ -106,180 +124,14 @@ function P({
       <div className="pb-panel-corner pb-panel-corner-tr" />
       <div className="pb-panel-corner pb-panel-corner-bl" />
       <div className="pb-panel-corner pb-panel-corner-br" />
-      <div className="pb-title">
-        <span className="pb-title-bar" />
+      <div className="pb-title pb-title-bar-img">
         <span className="pb-title-text">{title}</span>
         {subtitle && <span className="pb-title-sub">{subtitle}</span>}
-        <span className="pb-title-line" />
       </div>
       <div className={scrollable ? "pb-content" : "pb-content pb-content-no-scroll"}>{children}</div>
     </div>
   );
 }
-
-// ── Today attendance with summary + grouped list ────────────────────────
-
-// Max rows rendered per column — keeps DOM bounded even at 1000+ workers.
-// 20 unique × 2 duplicate = 40 DOM nodes/column max.
-const FEED_DISPLAY_CAP = 20;
-
-// Scroll feed column: measures whether content overflows before animating.
-function AttFeedCol({
-  label,
-  count,
-  items,
-  headerClass,
-  dotClass,
-  scrollClass,
-  emptyText,
-}: {
-  label: string;
-  count: number;
-  items: AttendanceFeedItem[];
-  headerClass: string;
-  dotClass: string;
-  scrollClass: string;
-  emptyText: string;
-}) {
-  const feedRef = useRef<HTMLDivElement>(null);
-  const innerRef = useRef<HTMLDivElement>(null);
-  const [shouldScroll, setShouldScroll] = useState(false);
-
-  // After each render, check if content height exceeds container height.
-  // Only enable scroll (and DOM duplication) when content truly overflows.
-  useEffect(() => {
-    const feed  = feedRef.current;
-    const inner = innerRef.current;
-    if (!feed || !inner) return;
-    setShouldScroll(inner.scrollHeight > feed.clientHeight + 4);
-  });
-
-  const renderList = useMemo(
-    () => shouldScroll ? [...items, ...items] : items,
-    [items, shouldScroll]
-  );
-
-  return (
-    <div className="pb-att-col">
-      <div className={`pb-att-col-header ${headerClass}`}>
-        <span className={`pb-att-dot ${dotClass}`} />
-        <span>{label}</span>
-        <span className="pb-att-count">{count}</span>
-      </div>
-      <div className="pb-scroll-feed" ref={feedRef}>
-        {items.length === 0 ? (
-          <div className="pb-empty">{emptyText}</div>
-        ) : (
-          <div
-            ref={innerRef}
-            className={shouldScroll ? scrollClass : "pb-static-list"}
-          >
-            {renderList.map((item, i) => (
-              <AttRow key={`${item.id}-${i}`} item={item} />
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function TodayAttendancePanel({ items }: { items: AttendanceFeedItem[] }) {
-
-  // Filter to today only and group by direction
-  const { inList, outList, stats } = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
-    const todayItems = items.filter((it) => it.triggerTime.slice(0, 10) === today);
-
-    const inAll = todayItems
-      .filter((it) => it.direction === 0)
-      .sort((a, b) => b.triggerTime.localeCompare(a.triggerTime));
-    const outAll = todayItems
-      .filter((it) => it.direction === 1)
-      .sort((a, b) => b.triggerTime.localeCompare(a.triggerTime));
-
-    // Unique workers who came in today (full set for accurate stats)
-    const inWorkers = new Set(inAll.map((it) => it.workerName));
-    const outWorkers = new Set(outAll.map((it) => it.workerName));
-    const onSite = new Set([...inWorkers].filter((w) => !outWorkers.has(w)));
-
-    return {
-      // Cap rendered list to keep DOM bounded, statistics use full set
-      inList: inAll.slice(0, FEED_DISPLAY_CAP),
-      outList: outAll.slice(0, FEED_DISPLAY_CAP),
-      stats: {
-        totalIn: inWorkers.size,
-        totalOut: outWorkers.size,
-        onSite: onSite.size,
-      },
-    };
-  }, [items]);
-
-  return (
-    <div className="pb-attendance-panel">
-      {/* Summary stats */}
-      <div className="pb-att-stats">
-        <div className="pb-stat-item pb-stat-card-green">
-          <span className="pb-stat-value pb-stat-green">{stats.totalIn}</span>
-          <span className="pb-stat-label">今日进场</span>
-        </div>
-        <div className="pb-stat-item pb-stat-card-orange">
-          <span className="pb-stat-value pb-stat-orange">{stats.totalOut}</span>
-          <span className="pb-stat-label">今日出场</span>
-        </div>
-        <div className="pb-stat-item pb-stat-card-cyan">
-          <span className="pb-stat-value pb-stat-cyan">{stats.onSite}</span>
-          <span className="pb-stat-label">当前在场</span>
-        </div>
-      </div>
-
-      {/* Two-column lists */}
-      <div className="pb-att-columns">
-        <AttFeedCol
-          label="进场"
-          count={stats.totalIn}
-          items={inList}
-          headerClass="pb-att-col-header-in"
-          dotClass="pb-att-dot-in"
-          scrollClass="pb-scroll-inner"
-          emptyText="暂无进场记录"
-        />
-        <AttFeedCol
-          label="出场"
-          count={stats.totalOut}
-          items={outList}
-          headerClass="pb-att-col-header-out"
-          dotClass="pb-att-dot-out"
-          scrollClass="pb-scroll-inner pb-scroll-inner-out"
-          emptyText="暂无出场记录"
-        />
-      </div>
-    </div>
-  );
-}
-
-const AttRow = memo(function AttRow({ item }: { item: AttendanceFeedItem }) {
-  return (
-    <div className="pb-feed-row">
-      <div className="pb-feed-avatar">
-        {item.workerPhotoUrl ? (
-          <img src={item.workerPhotoUrl} alt="" />
-        ) : (
-          item.workerName.slice(0, 1)
-        )}
-      </div>
-      <div className="pb-feed-info">
-        <div className="pb-feed-name">{item.workerName}</div>
-        <div className="pb-feed-equip">
-          {item.equipmentName ? item.equipmentName : "—"}
-        </div>
-      </div>
-      <div className="pb-feed-time">
-        {item.triggerTime.slice(11, 16)}
-      </div>
-    </div>
-  );
-});
 
 // ── Project switcher (header right) ──────────────────────────────────────
 
@@ -364,7 +216,6 @@ function BoardWip({ tab }: { tab: string }) {
 type Props = { projectId: string };
 
 export function ProjectBoard({ projectId }: Props) {
-  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState(DEFAULT_TAB);
 
   const { data: board, isLoading: boardLoading } = useProjectBoard(projectId);
@@ -384,22 +235,29 @@ export function ProjectBoard({ projectId }: Props) {
   }, []);
 
   const hourlyData = useMemo(
-    () => (hourly ?? []).map((h) => ({ hour: `${h.hour}:00`, count: h.count })),
-    [hourly]
+    () => (hourly ?? []).map((h) => ({ hour: h.hour, count: h.count })),
+    [hourly],
   );
 
   const barData = useMemo(() => {
     if (!board) return [];
     return [
-      { name: "在册工人", value: board.project.activeWorkers, fill: "#38bdf8" },
-      { name: "日均出勤", value: Math.round(board.dailyAvgAttendance), fill: "#34d399" },
-      { name: "今日出勤", value: board.todayAttendanceCount, fill: "#fbbf24" },
+      { name: "在册工人", value: board.project.activeWorkers },
+      { name: "日均出勤", value: Math.round(board.dailyAvgAttendance) },
+      { name: "今日出勤", value: board.todayAttendanceCount },
       {
-        name: "在场人数",
+        name: "场内人数",
         value: board.teamAttendance.reduce((s, t) => s + t.onSiteCount, 0),
-        fill: "#818cf8",
       },
     ];
+  }, [board]);
+
+  const pieData = useMemo(() => {
+    const list = board?.workerTypeDistribution ?? [];
+    if (list.length === 0) {
+      return [{ workerTypeName: "暂无", count: 1, empty: true }];
+    }
+    return list.map((d) => ({ ...d, empty: false }));
   }, [board]);
 
   const statusLabel = useCallback((s?: number | null) => {
@@ -411,52 +269,83 @@ export function ProjectBoard({ projectId }: Props) {
     return "—";
   }, []);
 
-  const statusColor = useCallback((s?: number | null) => {
-    if (s === 5) return "#00e88f";
-    if (s === 7) return "#ff4757";
-    return "#00d4ff";
-  }, []);
+  const overviewLines = useMemo(() => {
+    const p = board?.project;
+    const realNamePct =
+      p && p.totalWorkers > 0
+        ? ((p.activeWorkers / p.totalWorkers) * 100).toFixed(2)
+        : "0.00";
+    const dash = (v?: string | null) => (v && String(v).trim() ? v : "—");
+    return [
+      { fields: [{ l: "项目名称", v: dash(p?.name) }] },
+      { fields: [{ l: "项目编号", v: dash(p?.id) }] },
+      {
+        fields: [
+          { l: "项目状态", v: statusLabel(p?.status) },
+          {
+            l: "总投资",
+            v: p?.investmentAmount ? `${p.investmentAmount}万元` : "—",
+          },
+        ],
+      },
+      {
+        fields: [
+          { l: "总面积", v: "—" },
+          { l: "总长度", v: "-米" },
+        ],
+      },
+      {
+        fields: [
+          { l: "建设性质", v: "—" },
+          { l: "工程用途", v: "—" },
+        ],
+      },
+      {
+        fields: [
+          { l: "项目分类", v: "—" },
+          { l: "实名制进度", v: `${realNamePct}%` },
+        ],
+      },
+      { fields: [{ l: "所在区域", v: dash(p?.area) }] },
+      { fields: [{ l: "总承包单位", v: dash(p?.contractor) }] },
+      {
+        fields: [{ l: "总承包单位统一社会信用代码", v: "—" }],
+      },
+    ];
+  }, [board, statusLabel]);
 
   return (
     <ScreenStage>
     <div className="dashboard-root pb-root">
       <div className="pb-bg-image" />
-      <div className="pb-bg-radial" />
-      <div className="pb-bg-grid" />
-      <div className="pb-bg-hex" />
-      <div className="db-board-dots" />
-      <div className="db-board-floor" />
-      <ParticleBackground />
 
       <div className="db-content pb-content-wrap">
-        {/* Header */}
-        <div className="db-header">
+        {/* Header — 切图：看板顶部背景图 */}
+        <div className="db-header db-header-board">
           <div className="db-header-left">
-            <button
-              className="db-header-back"
-              onClick={() => navigate({ to: "/app/data-screen" })}
-            >
-              ← 返回大屏
-            </button>
+            <div className="db-brand db-brand-sm">
+              <span className="db-brand-mark">山</span>
+              <div className="db-brand-text">
+                <span className="db-brand-name">山淮筑</span>
+                <span className="db-brand-sub">SHANHUAI.TOP</span>
+              </div>
+            </div>
+            <BoardClock />
           </div>
           <div className="db-header-center">
-            <div className="db-board-banner" />
-            <div className="db-header-title" style={{ fontSize: 24, letterSpacing: "4px", paddingLeft: "4px" }}>
+            <div className="db-header-title db-header-title-board">
               {board?.project.name ?? "项目看板"}
             </div>
-            <div className="db-header-title-line" />
           </div>
           <div className="db-header-right">
-            <FullscreenBtn />
             <ProjectSwitcher
               currentId={projectId}
               currentName={board?.project.name}
             />
           </div>
-          <div className="db-header-line" />
         </div>
 
-        {/* Tabs */}
+        {/* Tabs — 切图：tab背景图 / 选中后的tab背景图 */}
         <div className="db-board-tabs">
           {TABS.map((tab) => (
             <div
@@ -469,7 +358,7 @@ export function ProjectBoard({ projectId }: Props) {
           ))}
         </div>
 
-        {/* Body */}
+        {/* Body — 参考三列：左概况+小时图 / 中班组+(日均|工种) / 右出勤通高 */}
         {boardLoading && !board ? (
           <div className="pb-loading">
             <span className="pb-loading-dot" />
@@ -478,284 +367,222 @@ export function ProjectBoard({ projectId }: Props) {
           </div>
         ) : activeTab === DEFAULT_TAB ? (
         <div className="pb-grid">
-          {/* Left Column: Project Info + Hourly Chart */}
-          <div className="pb-col pb-col-left">
-            <P
-              title="项目概况"
-              subtitle="PROJECT INFO"
-              className="pb-flex-md"
-            >
-              <div className="pb-info-list">
-                {[
-                  { l: "项目名称", v: board?.project.name, wide: true },
-                  { l: "项目编号", v: board?.project.id?.slice(0, 10) },
-                  { l: "项目状态", v: statusLabel(board?.project.status), vc: statusColor(board?.project.status) },
-                  { l: "总投资", v: board?.project.investmentAmount ? `${board.project.investmentAmount}万元` : "—" },
-                  { l: "建筑面积", v: board?.project.area ?? "—" },
-                  { l: "总包单位", v: board?.project.contractor, wide: true },
-                  { l: "项目经理", v: board?.project.projectManager },
-                  { l: "联系电话", v: board?.project.projectManagerPhone },
-                  { l: "开工日期", v: board?.project.startDate },
-                  { l: "竣工日期", v: board?.project.endDate },
-                  { l: "实名登记", v: board?.project.totalWorkers, vc: "#00d4ff" },
-                  { l: "在册人员", v: board?.project.activeWorkers, vc: "#00e88f" },
-                ].map((row) => (
-                  <div
-                    key={row.l}
-                    className={`pb-info-row ${row.wide ? "pb-info-row-wide" : ""}`}
-                  >
-                    <span className="pb-info-label">{row.l}</span>
-                    <span
-                      className="pb-info-value"
-                      style={row.vc ? { color: row.vc } : undefined}
-                    >
-                      {row.v ?? "—"}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </P>
+          <P title="项目概况" className="pb-flex-overview">
+            <div className="pb-info-list">
+              {overviewLines.map((line, i) => (
+                <div
+                  key={i}
+                  className={`pb-info-line ${line.fields.length > 1 ? "pair" : "full"}`}
+                >
+                  {line.fields.map((f) => (
+                    <div key={f.l} className="pb-info-field">
+                      <span className="pb-info-label">{f.l}:</span>
+                      <span className="pb-info-value" title={f.v}>
+                        {f.v}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </P>
 
-            <P
-              title="今日出勤情况"
-              subtitle="HOURLY TREND"
-              className="pb-flex-lg"
-              scrollable={false}
-            >
-              <div className="pb-chart-wrap">
+          <P title="今日各班组出勤情况" className="pb-flex-team">
+            <div className="pb-team-wrap">
+              <div className="pb-team-head">
+                <span className="pb-team-h-idx">序号</span>
+                <span className="pb-team-h-name">班组名称</span>
+                <span className="pb-team-h-cen">今日出勤</span>
+                <span className="pb-team-h-cen">今日在场</span>
+                <span className="pb-team-h-cen">班组总人数</span>
+                <span className="pb-team-h-cen">出勤率</span>
+              </div>
+              <ul className="pb-team-list">
+                {(board?.teamAttendance ?? []).slice(0, 6).map((t, i) => {
+                  const bdClass =
+                    i === 0 ? "bd" : i === 1 ? "bd2" : i === 2 ? "bd3" : "bd4";
+                  return (
+                    <li
+                      key={t.teamName}
+                      className={i % 2 === 0 ? "pb-team-item item2" : "pb-team-item item"}
+                    >
+                      <div className="pb-team-idx-wrap">
+                        <div className={`pb-team-bd ${bdClass}`}>{i + 1}</div>
+                      </div>
+                      <p className="pb-team-name" title={t.teamName}>
+                        {t.teamName}
+                      </p>
+                      <p className="pb-team-cen pb-team-att">{t.attendanceCount}</p>
+                      <p className="pb-team-cen pb-team-onsite">{t.onSiteCount}</p>
+                      <p className="pb-team-cen pb-team-total">{t.totalCount}</p>
+                      <p className="pb-team-cen pb-team-rate">
+                        {t.attendanceRate.toFixed(2)}%
+                      </p>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          </P>
+
+          <div className="pb-cell-right">
+            <P title="今日出勤" className="pb-flex-full" scrollable={false}>
+              <TodayAttendanceFeed projectId={projectId} items={feed ?? []} />
+            </P>
+          </div>
+
+          <P title="今日出勤情况" className="pb-flex-hourly" scrollable={false}>
+            <div className="pb-chart-wrap pb-chart-ref">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={hourlyData} margin={{ top: 28, right: 18, bottom: 8, left: 4 }}>
+                  <defs>
+                    <linearGradient id="pbHourlyFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#3ecbff" stopOpacity={0.55} />
+                      <stop offset="100%" stopColor="#3ecbff" stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid
+                    stroke={GRID_STROKE}
+                    strokeDasharray="4 4"
+                    vertical={false}
+                  />
+                  <XAxis
+                    dataKey="hour"
+                    tick={AXIS_TICK}
+                    axisLine={{ stroke: "rgba(140,160,210,0.35)" }}
+                    tickLine={false}
+                    interval="preserveStartEnd"
+                  />
+                  <YAxis
+                    tick={AXIS_TICK}
+                    axisLine={false}
+                    tickLine={false}
+                    width={36}
+                    label={{
+                      value: "人数",
+                      position: "top",
+                      offset: 12,
+                      fill: "rgba(255,255,255,0.9)",
+                      fontSize: 12,
+                    }}
+                  />
+                  <Tooltip contentStyle={tooltipStyle} />
+                  <Area
+                    type="monotone"
+                    dataKey="count"
+                    stroke="#3ecbff"
+                    strokeWidth={2}
+                    fill="url(#pbHourlyFill)"
+                    dot={{ r: 3, fill: "#3ecbff", strokeWidth: 0 }}
+                    activeDot={{ r: 4, fill: "#7ae4ff" }}
+                    isAnimationActive={false}
+                    name="人数"
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </P>
+
+          <div className="pb-charts-row">
+            <P title="日均出勤统计" className="pb-flex-1" scrollable={false}>
+              <div className="pb-chart-wrap pb-chart-ref">
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={hourlyData} margin={{ top: 10, right: 16, bottom: 0, left: -12 }}>
+                  <BarChart data={barData} margin={{ top: 28, right: 12, bottom: 8, left: 4 }} barCategoryGap="28%">
                     <defs>
-                      <linearGradient id="hourlyGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#22d3ee" stopOpacity={0.4} />
-                        <stop offset="100%" stopColor="#22d3ee" stopOpacity={0.02} />
-                      </linearGradient>
+                      {BAR_FILLS.map((c, i) => (
+                        <linearGradient key={i} id={`pbBarFill${i}`} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor={c.top} stopOpacity={1} />
+                          <stop offset="100%" stopColor={c.bottom} stopOpacity={1} />
+                        </linearGradient>
+                      ))}
                     </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,200,255,0.06)" />
+                    <CartesianGrid
+                      stroke={GRID_STROKE}
+                      strokeDasharray="4 4"
+                      vertical={false}
+                    />
                     <XAxis
-                      dataKey="hour"
-                      tick={{ fill: "#7fa4c4", fontSize: 10 }}
+                      dataKey="name"
+                      tick={AXIS_TICK}
                       axisLine={false}
                       tickLine={false}
+                      interval={0}
                     />
                     <YAxis
-                      tick={{ fill: "#7fa4c4", fontSize: 10 }}
+                      tick={AXIS_TICK}
                       axisLine={false}
                       tickLine={false}
+                      width={42}
+                      label={{
+                        value: "人数",
+                        position: "top",
+                        offset: 12,
+                        fill: "rgba(255,255,255,0.9)",
+                        fontSize: 12,
+                      }}
                     />
                     <Tooltip contentStyle={tooltipStyle} />
-                    <Area
-                      type="monotone"
-                      dataKey="count"
-                      stroke="#22d3ee"
-                      strokeWidth={2.5}
-                      fill="url(#hourlyGrad)"
-                      dot={{ r: 3, fill: "#22d3ee", strokeWidth: 0 }}
-                      activeDot={{ r: 5, stroke: "#22d3ee", strokeWidth: 2, fill: "#fff" }}
-                      isAnimationActive={false}
-                      name="出勤人数"
-                    >
-                      <LabelList
-                        dataKey="count"
-                        position="top"
-                        fill="#e4f0fa"
-                        fontSize={10}
-                        fontWeight={700}
-                        offset={8}
-                      />
-                    </Area>
-                  </AreaChart>
+                    <Bar dataKey="value" radius={[2, 2, 0, 0]} isAnimationActive={false} name="人数">
+                      {barData.map((_, i) => (
+                        <Cell key={i} fill={`url(#pbBarFill${i % BAR_FILLS.length})`} />
+                      ))}
+                    </Bar>
+                  </BarChart>
                 </ResponsiveContainer>
               </div>
             </P>
-          </div>
 
-          {/* Center Column: Team Table + Bar + Pie */}
-          <div className="pb-col pb-col-center">
-            <P
-              title="今日各班组出勤情况"
-              subtitle="TEAM ATTENDANCE"
-              className="pb-flex-1"
-            >
-              <div className="pb-table-wrap">
-                <table className="pb-table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: 44 }}>序号</th>
-                      <th>班组名称</th>
-                      <th className="text-right">出勤</th>
-                      <th className="text-right">在场</th>
-                      <th className="text-right">总人数</th>
-                      <th className="text-right">出勤率</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(board?.teamAttendance ?? []).slice(0, 15).map((t, i) => {
-                      const rateColor =
-                        t.attendanceRate >= 50
-                          ? "#00e88f"
-                          : t.attendanceRate >= 20
-                          ? "#ffd43b"
-                          : "#ff4757";
-                      return (
-                        <tr key={t.teamName}>
-                          <td>
-                            <span className="pb-idx" style={{
-                              background: i < 3
-                                ? `radial-gradient(circle at 35% 30%, ${PIE_COLORS[i]}, rgba(0,40,80,0.8))`
-                                : undefined
-                            }}>
-                              {i + 1}
-                            </span>
-                          </td>
-                          <td className="pb-td-name">{t.teamName}</td>
-                          <td className="text-right">
-                            <span className="pb-num">{t.attendanceCount}</span>
-                          </td>
-                          <td className="text-right">
-                            <span className="pb-num pb-num-green">{t.onSiteCount}</span>
-                          </td>
-                          <td className="text-right pb-td-total">{t.totalCount}</td>
-                          <td className="text-right">
-                            <span className="pb-rate" style={{ color: rateColor }}>
-                              {t.attendanceRate.toFixed(1)}%
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-                {(board?.teamAttendance?.length ?? 0) > 15 && (
-                  <div className="pb-table-more">
-                    共 {board!.teamAttendance.length} 个班组，展示前 15 个
-                  </div>
-                )}
-              </div>
-            </P>
-
-            <div className="pb-charts-row">
-              <P
-                title="日均出勤统计"
-                subtitle="DAILY STATS"
-                className="pb-flex-1"
-                scrollable={false}
-              >
-                <div className="pb-chart-wrap">
+            <P title="项目各工种人数占比" className="pb-flex-1" scrollable={false}>
+              <div className="pb-chart-wrap pb-chart-with-legend pb-chart-ref">
+                <div className="pb-pie-chart">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={barData} margin={{ top: 8, right: 8, bottom: 0, left: -12 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,200,255,0.06)" />
-                      <XAxis
-                        dataKey="name"
-                        tick={{ fill: "#7fa4c4", fontSize: 10 }}
-                        axisLine={false}
-                        tickLine={false}
-                      />
-                      <YAxis
-                        tick={{ fill: "#7fa4c4", fontSize: 10 }}
-                        axisLine={false}
-                        tickLine={false}
-                      />
-                      <Tooltip contentStyle={tooltipStyle} />
-                      <Bar
-                        dataKey="value"
-                        radius={[4, 4, 0, 0]}
+                    <PieChart>
+                      <Pie
+                        data={pieData}
+                        cx="50%"
+                        cy="48%"
+                        innerRadius="52%"
+                        outerRadius="78%"
+                        paddingAngle={pieData.length > 1 && !pieData[0].empty ? 1.5 : 0}
+                        dataKey="count"
+                        nameKey="workerTypeName"
+                        stroke="rgba(4, 20, 48, 0.85)"
+                        strokeWidth={2}
                         isAnimationActive={false}
-                        name="人数"
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        label={false as any}
                       >
-                        <LabelList
-                          dataKey="value"
-                          position="top"
-                          fill="#e4f0fa"
-                          fontSize={11}
-                          fontWeight={700}
-                          offset={6}
-                        />
-                        {barData.map((d, i) => (
-                          <Cell key={i} fill={d.fill} opacity={0.85} />
+                        {pieData.map((d, i) => (
+                          <Cell
+                            key={d.workerTypeName}
+                            fill={
+                              d.empty
+                                ? "rgba(120,160,200,0.2)"
+                                : PIE_COLORS[i % PIE_COLORS.length]
+                            }
+                          />
                         ))}
-                      </Bar>
-                    </BarChart>
+                      </Pie>
+                      <Tooltip contentStyle={tooltipStyle} />
+                    </PieChart>
                   </ResponsiveContainer>
                 </div>
-              </P>
-
-              <P
-                title="项目各工种人数占比"
-                subtitle="WORKER TYPES"
-                className="pb-flex-1"
-                scrollable={false}
-              >
-                <div className="pb-chart-wrap pb-chart-with-legend">
-                  <div className="pb-pie-chart">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={board?.workerTypeDistribution ?? []}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius="45%"
-                          outerRadius="75%"
-                          dataKey="count"
-                          nameKey="workerTypeName"
-                          stroke="rgba(3,14,32,0.6)"
-                          strokeWidth={2}
-                          isAnimationActive={false}
-                          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                          label={(props: any) => {
-                            const pct = Number(props.percent ?? 0);
-                            if (pct < 0.06) return "";
-                            return `${(pct * 100).toFixed(0)}%`;
-                          }}
-                          labelLine={false}
-                        >
-                          {(board?.workerTypeDistribution ?? []).map((_, i) => (
-                            <Cell
-                              key={i}
-                              fill={PIE_COLORS[i % PIE_COLORS.length]}
-                              opacity={0.92}
-                            />
-                          ))}
-                        </Pie>
-                        <Tooltip
-                          contentStyle={tooltipStyle}
-                          formatter={(value, name) => [value, name]}
+                <div className="pb-pie-legend">
+                  {pieData
+                    .filter((d) => !d.empty)
+                    .map((d, i) => (
+                      <div key={d.workerTypeName} className="pb-pie-legend-item">
+                        <span
+                          className="pb-pie-legend-dot"
+                          style={{ background: PIE_COLORS[i % PIE_COLORS.length] }}
                         />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                  <div className="pb-pie-legend">
-                    {(board?.workerTypeDistribution ?? []).map((d, i) => {
-                      const total = (board?.workerTypeDistribution ?? []).reduce((s, w) => s + w.count, 0);
-                      const pct = total > 0 ? ((d.count / total) * 100).toFixed(1) : "0.0";
-                      return (
-                        <div key={d.workerTypeName} className="pb-pie-legend-item">
-                          <span
-                            className="pb-pie-legend-dot"
-                            style={{ background: PIE_COLORS[i % PIE_COLORS.length] }}
-                          />
-                          <span className="pb-pie-legend-name" title={d.workerTypeName}>
-                            {d.workerTypeName}
-                          </span>
-                          <span className="pb-pie-legend-count">{d.count}人</span>
-                          <span className="pb-pie-legend-pct">{pct}%</span>
-                        </div>
-                      );
-                    })}
-                  </div>
+                        <span className="pb-pie-legend-name" title={d.workerTypeName}>
+                          {d.workerTypeName}
+                        </span>
+                      </div>
+                    ))}
                 </div>
-              </P>
-            </div>
-          </div>
-
-          {/* Right Column: Today Attendance */}
-          <div className="pb-col pb-col-right">
-            <P
-              title="今日出勤情况"
-              subtitle="ATTENDANCE"
-              className="pb-flex-full"
-            >
-              <TodayAttendancePanel items={feed ?? []} />
+              </div>
             </P>
           </div>
         </div>

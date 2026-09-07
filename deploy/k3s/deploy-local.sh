@@ -53,6 +53,10 @@ DEPLOY_PLATFORM="${DEPLOY_PLATFORM:-linux/amd64}"
 PUBLIC_WEB_URL="${PUBLIC_WEB_URL:-http://$VPS_HOST:30081}"
 VERIFY_WEB_URL="${VERIFY_WEB_URL:-$PUBLIC_WEB_URL}"
 FRONTEND_API_URL="${FRONTEND_API_URL:-${VITE_API_URL:-}}"
+# 前端地图 Key：.env.deploy 若被协同覆盖漏配，用与源码兜底一致的默认值，保证线上 UI 构建可调百度/高德
+VITE_AMAP_KEY="${VITE_AMAP_KEY:-142205c95a53b57e404de95f31be67d8}"
+VITE_AMAP_SECURITY_CODE="${VITE_AMAP_SECURITY_CODE:-1b7e6b992e0dcfafd2b80252a32ddaa8}"
+VITE_BAIDU_MAP_AK="${VITE_BAIDU_MAP_AK:-xMpAL2lUFuRNDvkLYi4lsNtBnGwfMEee}"
 SSH_KEY="${SHANHUAI_SSH_KEY:-$HOME/.ssh/shanhuai_k3s_deploy_ed25519}"
 CACHE_ROOT="${SHANHUAI_LOCAL_CACHE:-$HOME/.cache/shanhuai-gc/buildkit}"
 DEPLOYED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -593,6 +597,7 @@ if [ "$DEPLOY_UI" = true ]; then
     --build-arg "VITE_API_URL=$FRONTEND_API_URL" \
     --build-arg "VITE_AMAP_KEY=${VITE_AMAP_KEY:-}" \
     --build-arg "VITE_AMAP_SECURITY_CODE=${VITE_AMAP_SECURITY_CODE:-}" \
+    --build-arg "VITE_BAIDU_MAP_AK=${VITE_BAIDU_MAP_AK:-}" \
     "$ROOT_DIR/ui"
   import_image "$UI_IMAGE"
   rollout_ui

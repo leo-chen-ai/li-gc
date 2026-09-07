@@ -139,8 +139,11 @@ pub struct BoardWorkerTypeCount {
 #[serde(rename_all = "camelCase")]
 pub struct AttendanceFeedItem {
     pub id: uuid::Uuid,
+    pub worker_id: uuid::Uuid,
     pub worker_name: String,
     pub worker_photo_url: Option<String>,
+    pub phone: Option<String>,
+    pub work_type: Option<i32>,
     pub trigger_time: String,
     pub equipment_name: Option<String>,
     pub direction: i16,

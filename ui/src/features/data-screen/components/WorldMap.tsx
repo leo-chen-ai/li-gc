@@ -1,9 +1,15 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { memo, useEffect, useRef, useState } from "react";
+import { loadBaiduMap } from "@/lib/baidu-map";
+import baiduMapStyle from "../map/baidu-map-style.json";
 
-// ── Amap credentials ─────────────────────────────────────────────────────
-const AMAP_KEY = "142205c95a53b57e404de95f31be67d8";
-const AMAP_SECURITY_CODE = "1b7e6b992e0dcfafd2b80252a32ddaa8";
+/**
+ * 示例大屏（姜太公）企业驾驶舱用的是百度地图 + setMapStyleV2：
+ * - 陆地 #091220（近黑）
+ * - 水域 #00364B
+ * 高德 darkblue 无法单独把海洋调成该色，故对齐示例改用百度自定义样式。
+ * AK 见 ui/src/lib/baidu-map.ts（含协同 env 被覆盖时的硬编码兜底）。
+ */
 
 export interface MapProjectPoint {
   id: string;
@@ -14,7 +20,7 @@ export interface MapProjectPoint {
   mapAddress?: string | null;
 }
 
-interface AmapProps {
+interface MapProps {
   projects: MapProjectPoint[];
   onProjectClick?: (project: MapProjectPoint) => void;
   selectedProject?: MapProjectPoint | null;
@@ -22,83 +28,120 @@ interface AmapProps {
   onMapReady?: () => void;
 }
 
-// Global load state
-let loadPromise: Promise<void> | null = null;
-
-function loadAmap(): Promise<void> {
-  if (loadPromise) return loadPromise;
-
-  loadPromise = new Promise<void>((resolve, reject) => {
-    (window as any)._AMapSecurityConfig = {
-      securityJsCode: AMAP_SECURITY_CODE,
-    };
-
-    const script = document.createElement("script");
-    script.src = `https://webapi.amap.com/maps?v=2.0&key=${AMAP_KEY}`;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error("Failed to load Amap"));
-    document.head.appendChild(script);
-  });
-
-  return loadPromise;
+/** DOM marker overlay — neon dot + ripple */
+function createDotOverlay(BMap: any, point: any, onClick: () => void) {
+  function DotOverlay(this: any) {
+    this._point = point;
+  }
+  DotOverlay.prototype = new BMap.Overlay();
+  DotOverlay.prototype.initialize = function (map: any) {
+    this._map = map;
+    const el = document.createElement("div");
+    el.className = "db-bmap-dot";
+    el.style.cssText = `
+      width: 10px; height: 10px; border-radius: 50%;
+      background: radial-gradient(circle, #ffffff 0%, #00e5ff 40%, #0088ff 100%);
+      box-shadow: 0 0 8px 2px rgba(0,229,255,0.7), 0 0 20px 6px rgba(0,136,255,0.35);
+      cursor: pointer; position: absolute; z-index: 10;
+    `;
+    [1, 2].forEach((i) => {
+      const ring = document.createElement("div");
+      ring.style.cssText = `
+        position: absolute; top: -10px; left: -10px;
+        width: 30px; height: 30px; border-radius: 50%;
+        border: 1.5px solid rgba(0,229,255,${0.5 - i * 0.15});
+        animation: amapRipple 2.4s ease-out infinite;
+        animation-delay: ${i * 0.6}s;
+        pointer-events: none;
+      `;
+      el.appendChild(ring);
+    });
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      onClick();
+    });
+    map.getPanes().markerPane.appendChild(el);
+    this._el = el;
+    return el;
+  };
+  DotOverlay.prototype.draw = function () {
+    const pixel = this._map.pointToOverlayPixel(this._point);
+    if (!this._el) return;
+    this._el.style.left = `${pixel.x - 5}px`;
+    this._el.style.top = `${pixel.y - 5}px`;
+  };
+  DotOverlay.prototype.getPosition = function () {
+    return this._point;
+  };
+  return new (DotOverlay as any)();
 }
 
-const DARK_STYLE = "amap://styles/darkblue";
-
-export const WorldMap = memo(function WorldMap({ projects, onProjectClick, selectedProject, onCloseTooltip, onMapReady }: AmapProps) {
+export const WorldMap = memo(function WorldMap({
+  projects,
+  onProjectClick,
+  selectedProject,
+  onCloseTooltip,
+  onMapReady,
+}: MapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const markersRef = useRef<any[]>([]);
   const clickRef = useRef(onProjectClick);
   const mapReadyRef = useRef(onMapReady);
   const closeRef = useRef(onCloseTooltip);
-  // Always holds the latest projects so the map-init callback can read them
   const projectsRef = useRef(projects);
 
   useEffect(() => {
     clickRef.current = onProjectClick;
   }, [onProjectClick]);
-
   useEffect(() => {
     mapReadyRef.current = onMapReady;
   }, [onMapReady]);
-
   useEffect(() => {
     closeRef.current = onCloseTooltip;
   }, [onCloseTooltip]);
-
   useEffect(() => {
     projectsRef.current = projects;
   });
 
-  // Tooltip position state
-  const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
+  const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(
+    null,
+  );
 
-  // Update tooltip position when selectedProject or map changes
+  function updateTooltipPos(lng: number, lat: number) {
+    const map = mapRef.current;
+    const BMap = (window as any).BMap;
+    if (!map || !BMap) return;
+    const pixel = map.pointToOverlayPixel(new BMap.Point(lng, lat));
+    const size = map.getSize();
+    setTooltipPos({
+      x: Math.max(150, Math.min(size.width - 150, pixel.x)),
+      y: Math.max(0, pixel.y - 20),
+    });
+  }
+
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !selectedProject || !selectedProject.longitude || !selectedProject.latitude) {
+    if (
+      !map ||
+      !selectedProject ||
+      !selectedProject.longitude ||
+      !selectedProject.latitude
+    ) {
       setTooltipPos(null);
       return;
     }
-    const pos = map.lngLatToContainer(
-      new (window as any).AMap.LngLat(Number(selectedProject.longitude), Number(selectedProject.latitude))
+    updateTooltipPos(
+      Number(selectedProject.longitude),
+      Number(selectedProject.latitude),
     );
-    if (pos) {
-      const size = map.getSize();
-      setTooltipPos({
-        x: Math.max(150, Math.min(size.width - 150, pos.x)),
-        y: Math.max(0, pos.y - 20),
-      });
-    }
   }, [selectedProject]);
 
-  // ── Shared marker render helper ─────────────────────────────────────────
   function renderMarkers(map: any, pts: MapProjectPoint[]) {
-    const AMap = (window as any).AMap;
-    if (!AMap) return;
+    const BMap = (window as any).BMap;
+    if (!BMap) return;
 
-    markersRef.current.forEach((m: any) => map.remove(m));
+    markersRef.current.forEach((m: any) => map.removeOverlay(m));
     markersRef.current = [];
 
     pts
@@ -106,108 +149,117 @@ export const WorldMap = memo(function WorldMap({ projects, onProjectClick, selec
       .forEach((p) => {
         const lng = Number(p.longitude);
         const lat = Number(p.latitude);
-
-        // Neon glowing dot
-        const el = document.createElement("div");
-        el.style.cssText = `
-          width: 10px; height: 10px; border-radius: 50%;
-          background: radial-gradient(circle, #ffffff 0%, #00e5ff 40%, #0088ff 100%);
-          box-shadow: 0 0 8px 2px rgba(0,229,255,0.7), 0 0 20px 6px rgba(0,136,255,0.35), 0 0 35px 10px rgba(0,229,255,0.12);
-          cursor: pointer; position: relative;
-        `;
-
-        // Radar ripple rings
-        [1, 2].forEach((i) => {
-          const ring = document.createElement("div");
-          const delay = i * 0.6;
-          ring.style.cssText = `
-            position: absolute; top: -10px; left: -10px;
-            width: 30px; height: 30px; border-radius: 50%;
-            border: 1.5px solid rgba(0,229,255,${0.5 - i * 0.15});
-            animation: amapRipple 2.4s ease-out infinite;
-            animation-delay: ${delay}s;
-            pointer-events: none;
-          `;
-          el.appendChild(ring);
-        });
-
-        const marker = new AMap.Marker({
-          position: new AMap.LngLat(lng, lat),
-          content: el,
-          offset: new AMap.Pixel(-6, -6),
-          extData: p,
-        });
-
-        marker.on("click", () => {
+        const point = new BMap.Point(lng, lat);
+        const overlay = createDotOverlay(BMap, point, () => {
           clickRef.current?.(p);
-          const m = mapRef.current;
-          if (m) {
-            const pos = m.lngLatToContainer(new AMap.LngLat(lng, lat));
-            if (pos) {
-              const size = m.getSize();
-              setTooltipPos({
-                x: Math.max(150, Math.min(size.width - 150, pos.x)),
-                y: Math.max(0, pos.y - 20),
-              });
-            }
-          }
+          updateTooltipPos(lng, lat);
         });
-
-        map.add(marker);
-        markersRef.current.push(marker);
+        map.addOverlay(overlay);
+        markersRef.current.push(overlay);
       });
   }
 
-  // ── Init map once ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!containerRef.current) return;
-
     let disposed = false;
+    let onWheel: ((e: WheelEvent) => void) | null = null;
 
-    loadAmap().then(() => {
-      if (disposed || !containerRef.current) return;
-      const AMap = (window as any).AMap;
-      if (!AMap) return;
+    loadBaiduMap()
+      .then(() => {
+        if (disposed || !containerRef.current) return;
+        const BMap = (window as any).BMap;
+        if (!BMap) return;
+        const container = containerRef.current;
 
-      const map = new AMap.Map(containerRef.current, {
-        zoom: 8,
-        center: [121.2, 29.6],
-        mapStyle: DARK_STYLE,
-        viewMode: "2D",
-        features: ["bg", "road", "building", "point"],
-        pitchEnable: false,
-        rotateEnable: false,
+        const map = new BMap.Map(container, {
+          enableMapClick: true,
+        });
+        map.centerAndZoom(new BMap.Point(121.2, 29.6), 8);
+        map.enableDragging();
+        map.enableInertialDragging();
+        // ScreenStage 有 CSS scale，百度自带滚轮会按未缩放坐标算错，
+        // 导致放大中心不是鼠标位置；改用手写滚轮缩放。
+        map.disableScrollWheelZoom();
+        // 陆地近黑 + 水域 #00364B（对齐示例）
+        map.setMapStyleV2({ styleJson: baiduMapStyle as any[] });
+
+        mapRef.current = map;
+        renderMarkers(map, projectsRef.current);
+        mapReadyRef.current?.();
+
+        map.addEventListener("click", () => {
+          closeRef.current?.();
+        });
+
+        onWheel = (e: WheelEvent) => {
+          const hit = document.elementFromPoint(e.clientX, e.clientY);
+          // 仅鼠标下方实际落在百度地图 DOM 上时才缩放（左右栏/搜索/底部图表面板不触发）
+          if (!hit || !container.contains(hit)) return;
+
+          e.preventDefault();
+          e.stopPropagation();
+          const m = mapRef.current;
+          if (!m) return;
+
+          const rect = container.getBoundingClientRect();
+          if (rect.width <= 0 || rect.height <= 0) return;
+
+          // 视口坐标 → 设计画布（未缩放）坐标，抵消 ScreenStage 的 CSS scale
+          const scaleX = rect.width / container.clientWidth;
+          const scaleY = rect.height / container.clientHeight;
+          const x = (e.clientX - rect.left) / scaleX;
+          const y = (e.clientY - rect.top) / scaleY;
+
+          const point = m.pixelToPoint(new BMap.Pixel(x, y));
+          const cur = m.getZoom();
+          const next = Math.max(3, Math.min(19, cur + (e.deltaY < 0 ? 1 : -1)));
+          if (next === cur) return;
+
+          let applied = false;
+          const keepCursor = () => {
+            if (applied) return;
+            applied = true;
+            m.removeEventListener("zoomend", keepCursor);
+            const after = m.pointToPixel(point);
+            const dx = Math.round(x - after.x);
+            const dy = Math.round(y - after.y);
+            if (dx || dy) m.panBy(dx, dy);
+          };
+          m.addEventListener("zoomend", keepCursor);
+          m.setZoom(next);
+          requestAnimationFrame(keepCursor);
+        };
+        // 挂到 window 捕获阶段：上层 UI 是 pointer-events:none，
+        // 但滚轮仍可能被中间层接住；按鼠标下是否可透传到地图来决定
+        window.addEventListener("wheel", onWheel, { passive: false, capture: true });
+      })
+      .catch((err) => {
+        console.error(err);
+        // 仍通知外层结束 loading，避免一直卡在启动页
+        mapReadyRef.current?.();
       });
-
-      mapRef.current = map;
-
-      // Render any projects that arrived before the map was ready
-      renderMarkers(map, projectsRef.current);
-
-      mapReadyRef.current?.();
-
-      // Click on empty map area to dismiss tooltip
-      map.on("click", () => {
-        closeRef.current?.();
-      });
-    });
 
     return () => {
       disposed = true;
+      if (onWheel) {
+        window.removeEventListener("wheel", onWheel, true);
+      }
       if (mapRef.current) {
-        mapRef.current.destroy();
+        mapRef.current.clearOverlays?.();
         mapRef.current = null;
       }
+      if (containerRef.current) {
+        containerRef.current.innerHTML = "";
+      }
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Update markers when data changes ───────────────────────────────────
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return; // map not ready yet — init callback will handle it
+    if (!map) return;
     renderMarkers(map, projects);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projects]);
 
   return (
@@ -217,12 +269,21 @@ export const WorldMap = memo(function WorldMap({ projects, onProjectClick, selec
           0%   { transform: scale(0.5); opacity: 1; }
           100% { transform: scale(2.5); opacity: 0; }
         }
+        .db-bmap .anchorBL,
+        .db-bmap .BMap_cpyCtrl {
+          display: none !important;
+        }
       `}</style>
       <div
         ref={containerRef}
-        style={{ width: "100%", height: "100%", minHeight: 200 }}
+        className="db-bmap"
+        style={{
+          width: "100%",
+          height: "100%",
+          minHeight: 200,
+          background: "#091220",
+        }}
       />
-      {/* Floating tooltip above selected marker */}
       {selectedProject && tooltipPos && (
         <div
           className="db-tooltip"
@@ -233,18 +294,34 @@ export const WorldMap = memo(function WorldMap({ projects, onProjectClick, selec
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          <button className="db-tooltip-close" onClick={() => closeRef.current?.()}>✕</button>
+          <button
+            className="db-tooltip-close"
+            onClick={() => closeRef.current?.()}
+          >
+            ✕
+          </button>
           <div className="db-tooltip-name">{selectedProject.name}</div>
           <div className="db-tooltip-rows">
             {[
-              { l: "总包单位", v: (selectedProject as any).generalContractor },
-              { l: "项目经理", v: (selectedProject as any).projectManager },
-              { l: "联系电话", v: (selectedProject as any).projectManagerPhone },
+              {
+                l: "总包单位",
+                v: (selectedProject as any).generalContractor,
+              },
+              {
+                l: "项目经理",
+                v: (selectedProject as any).projectManager,
+              },
+              {
+                l: "联系电话",
+                v: (selectedProject as any).projectManagerPhone,
+              },
               { l: "项目地点", v: selectedProject.mapPoiName },
             ].map((row, i) => (
               <div key={i} className="db-tooltip-row">
                 <span className="db-tooltip-row-label">{row.l}</span>
-                <span className="db-tooltip-row-value">{row.v || "—"}</span>
+                <span className="db-tooltip-row-value">
+                  {row.v || "—"}
+                </span>
               </div>
             ))}
           </div>
@@ -252,7 +329,13 @@ export const WorldMap = memo(function WorldMap({ projects, onProjectClick, selec
             <button className="db-tooltip-btn">项目详情</button>
             <button
               className="db-tooltip-btn db-tooltip-btn-primary"
-              onClick={() => { window.location.href = `/app/data-screen/project/${selectedProject.id}`; }}
+              onClick={() => {
+                window.open(
+                  `/app/data-screen/project/${selectedProject.id}`,
+                  "_blank",
+                  "noopener,noreferrer",
+                );
+              }}
             >
               项目看板
             </button>

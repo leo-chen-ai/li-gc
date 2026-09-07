@@ -1247,11 +1247,20 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <Button asChild size="sm" variant="outline" className="border-[#409eff] text-[#409eff] hover:bg-[#409eff] hover:text-white">
-                <Link to="/app/data-screen/project/$projectId" params={{ projectId }}>
-                  <LayoutDashboard className="size-4" />
-                  项目看板
-                </Link>
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-[#409eff] text-[#409eff] hover:bg-[#409eff] hover:text-white"
+                onClick={() =>
+                  window.open(
+                    `/app/data-screen/project/${projectId}`,
+                    "_blank",
+                    "noopener,noreferrer",
+                  )
+                }
+              >
+                <LayoutDashboard className="size-4" />
+                项目看板
               </Button>
               <Button asChild size="sm" className="bg-[#409eff] text-white hover:bg-[#337ecc]">
                 <Link to="/app/admin/projects">

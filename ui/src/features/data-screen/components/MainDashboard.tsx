@@ -1,12 +1,12 @@
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "@tanstack/react-router";
 import {
-  AreaChart,
-  Area,
+  LineChart,
+  Line,
   XAxis,
   YAxis,
   Tooltip,
   ResponsiveContainer,
+  CartesianGrid,
   PieChart,
   Pie,
   Cell,
@@ -23,6 +23,7 @@ import { WorldMap } from "./WorldMap";
 import type { MapProjectPoint } from "./WorldMap";
 import { ParticleBackground } from "./ParticleBackground";
 import { AnimatedNumber } from "./AnimatedNumber";
+import { dataScreenAsset } from "../config/assets";
 import { ScreenStage } from "./ScreenStage";
 import type { MapProject } from "../api/dashboard-api";
 
@@ -39,17 +40,9 @@ function useClock() {
 
 function HeaderClock() {
   const now = useClock();
-  const timeStr = now.toLocaleTimeString("zh-CN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  });
-  const dateStr = now.toLocaleDateString("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const timeStr = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
   const weekdays = ["星期天", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
   const weekday = weekdays[now.getDay()];
   return (
@@ -79,8 +72,22 @@ function HeaderFullscreen() {
   };
 
   return (
-    <button className="db-header-back" onClick={toggle} title={isFullscreen ? "退出全屏" : "进入全屏"}>
-      {isFullscreen ? "✕ 退出全屏" : "⛶ 全屏"}
+    <button
+      className="db-header-fs"
+      onClick={toggle}
+      title={isFullscreen ? "退出全屏" : "进入全屏"}
+      aria-label={isFullscreen ? "退出全屏" : "进入全屏"}
+    >
+      {isFullscreen ? (
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M5 1H1v4M11 1h4v4M5 15H1v-4M11 15h4v-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          <path d="M1 1l4 4M15 1l-4 4M1 15l4-4M15 15l-4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        </svg>
+      ) : (
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
     </button>
   );
 }
@@ -107,46 +114,10 @@ function P({
       <div className="db-stream" />
       <div className="db-corner-bl" />
       <div className="db-corner-br" />
-      <div className="db-title">
+      <div className="db-title db-title-bar">
         <span className="db-title-text">{title}</span>
         {subtitle && <span className="db-title-sub">{subtitle}</span>}
-        <span className="db-title-line" />
         {extra}
-      </div>
-      <div className="db-content-area">{children}</div>
-    </div>
-  );
-}
-
-// ── Dual-title panel (two side-by-side section titles) ─────────────────────
-
-function DuoP({
-  t1,
-  t2,
-  children,
-  className = "",
-}: {
-  t1: string;
-  t2: string;
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <div className={`db-panel ${className}`}>
-      <div className="db-panel-bottom" />
-      <div className="db-panel-grid" />
-      <div className="db-stream" />
-      <div className="db-corner-bl" />
-      <div className="db-corner-br" />
-      <div className="db-duo-header">
-        <div className="db-title">
-          <span className="db-title-text">{t1}</span>
-          <span className="db-title-line" />
-        </div>
-        <div className="db-title">
-          <span className="db-title-text">{t2}</span>
-          <span className="db-title-line" />
-        </div>
       </div>
       <div className="db-content-area">{children}</div>
     </div>
@@ -159,43 +130,60 @@ function AttRing({
   percent,
   color,
   size = 48,
+  iconSrc,
+  trackColor = "rgba(80, 110, 150, 0.35)",
+  strokeWidth = 7,
 }: {
   percent: number;
   color: string;
   size?: number;
+  iconSrc?: string;
+  trackColor?: string;
+  strokeWidth?: number;
 }) {
-  const r = 19;
+  const r = 24 - strokeWidth / 2 - 1;
   const c = 2 * Math.PI * r;
   const p = Math.max(0, Math.min(100, percent));
+  const iconSize = Math.round(size * 0.38);
   return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 48 48"
-      aria-hidden="true"
-      style={{ flexShrink: 0 }}
-    >
-      <circle
-        cx="24"
-        cy="24"
-        r={r}
-        fill="none"
-        stroke="rgba(120, 160, 200, 0.18)"
-        strokeWidth="5"
-      />
-      <circle
-        cx="24"
-        cy="24"
-        r={r}
-        fill="none"
-        stroke={color}
-        strokeWidth="5"
-        strokeLinecap="round"
-        strokeDasharray={`${(p / 100) * c} ${c}`}
-        transform="rotate(-90 24 24)"
-        style={{ filter: `drop-shadow(0 0 3px ${color})` }}
-      />
-    </svg>
+    <div className="db-att-ring" style={{ width: size, height: size }}>
+      <svg
+        width={size}
+        height={size}
+        viewBox="0 0 48 48"
+        aria-hidden="true"
+      >
+        <circle
+          cx="24"
+          cy="24"
+          r={r}
+          fill="none"
+          stroke={trackColor}
+          strokeWidth={strokeWidth}
+        />
+        <circle
+          cx="24"
+          cy="24"
+          r={r}
+          fill="none"
+          stroke={color}
+          strokeWidth={strokeWidth}
+          strokeLinecap="butt"
+          strokeDasharray={`${(p / 100) * c} ${c}`}
+          transform="rotate(-90 24 24)"
+          style={{ filter: `drop-shadow(0 0 5px ${color})` }}
+        />
+      </svg>
+      {iconSrc ? (
+        <img
+          className="db-att-ring-icon"
+          src={iconSrc}
+          alt=""
+          draggable={false}
+          style={{ width: iconSize, height: iconSize }}
+        />
+      ) : null}
+    </div>
   );
 }
 
@@ -281,82 +269,6 @@ function PersonIcon({
   );
 }
 
-function SqIcon({
-  kind,
-  color,
-}: {
-  kind: "doc" | "check" | "shield" | "tri";
-  color: string;
-}) {
-  return (
-    <svg
-      width="26"
-      height="26"
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden="true"
-      style={{ filter: `drop-shadow(0 0 3px ${color})`, flexShrink: 0 }}
-    >
-      {kind === "doc" && (
-        <>
-          <rect
-            x="6"
-            y="4"
-            width="12"
-            height="16"
-            rx="1.5"
-            stroke={color}
-            strokeWidth="1.6"
-          />
-          <path
-            d="M9 9.5h6M9 13.5h6"
-            stroke={color}
-            strokeWidth="1.6"
-            strokeLinecap="round"
-          />
-        </>
-      )}
-      {kind === "check" && (
-        <>
-          <circle cx="12" cy="12" r="8.5" stroke={color} strokeWidth="1.6" />
-          <path
-            d="m8.5 12.2 2.4 2.4 4.6-5"
-            stroke={color}
-            strokeWidth="1.6"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </>
-      )}
-      {kind === "shield" && (
-        <path
-          d="M12 3.5 19 6v6c0 4.4-3 7.4-7 8.5-4-1.1-7-4.1-7-8.5V6l7-2.5Z"
-          stroke={color}
-          strokeWidth="1.6"
-          strokeLinejoin="round"
-        />
-      )}
-      {kind === "tri" && (
-        <>
-          <path
-            d="M12 4.5 20.5 19h-17L12 4.5Z"
-            stroke={color}
-            strokeWidth="1.6"
-            strokeLinejoin="round"
-          />
-          <path
-            d="M12 10v4"
-            stroke={color}
-            strokeWidth="1.6"
-            strokeLinecap="round"
-          />
-          <circle cx="12" cy="16.6" r="0.9" fill={color} />
-        </>
-      )}
-    </svg>
-  );
-}
-
 // ── Left column ──────────────────────────────────────────────────────────
 
 const LeftColumn = memo(function LeftColumn() {
@@ -378,189 +290,206 @@ const LeftColumn = memo(function LeftColumn() {
             <div className="db-skeleton-bar" style={{ width: "60%" }} />
           </div>
         </P>
-        <DuoP t1="今日出勤" t2="合同签署" className="flex-1">
-          <div className="db-skeleton-block">
-            <div className="db-skeleton-bar db-skeleton-bar-lg" />
-            <div className="db-skeleton-bar db-skeleton-bar-sm" style={{ width: "50%" }} />
+        <div className="db-panel db-circular">
+          <div className="db-circular-titles">
+            <div className="db-circular-shadow">
+              <span className="db-circular-border" />
+              <span className="db-circular-icon" aria-hidden="true" />
+              <span className="db-circular-text">今日出勤</span>
+            </div>
+            <div className="db-circular-shadow">
+              <span className="db-circular-border" />
+              <span className="db-circular-icon" aria-hidden="true" />
+              <span className="db-circular-text">合同签署</span>
+            </div>
           </div>
-        </DuoP>
-        <P title="安全质量管理" subtitle="SAFETY" className="flex-[1.5]">
-          <div className="db-skeleton-block">
-            <div className="db-skeleton-bar" style={{ width: "85%" }} />
-            <div className="db-skeleton-bar" style={{ width: "55%" }} />
+          <div className="db-circular-content">
+            <div className="db-skeleton-block" style={{ width: "100%" }}>
+              <div className="db-skeleton-bar db-skeleton-bar-lg" />
+              <div className="db-skeleton-bar db-skeleton-bar-sm" style={{ width: "50%" }} />
+            </div>
           </div>
-        </P>
+        </div>
+        <div className="db-panel db-safety">
+          <div className="db-safety-tabs">
+            <button type="button" className="db-safety-tab active">
+              安全管理
+            </button>
+            <button type="button" className="db-safety-tab">
+              质量管理
+            </button>
+          </div>
+          <div className="db-safety-body">
+            <div className="db-skeleton-block">
+              <div className="db-skeleton-bar" style={{ width: "85%" }} />
+              <div className="db-skeleton-bar" style={{ width: "55%" }} />
+            </div>
+          </div>
+        </div>
       </>
     );
   }
 
   return (
     <>
-      {/* Enterprise data */}
-      <P title="企业综合数据" subtitle="OVERVIEW" className="flex-[1.8]">
-        {/* Project status 3x2, same order as reference */}
-        <div className="db-grid-3">
-          {[
-            { l: "项目总数", v: o?.projectTotal, c: "" },
-            { l: "筹备", v: o?.statusPreparation, c: "" },
-            {
-              l: "完工/竣工",
-              v: (o?.statusCompleted ?? 0) + (o?.statusFinished ?? 0),
-              c: "db-num-green",
-            },
-            { l: "立项", v: o?.statusApproved, c: "" },
-            { l: "在建", v: o?.statusInProgress, c: "db-num-green" },
-            { l: "停工", v: o?.statusStopped, c: "db-num-red" },
-          ].map((i) => (
-            <div key={i.l} className="db-cell">
-              <AnimatedNumber
-                value={i.v ?? 0}
-                className={`db-num db-num-sm ${i.c}`}
-              />
-              <div className="db-label">{i.l}</div>
-            </div>
-          ))}
+      {/* Enterprise data — 1:1 reference spacing */}
+      <P title="企业综合数据" className="flex-none db-enterprise">
+        <div className="db-ym-content">
+          <div className="db-ym-grid">
+            {[
+              { l: "项目总数", v: o?.projectTotal },
+              { l: "筹备", v: o?.statusPreparation },
+              {
+                l: "完工/竣工",
+                v: (o?.statusCompleted ?? 0) + (o?.statusFinished ?? 0),
+              },
+              { l: "立项", v: o?.statusApproved },
+              { l: "在建", v: o?.statusInProgress },
+              { l: "停工", v: o?.statusStopped },
+            ].map((i) => (
+              <div key={i.l} className="db-ym-item">
+                <div className="db-ym-label">{i.l}</div>
+                <div className="db-ym-value-row">
+                  <AnimatedNumber value={i.v ?? 0} className="db-key-num" />
+                  <span className="db-ym-unit">个</span>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
 
-        {/* Personnel stats — 4-col row with icons */}
-        <div className="db-grid-4 mt-2">
+        <div className="db-human">
           {[
-            { l: "实名登记", v: o?.totalRegistered, k: "id", col: "#00c8ff" },
-            { l: "在册人员", v: o?.totalActive, k: "person", col: "#00c8ff" },
-            { l: "管理人员", v: o?.totalManagement, k: "mgr", col: "#66b3ff" },
-            { l: "党员人数", v: o?.totalPartyMember, k: "star", col: "#ff5c7a" },
+            { l: "累计实名登记", v: o?.totalRegistered, icon: dataScreenAsset("icon-registered.png") },
+            { l: "在册人员", v: o?.totalActive, icon: dataScreenAsset("icon-active.png") },
+            { l: "管理人员", v: o?.totalManagement, icon: dataScreenAsset("icon-mgmt.png") },
+            { l: "党员人数", v: o?.totalPartyMember, icon: dataScreenAsset("icon-party.png") },
           ].map((i) => (
-            <div key={i.l} className="db-mod">
-              <PersonIcon
-                kind={i.k as "id" | "person" | "mgr" | "star"}
-                color={i.col}
-              />
-              <AnimatedNumber
-                value={i.v ?? 0}
-                className="db-num db-num-md"
-              />
-              <div className="db-label">{i.l}</div>
+            <div key={i.l} className="db-human-card">
+              <div className="db-human-frame">
+                <img className="db-human-icon" src={i.icon} alt="" draggable={false} />
+              </div>
+              <div className="db-human-label">{i.l}</div>
+              <AnimatedNumber value={i.v ?? 0} className="db-human-qty" />
             </div>
           ))}
         </div>
       </P>
 
-      {/* Today attendance | contract sign — dual-title panel */}
-      <DuoP t1="今日出勤" t2="合同签署" className="flex-1">
-        <div className="db-grid-2">
-          <div className="db-att-block">
-            <div>
-              <div className="flex items-baseline gap-1">
+      {/* 今日出勤 / 合同签署 — circular 纯 CSS（无 tab 切图） */}
+      <div className="db-panel db-circular">
+        <div className="db-circular-titles">
+          <div className="db-circular-shadow">
+            <span className="db-circular-border" />
+            <span className="db-circular-icon" aria-hidden="true" />
+            <span className="db-circular-text">今日出勤</span>
+          </div>
+          <div className="db-circular-shadow">
+            <span className="db-circular-border" />
+            <span className="db-circular-icon" aria-hidden="true" />
+            <span className="db-circular-text">合同签署</span>
+          </div>
+        </div>
+        <div className="db-circular-content">
+          <div className="db-circular-item">
+            <div className="db-circular-meta">
+              <div className="db-circular-label">今日出勤人数</div>
+              <div className="db-circular-num-row">
                 <AnimatedNumber
                   value={o?.todayAttendance ?? 0}
-                  className="db-num db-num-lg db-num-green db-num-scan"
+                  className="db-circular-num"
                 />
-                <span className="db-label">人</span>
+                <span className="db-circular-unit">人</span>
               </div>
-              <div className="db-label">今日出勤人数</div>
-              <div className="db-att-sub">
-                出勤率 <span>{rate}%</span>
-              </div>
+              <div className="db-circular-rate">出勤率 {rate}%</div>
             </div>
-            <AttRing percent={parseFloat(rate)} color="#00e88f" size={64} />
+            <AttRing
+              percent={parseFloat(rate)}
+              color="#2ddcce"
+              size={88}
+              strokeWidth={6.5}
+              iconSrc={dataScreenAsset("ring-attendance.png")}
+            />
           </div>
-          <div className="db-att-block">
-            <div>
-              <div className="flex items-baseline gap-1">
-                <span
-                  className="db-num db-num-md"
-                  style={{ color: "var(--db-text-dim)" }}
-                >
-                  0
-                </span>
-                <span className="db-label">人</span>
+          <div className="db-circular-item">
+            <div className="db-circular-meta">
+              <div className="db-circular-label">签署人数</div>
+              <div className="db-circular-num-row">
+                <span className="db-circular-num">0</span>
+                <span className="db-circular-unit">人</span>
               </div>
-              <div className="db-label">签署人数</div>
-              <div className="db-att-sub">
-                签署率 <span>0%</span>
-              </div>
+              <div className="db-circular-rate">签署率 0%</div>
             </div>
-            <AttRing percent={0} color="#00b8ff" size={64} />
+            <AttRing
+              percent={0}
+              color="#1e90ff"
+              size={88}
+              strokeWidth={6.5}
+              iconSrc={dataScreenAsset("ring-contract.png")}
+            />
           </div>
         </div>
-      </DuoP>
+      </div>
 
-      {/* Safety / quality management — tab switch */}
-      <P
-        title="安全质量管理"
-        subtitle={sqTab === "safety" ? "SAFETY" : "QUALITY"}
-        className="flex-[1.5]"
-        extra={
-          <div className="db-tabs">
-            <button
-              className={`db-tab${sqTab === "safety" ? " active" : ""}`}
-              onClick={() => setSqTab("safety")}
-            >
-              安全
-            </button>
-            <button
-              className={`db-tab${sqTab === "quality" ? " active" : ""}`}
-              onClick={() => setSqTab("quality")}
-            >
-              质量
-            </button>
-          </div>
-        }
-      >
-        {/* identical structure per tab keeps panel height stable */}
-        <div className="db-grid-3">
-          {[
-            { l: "待整改", v: 0, c: "db-num-red", k: "doc", col: "#ff4757" },
-            { l: "已整改", v: 0, c: "db-num-green", k: "check", col: "#00e88f" },
-            { l: "无风险", v: 0, c: "", k: "shield", col: "#00e88f" },
-            { l: "低风险", v: 0, c: "", k: "tri", col: "#00d4ff" },
-            { l: "较大风险", v: 0, c: "db-num-orange", k: "tri", col: "#ff9f43" },
-            { l: "重大风险", v: 0, c: "db-num-red", k: "tri", col: "#ff4757" },
-          ].map((i) => (
-            <div key={i.l} className="db-sq-item">
-              <SqIcon kind={i.k as "doc" | "check" | "shield" | "tri"} color={i.col} />
-              <div className="min-w-0">
-                <div className="db-label" style={{ marginTop: 0 }}>
-                  {i.l}
+      {/* 安全管理 / 质量管理 — 双 tab 同一套内容 */}
+      <div className="db-panel db-safety">
+        <div className="db-safety-tabs">
+          <button
+            type="button"
+            className={`db-safety-tab${sqTab === "safety" ? " active" : ""}`}
+            onClick={() => setSqTab("safety")}
+          >
+            安全管理
+          </button>
+          <button
+            type="button"
+            className={`db-safety-tab${sqTab === "quality" ? " active" : ""}`}
+            onClick={() => setSqTab("quality")}
+          >
+            质量管理
+          </button>
+        </div>
+        <div className="db-safety-body">
+          <ul className="db-safety-grid">
+            {[
+              { l: "待整改总数", v: 0, icon: dataScreenAsset("sq-pending.png") },
+              { l: "已整改总数", v: 0, icon: dataScreenAsset("sq-done.png") },
+              { l: "无风险", v: 0, icon: dataScreenAsset("sq-risk-none.png") },
+              { l: "低风险", v: 0, icon: dataScreenAsset("sq-risk-low.png") },
+              { l: "较大风险", v: 0, icon: dataScreenAsset("sq-risk-mid.png") },
+              { l: "重大风险", v: 0, icon: dataScreenAsset("sq-risk-high.png") },
+            ].map((i) => (
+              <li key={i.l} className="db-safety-item">
+                <div className="db-safety-fx">
+                  <img className="db-safety-icon" src={i.icon} alt="" draggable={false} />
+                  <div className="db-safety-box">
+                    {i.l}
+                    <div className="db-safety-num-wrap">
+                      <AnimatedNumber value={i.v} className="db-safety-num" />
+                    </div>
+                  </div>
                 </div>
-                <AnimatedNumber
-                  value={i.v}
-                  className={`db-num db-num-md ${i.c}`}
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-        {/* Donut charts row */}
-        <div className="mt-3 flex gap-3" style={{ minHeight: 120 }}>
-          <DonutMini
-            center="整改"
-            data={[
-              { name: "待整改", value: 0, color: "#ff4757" },
-              { name: "已整改", value: 0, color: "#00e88f" },
-            ]}
-          />
-          {sqTab === "safety" ? (
+              </li>
+            ))}
+          </ul>
+          <div className="db-safety-pies">
             <DonutMini
-              center="风险"
               data={[
-                { name: "无风险", value: 0, color: "#00e88f" },
-                { name: "低风险", value: 0, color: "#00d4ff" },
-                { name: "较大风险", value: 0, color: "#ff9f43" },
-                { name: "重大风险", value: 0, color: "#ff4757" },
+                { name: "待整改", value: 0, color: "#22e3bb" },
+                { name: "已整改", value: 0, color: "rgba(255,255,255,0.08)" },
               ]}
             />
-          ) : (
             <DonutMini
-              center="质量"
               data={[
-                { name: "合格", value: 0, color: "#00e88f" },
-                { name: "返工", value: 0, color: "#ff9f43" },
+                { name: "无风险", value: 0, color: "#22e3bb" },
+                { name: "较大风险", value: 0, color: "#f6b831" },
+                { name: "低风险", value: 0, color: "#3176f6" },
+                { name: "重大风险", value: 0, color: "#f66831" },
               ]}
             />
-          )}
+          </div>
         </div>
-      </P>
+      </div>
     </>
   );
 });
@@ -570,48 +499,52 @@ const LeftColumn = memo(function LeftColumn() {
 const DonutMini = memo(function DonutMini({
   data,
   center,
+  equalWhenZero = true,
 }: {
   data: { name: string; value: number; color: string }[];
   center?: string;
+  /** 全 0 时按等分色块展示（对齐参考环图） */
+  equalWhenZero?: boolean;
 }) {
-  // recharts renders nothing when all values are 0 — show a faint base ring
   const total = data.reduce((s, d) => s + d.value, 0);
   const pieData =
     total > 0
       ? data
-      : [{ name: "暂无数据", value: 1, color: "rgba(120, 160, 200, 0.18)" }];
+      : equalWhenZero
+        ? data.map((d) => ({ ...d, value: 1 }))
+        : [{ name: "暂无数据", value: 1, color: "rgba(120, 160, 200, 0.18)" }];
   return (
-    <div className="flex-1 flex flex-col items-center">
-      <div style={{ width: 100, height: 100, position: "relative" }}>
+    <div className="db-safety-pie">
+      <div className="db-safety-pie-chart">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
             <Pie
               data={pieData}
               cx="50%"
               cy="50%"
-              innerRadius={28}
-              outerRadius={42}
+              innerRadius="52%"
+              outerRadius="78%"
               dataKey="value"
               stroke="none"
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               label={false as any}
             >
               {pieData.map((d, i) => (
-                <Cell key={i} fill={d.color} opacity={0.8} />
+                <Cell key={i} fill={d.color} />
               ))}
             </Pie>
           </PieChart>
         </ResponsiveContainer>
         {center && <div className="db-donut-center">{center}</div>}
       </div>
-      <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 mt-1">
+      <div className="db-safety-pie-legend">
         {data.map((d) => (
-          <div key={d.name} className="db-legend-row">
+          <div key={d.name} className="db-safety-legend-row">
             <span
-              className="db-legend-dot"
-              style={{ background: d.color, boxShadow: `0 0 4px ${d.color}` }}
+              className="db-safety-legend-sq"
+              style={{ background: d.color }}
             />
-            <span style={{ color: "var(--db-text-sec)" }}>{d.name}</span>
+            <span>{d.name}</span>
           </div>
         ))}
       </div>
@@ -623,301 +556,33 @@ const DonutMini = memo(function DonutMini({
 
 // 展示顺序与名称以设计图为准，count 通过 key 与后端模块联动
 const SITE_ITEMS: { label: string; icon: string; key?: string }[] = [
-  { label: "考勤机", icon: "attendance_device", key: "attendance_device" },
-  { label: "塔吊监测", icon: "tower_crane", key: "tower_crane" },
-  { label: "升降机监测", icon: "elevator", key: "elevator" },
-  { label: "视频监控", icon: "video_monitor", key: "video_monitor" },
-  { label: "AI识别", icon: "ai_camera", key: "ai_camera" },
-  { label: "环境监测", icon: "env_monitor", key: "env_monitor" },
-  { label: "智能水电", icon: "water_control", key: "water_control" },
-  { label: "智能安全帽", icon: "smart_helmet", key: "smart_helmet" },
-  { label: "无人机全景", icon: "drone" },
-  { label: "全景模拟", icon: "pano" },
-  { label: "疫情防控", icon: "epidemic" },
-  { label: "安全监测", icon: "safety_check", key: "safety_check" },
-  { label: "质量监测", icon: "quality_check", key: "quality_check" },
-  { label: "高支模", icon: "high_formwork", key: "high_formwork" },
-  { label: "深基坑", icon: "deep_pit", key: "deep_pit" },
-  { label: "智能烟感", icon: "smoke" },
-  { label: "LED屏", icon: "led_board", key: "led_board" },
-  { label: "车辆冲洗", icon: "vehicle", key: "vehicle" },
+  { label: "考勤机", icon: dataScreenAsset("site-attendance.png"), key: "attendance_device" },
+  { label: "塔吊监测", icon: dataScreenAsset("site-tower.png"), key: "tower_crane" },
+  { label: "升降机监测", icon: dataScreenAsset("site-elevator.png"), key: "elevator" },
+  { label: "视频监控", icon: dataScreenAsset("site-video.png"), key: "video_monitor" },
+  { label: "AI识别", icon: dataScreenAsset("site-ai.png"), key: "ai_camera" },
+  { label: "环境监测", icon: dataScreenAsset("site-env.png"), key: "env_monitor" },
+  { label: "智能水电", icon: dataScreenAsset("site-water.png"), key: "water_control" },
+  { label: "智能安全帽", icon: dataScreenAsset("site-helmet.png"), key: "smart_helmet" },
+  { label: "无人机全景", icon: dataScreenAsset("site-drone.png") },
+  { label: "全景模拟", icon: dataScreenAsset("site-pano.png") },
+  { label: "疫情防控", icon: dataScreenAsset("site-epidemic.png") },
+  { label: "安全监测", icon: dataScreenAsset("site-safety.png"), key: "safety_check" },
+  { label: "质量监测", icon: dataScreenAsset("site-quality.png"), key: "quality_check" },
+  { label: "高支模", icon: dataScreenAsset("site-formwork.png"), key: "high_formwork" },
+  { label: "深基坑", icon: dataScreenAsset("site-pit.png"), key: "deep_pit" },
+  { label: "智能烟感", icon: dataScreenAsset("site-smoke.png") },
+  { label: "LED屏", icon: dataScreenAsset("site-led.png"), key: "led_board" },
+  { label: "车辆冲洗", icon: dataScreenAsset("site-vehicle.png"), key: "vehicle" },
 ];
 
-function ModIcon({ kind }: { kind: string }) {
-  const s = { stroke: "currentColor", strokeWidth: 1.6, fill: "none" } as const;
-  let body: React.ReactNode;
-  switch (kind) {
-    case "attendance_device":
-      body = (
-        <>
-          <rect x="7" y="3.5" width="10" height="17" rx="1.5" {...s} />
-          <circle cx="12" cy="9" r="2.2" {...s} />
-          <path d="M9.5 15.5h5" {...s} strokeLinecap="round" />
-        </>
-      );
-      break;
-    case "real_name":
-      body = (
-        <>
-          <rect x="3" y="5" width="18" height="14" rx="2" {...s} />
-          <circle cx="8.3" cy="10.3" r="1.9" {...s} />
-          <path d="M14 9.8h4M14 13h4" {...s} strokeLinecap="round" />
-        </>
-      );
-      break;
-    case "video_monitor":
-      body = (
-        <>
-          <rect x="3.5" y="7" width="13" height="9" rx="1.5" {...s} />
-          <path d="M16.5 10.5 20.5 8.5v7l-4-2" {...s} strokeLinejoin="round" />
-          <circle cx="10" cy="11.5" r="2.2" {...s} />
-        </>
-      );
-      break;
-    case "env_monitor":
-      body = (
-        <>
-          <path
-            d="M19.5 4.5c-9 0-14 5-14 13.5 0 .5 0 1 .1 1.5C14 19.5 19.5 14 19.5 4.5Z"
-            {...s}
-            strokeLinejoin="round"
-          />
-          <path d="M6 19c3.4-6.4 7.4-10.4 13.5-14.5" {...s} strokeLinecap="round" />
-        </>
-      );
-      break;
-    case "tower_crane":
-      body = (
-        <>
-          <path d="M4 7h16M12 7v13M8 20h8M12 7l-4 3" {...s} strokeLinecap="round" />
-          <path d="M18 7v3" {...s} />
-          <circle cx="18" cy="11.5" r="1.3" {...s} />
-        </>
-      );
-      break;
-    case "elevator":
-      body = (
-        <>
-          <rect x="7.5" y="3.5" width="9" height="17" rx="1.5" {...s} />
-          <path d="M10.5 9 12 7l1.5 2M13.5 15 12 17l-1.5-2" {...s} strokeLinecap="round" strokeLinejoin="round" />
-        </>
-      );
-      break;
-    case "deep_pit":
-      body = (
-        <>
-          <rect x="4.5" y="4.5" width="15" height="15" rx="1.5" {...s} />
-          <path d="M8 9h8M8 12h8M8 15h5" {...s} strokeLinecap="round" />
-        </>
-      );
-      break;
-    case "high_formwork":
-      body = (
-        <path d="M9 4.5v15M15 4.5v15M4.5 9h15M4.5 15h15" {...s} strokeLinecap="round" />
-      );
-      break;
-    case "dust_control":
-      body = (
-        <path
-          d="M4 9h9a2.5 2.5 0 1 0-2.5-2.5M4 13h13a2.5 2.5 0 1 1-2.5 2.5M4 17h7"
-          {...s}
-          strokeLinecap="round"
-        />
-      );
-      break;
-    case "water_control":
-      body = (
-        <>
-          <path
-            d="M12 4c3.4 4.1 5.8 7.2 5.8 10a5.8 5.8 0 0 1-11.6 0C6.2 11.2 8.6 8.1 12 4Z"
-            {...s}
-            strokeLinejoin="round"
-          />
-          <path d="M12.7 9.5l-1.9 2.8h2.4l-1.9 2.8" {...s} strokeLinecap="round" strokeLinejoin="round" />
-        </>
-      );
-      break;
-    case "drone":
-      body = (
-        <>
-          <rect x="10" y="10.5" width="4" height="3" rx="0.8" {...s} />
-          <path d="M10 10.5 7.8 8.3M14 10.5l2.2-2.2M10 13.5l-2.2 2.2M14 13.5l2.2 2.2" {...s} strokeLinecap="round" />
-          <circle cx="7" cy="7.5" r="1.7" {...s} />
-          <circle cx="17" cy="7.5" r="1.7" {...s} />
-          <circle cx="7" cy="16.5" r="1.7" {...s} />
-          <circle cx="17" cy="16.5" r="1.7" {...s} />
-        </>
-      );
-      break;
-    case "pano":
-      body = (
-        <>
-          <circle cx="12" cy="12" r="7.5" {...s} />
-          <path d="M4.5 12h15M12 4.5c3 2.5 3 12.5 0 15M12 4.5c-3 2.5-3 12.5 0 15" {...s} />
-        </>
-      );
-      break;
-    case "epidemic":
-      body = (
-        <>
-          <circle cx="12" cy="12" r="4" {...s} />
-          <path d="M12 5.5V8M12 16v2.5M5.5 12H8M16 12h2.5M7.4 7.4l1.8 1.8M14.8 14.8l1.8 1.8M16.6 7.4l-1.8 1.8M9.2 14.8l-1.8 1.8" {...s} strokeLinecap="round" />
-        </>
-      );
-      break;
-    case "smoke":
-      body = (
-        <>
-          <circle cx="12" cy="9" r="4.5" {...s} />
-          <path d="M10.5 9h3M9 16.5h6M10 19.5h4" {...s} strokeLinecap="round" />
-        </>
-      );
-      break;
-    case "elec_control":
-      body = (
-        <path d="M13 3 6 13.5h5L11 21l7-10.5h-5L13 3Z" {...s} strokeLinejoin="round" />
-      );
-      break;
-    case "smart_helmet":
-      body = (
-        <>
-          <path d="M5 15.5a7 7 0 0 1 14 0" {...s} />
-          <path d="M3.5 15.5h17M10 8.7v-2.2h4v2.2" {...s} strokeLinecap="round" />
-        </>
-      );
-      break;
-    case "ai_camera":
-      body = (
-        <>
-          <circle cx="12" cy="10" r="3" {...s} />
-          <path d="M8 17.5c.7-2.4 2.2-3.6 4-3.6s3.3 1.2 4 3.6" {...s} strokeLinecap="round" />
-          <path d="M4.5 4.5h3M4.5 4.5v3M19.5 4.5h-3M19.5 4.5v3M4.5 19.5h3M4.5 19.5v-3M19.5 19.5h-3M19.5 19.5v-3" {...s} strokeLinecap="round" />
-        </>
-      );
-      break;
-    case "vehicle":
-      body = (
-        <>
-          <path d="M5 15 6.5 10h11L19 15" {...s} strokeLinejoin="round" />
-          <rect x="4" y="15" width="16" height="3.5" rx="1" {...s} />
-          <path d="M7 18.5v1.5M17 18.5v1.5" {...s} strokeLinecap="round" />
-        </>
-      );
-      break;
-    case "material":
-      body = (
-        <>
-          <path d="M12 3.5 20 8v8l-8 4.5L4 16V8l8-4.5Z" {...s} strokeLinejoin="round" />
-          <path d="M4 8l8 4.5L20 8M12 12.5v8" {...s} />
-        </>
-      );
-      break;
-    case "quality_check":
-      body = (
-        <>
-          <circle cx="10.5" cy="10.5" r="4.5" {...s} />
-          <path d="m14 14 5.5 5.5" {...s} strokeLinecap="round" />
-        </>
-      );
-      break;
-    case "safety_check":
-      body = (
-        <>
-          <path d="M12 3.5 19 6v6c0 4.4-3 7.4-7 8.5-4-1.1-7-4.1-7-8.5V6l7-2.5Z" {...s} strokeLinejoin="round" />
-          <path d="m9 11.8 2.2 2.2 4-4.4" {...s} strokeLinecap="round" strokeLinejoin="round" />
-        </>
-      );
-      break;
-    case "led_board":
-      body = (
-        <>
-          <rect x="4" y="5" width="16" height="10.5" rx="1.5" {...s} />
-          <path d="M8 8.8h5M8 11.8h7M9 19.5h6M12 15.5v4" {...s} strokeLinecap="round" />
-        </>
-      );
-      break;
-    default:
-      body = (
-        <>
-          <rect x="5" y="5" width="14" height="14" rx="2" {...s} />
-          <path d="M9 12h6" {...s} strokeLinecap="round" />
-        </>
-      );
-  }
-  return (
-    <svg width="28" height="28" viewBox="0 0 24 24" aria-hidden="true">
-      {body}
-    </svg>
-  );
-}
-
-// ── Personnel alert icons (solid style, by index) ────────────────────────
-
-function AlertIcon({ idx }: { idx: number }) {
-  const f = { fill: "currentColor" } as const;
-  const w = { fill: "#eaf7ff" } as const;
-  let body: React.ReactNode;
-  switch (idx) {
-    case 0: // person + gear (manager attendance)
-      body = (
-        <>
-          <circle cx="10" cy="7.5" r="3.5" {...f} />
-          <path d="M3.5 18.5a6.5 6.5 0 0 1 13 0Z" {...f} />
-          <path
-            d="M17.8 12.9v-1.2M17.8 21.9v-1.2M13.3 17.4h-1.2M23.5 17.4h-1.2M14.6 14.2l-.9-.9M21.9 21.5l-.9-.9M21 14.2l.9-.9M13.7 21.5l.9-.9"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-          />
-          <circle cx="17.8" cy="17.4" r="2.6" {...f} />
-          <circle cx="17.8" cy="17.4" r="1" {...w} />
-        </>
-      );
-      break;
-    case 1: // id card (person-id mismatch)
-      body = (
-        <>
-          <rect x="3" y="6" width="18" height="13" rx="1.5" {...f} />
-          <circle cx="8" cy="11" r="1.8" {...w} />
-          <path d="M5.6 15.8a2.7 2.7 0 0 1 4.8 0Z" {...w} />
-          <rect x="13" y="9.3" width="5.2" height="1.5" rx="0.7" {...w} />
-          <rect x="13" y="12.4" width="5.2" height="1.5" rx="0.7" {...w} />
-        </>
-      );
-      break;
-    case 2: // phone + location pin (location off)
-      body = (
-        <>
-          <rect x="7.8" y="3" width="8.4" height="18" rx="1.8" {...f} />
-          <path
-            d="M12 7.6c-1.8 0-3.2 1.4-3.2 3.1 0 2.3 3.2 5.2 3.2 5.2s3.2-2.9 3.2-5.2c0-1.7-1.4-3.1-3.2-3.1Z"
-            {...w}
-          />
-          <circle cx="12" cy="10.8" r="1.1" {...f} />
-        </>
-      );
-      break;
-    default: // phone + waveform (process terminated)
-      body = (
-        <>
-          <rect x="7.8" y="3" width="8.4" height="18" rx="1.8" {...f} />
-          <path
-            d="M9.6 12h1.3l1-2.1 1.5 4.2 1-2.1h1.2"
-            stroke="#eaf7ff"
-            strokeWidth="1.3"
-            fill="none"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </>
-      );
-  }
-  return (
-    <svg width="32" height="32" viewBox="0 0 24 24" aria-hidden="true">
-      {body}
-    </svg>
-  );
-}
+// 展示顺序与切图以设计图为准（对齐 tg .staff .numBox）
+const STAFF_ALERT_ITEMS: { label: string; icon: string }[] = [
+  { label: "管理人员出勤预警", icon: dataScreenAsset("alert-mgmt.png") },
+  { label: "人证不相似预警", icon: dataScreenAsset("alert-id.png") },
+  { label: "手机定位关闭预警", icon: dataScreenAsset("alert-location.png") },
+  { label: "手机进程终止预警", icon: dataScreenAsset("alert-process.png") },
+];
 
 // ── Right column ─────────────────────────────────────────────────────────
 
@@ -927,15 +592,23 @@ const RightColumn = memo(function RightColumn() {
   const { data: alertsToday, isLoading: alertLoading } = useDashboardAlertsToday();
 
   const alertData = useMemo(() => {
-    if (!alerts30d) return [];
-    return [
-      { name: "AI识别预警", value: alerts30d.pending, color: "#00d4ff" },
-      { name: "塔吊监测预警", value: alerts30d.resolved, color: "#a29bfe" },
-      { name: "升降机预警", value: alerts30d.lowRisk, color: "#74b9ff" },
-      { name: "环境监测预警", value: alerts30d.mediumRisk, color: "#ff9f43" },
-      { name: "质量监测预警", value: alerts30d.noRisk, color: "#ffd43b" },
-      { name: "安全监测预警", value: alerts30d.highRisk, color: "#00e88f" },
+    const colors = [
+      "#3A7BEB",
+      "#7C7BE1",
+      "#88AAFF",
+      "#FFA391",
+      "#FFDC8B",
+      "#9CED7B",
+    ] as const;
+    const rows = [
+      { name: "AI识别预警", value: alerts30d?.pending ?? 0, color: colors[0] },
+      { name: "塔吊监测预警", value: alerts30d?.resolved ?? 0, color: colors[1] },
+      { name: "升降机预警", value: alerts30d?.lowRisk ?? 0, color: colors[2] },
+      { name: "环境监测预警", value: alerts30d?.mediumRisk ?? 0, color: colors[3] },
+      { name: "质量监测预警", value: alerts30d?.noRisk ?? 0, color: colors[4] },
+      { name: "安全监测预警", value: alerts30d?.highRisk ?? 0, color: colors[5] },
     ];
+    return rows;
   }, [alerts30d]);
 
   const totalAlerts = alertData.reduce((s, d) => s + d.value, 0);
@@ -943,19 +616,7 @@ const RightColumn = memo(function RightColumn() {
   return (
     <>
       {/* Smart site modules */}
-      <P
-        title="智慧工地开通项目数"
-        subtitle="SMART SITE"
-        className="flex-[2.2]"
-        extra={
-          <span
-            className="db-num db-num-sm"
-            style={{ marginLeft: "auto" }}
-          >
-            <AnimatedNumber value={smartSite?.deviceCount ?? 0} className="db-num db-num-sm" /> 台考勤机
-          </span>
-        }
-      >
+      <P title="智慧工地开通项目数" className="db-right-projects">
         {siteLoading && !smartSite ? (
           <div className="db-skeleton-block">
             <div className="db-skeleton-bar" style={{ width: "95%" }} />
@@ -967,13 +628,11 @@ const RightColumn = memo(function RightColumn() {
         <div className="db-grid-site">
           {SITE_ITEMS.map((it) => (
             <div key={it.label} className="db-site-item">
-              <div className="db-site-icon">
-                <ModIcon kind={it.icon} />
-              </div>
-              <div className="min-w-0">
+              <img className="db-site-icon" src={it.icon} alt="" draggable={false} />
+              <div className="db-site-meta">
                 <AnimatedNumber
                   value={it.key ? (smartSite?.modules ?? []).find((m) => m.key === it.key)?.count ?? 0 : 0}
-                  className="db-num db-num-md"
+                  className="db-site-qty"
                 />
                 <div className="db-site-label">{it.label}</div>
               </div>
@@ -983,68 +642,66 @@ const RightColumn = memo(function RightColumn() {
         )}
       </P>
 
-      {/* 30-day alert donut */}
-      <P title="最近三十天工地预警统计" subtitle="ALERTS" className="flex-[1.3]">
-        <div className="flex items-center gap-3">
-          <div className="relative" style={{ width: 130, height: 130, flexShrink: 0 }}>
+      {/* 30-day alert donut — 对齐 tg v-circle / MaxCircle */}
+      <P title="最近三十天工地预警统计" className="db-right-stats">
+        <div className="db-right-warn">
+          <div className="db-right-warn-chart">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
-                  data={alertData}
+                  data={
+                    totalAlerts > 0
+                      ? alertData
+                      : alertData.map((d) => ({ ...d, value: 1 }))
+                  }
                   cx="50%"
                   cy="50%"
-                  innerRadius={34}
-                  outerRadius={56}
+                  innerRadius={52}
+                  outerRadius={74}
                   dataKey="value"
                   stroke="none"
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
                   label={false as any}
+                  isAnimationActive={false}
                 >
                   {alertData.map((d, i) => (
-                    <Cell key={i} fill={d.color} opacity={0.85} />
+                    <Cell key={i} fill={d.color} />
                   ))}
                 </Pie>
               </PieChart>
             </ResponsiveContainer>
-            <div
-              className="absolute inset-0 flex flex-col items-center justify-center"
-              style={{ fontFamily: "var(--db-font-num)" }}
-            >
-              <AnimatedNumber value={totalAlerts} className="db-num db-num-md db-num-scan" />
-              <span className="db-label">预警</span>
+            <div className="db-right-warn-center">
+              <div className="db-right-warn-center-row">
+                <AnimatedNumber value={totalAlerts} className="db-right-warn-num" />
+                <span className="db-right-warn-unit">次</span>
+              </div>
+              <div className="db-right-warn-sub">预警</div>
             </div>
           </div>
-          <div className="flex flex-col gap-[3px] flex-1">
-            {alertData.map((d) => (
-              <div key={d.name} className="db-legend-row">
-                <span
-                  className="db-legend-dot"
-                  style={{
-                    background: d.color,
-                    boxShadow: `0 0 5px ${d.color}`,
-                  }}
-                />
-                <span style={{ color: "var(--db-text-sec)" }}>{d.name}</span>
-                <span
-                  className="ml-auto"
-                  style={{
-                    color: "var(--db-text)",
-                    fontFamily: "var(--db-font-num)",
-                    fontWeight: 600,
-                  }}
-                >
-                  {d.value > 0
-                    ? `${((d.value / Math.max(totalAlerts, 1)) * 100).toFixed(0)}%`
-                    : "0%"}
-                </span>
-              </div>
-            ))}
+          <div className="db-right-warn-legend">
+            {alertData.map((d) => {
+              const pct =
+                totalAlerts > 0
+                  ? `${((d.value / totalAlerts) * 100).toFixed(0)}%`
+                  : "0%";
+              return (
+                <div key={d.name} className="db-right-warn-legend-row">
+                  <span
+                    className="db-right-warn-legend-dot"
+                    style={{ background: d.color }}
+                  />
+                  <span className="db-right-warn-legend-name">
+                    {d.name}&nbsp;{pct}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </div>
       </P>
 
       {/* Today personnel alerts */}
-      <P title="今日人员预警" subtitle="TODAY" className="flex-1">
+      <P title="今日人员预警" className="db-right-staff">
         {alertLoading && !alertsToday ? (
           <div className="db-skeleton-block">
             <div className="db-skeleton-bar" style={{ width: "80%" }} />
@@ -1052,17 +709,29 @@ const RightColumn = memo(function RightColumn() {
           </div>
         ) : (
         <div className="db-alert-grid">
-          {(alertsToday?.items ?? []).map((item, idx) => (
-            <div key={item.label} className="db-alert-item">
-              <div className="db-alert-icon">
-                <AlertIcon idx={idx} />
+          {STAFF_ALERT_ITEMS.map((it) => {
+            const count =
+              alertsToday?.items.find((x) => x.label === it.label)?.count ?? 0;
+            return (
+              <div key={it.label} className="db-alert-item">
+                <img
+                  className="db-alert-icon"
+                  src={it.icon}
+                  alt=""
+                  draggable={false}
+                />
+                <div className="db-alert-meta">
+                  <div className="db-alert-count-row">
+                    <AnimatedNumber value={count} className="db-alert-count" />
+                    {count > 0 ? (
+                      <span className="db-alert-unit">次</span>
+                    ) : null}
+                  </div>
+                  <div className="db-alert-label">{it.label}</div>
+                </div>
               </div>
-              <div className="db-alert-meta">
-                <AnimatedNumber value={item.count} className="db-num db-num-md" />
-                <div className="db-alert-label">{item.label}</div>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
         )}
       </P>
@@ -1072,70 +741,68 @@ const RightColumn = memo(function RightColumn() {
 
 // ── Bottom chart ─────────────────────────────────────────────────────────
 
-const tooltipStyle = {
-  background: "rgba(5,16,32,0.96)",
-  border: "1px solid rgba(0,229,255,0.35)",
-  borderRadius: 4,
-  color: "#e8f4ff",
-  fontSize: 11,
-  boxShadow: "0 0 20px rgba(0,229,255,0.15)",
-};
-
 const BottomChart = memo(function BottomChart() {
   const { data } = useDashboardAttendance30d();
+  const chartData = data ?? [];
 
   return (
-    <div className="db-panel" style={{ padding: "8px 14px" }}>
-      <div className="db-corner-bl" />
-      <div className="db-corner-br" />
-      <div className="db-title">
-        <span className="db-title-text">最近三十天考勤统计</span>
-        <span className="db-title-sub">ATTENDANCE</span>
-        <span className="db-title-line" />
+    <div className="db-panel db-att30">
+      <div className="db-att30-title">
+        <span className="db-att30-title-text">最近三十天考勤统计</span>
       </div>
-      <div style={{ height: 180 }}>
+      <div className="db-att30-chart">
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart
-            data={data ?? []}
-            margin={{ top: 4, right: 12, bottom: 0, left: 0 }}
+          <LineChart
+            data={chartData}
+            margin={{ top: 18, right: 18, bottom: 6, left: 4 }}
           >
-            <defs>
-              <linearGradient id="areaFill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#00e5ff" stopOpacity={0.45} />
-                <stop offset="60%" stopColor="#0088ff" stopOpacity={0.12} />
-                <stop offset="100%" stopColor="#0088ff" stopOpacity={0.01} />
-              </linearGradient>
-            </defs>
+            <CartesianGrid
+              stroke="rgba(255, 255, 255, 0.55)"
+              vertical={false}
+              strokeDasharray="0"
+            />
             <XAxis
               dataKey="date"
-              tick={{ fill: "#7fa4c4", fontSize: 10 }}
-              axisLine={{ stroke: "rgba(0,200,255,0.1)" }}
+              tick={{ fill: "#ffffff", fontSize: 11 }}
+              axisLine={{ stroke: "rgba(140, 160, 210, 0.65)" }}
               tickLine={false}
-              tickFormatter={(v: string) => v.slice(5)}
+              interval={3}
+              minTickGap={8}
             />
             <YAxis
-              tick={{ fill: "#7fa4c4", fontSize: 10 }}
+              tick={{ fill: "#ffffff", fontSize: 11 }}
               axisLine={false}
               tickLine={false}
-              width={30}
+              width={36}
+              allowDecimals={false}
+              domain={[0, (max: number) => (max <= 0 ? 100 : Math.ceil(max / 20) * 20)]}
+              ticks={
+                chartData.every((d) => !d.count)
+                  ? [0, 20, 40, 60, 80, 100]
+                  : undefined
+              }
             />
-            <Tooltip contentStyle={tooltipStyle} />
-            <Area
-              type="monotone"
-              dataKey="count"
-              stroke="#00e5ff"
-              strokeWidth={2.5}
-              fill="url(#areaFill)"
-              dot={false}
-              activeDot={{
-                r: 5,
-                fill: "#00e5ff",
-                stroke: "#050d16",
-                strokeWidth: 2,
+            <Tooltip
+              contentStyle={{
+                background: "rgba(4, 35, 82, 0.96)",
+                border: "1px solid rgba(4, 100, 180, 0.55)",
+                borderRadius: 4,
+                color: "#ffffff",
+                fontSize: 12,
               }}
-              name="出勤人数"
+              labelStyle={{ color: "#ffffff" }}
             />
-          </AreaChart>
+            <Line
+              type="linear"
+              dataKey="count"
+              name="出勤人数"
+              stroke="#91cc75"
+              strokeWidth={2}
+              dot={{ r: 3.5, fill: "#91cc75", strokeWidth: 0 }}
+              activeDot={{ r: 5, fill: "#91cc75", stroke: "#044087", strokeWidth: 1 }}
+              isAnimationActive={false}
+            />
+          </LineChart>
         </ResponsiveContainer>
       </div>
     </div>
@@ -1145,7 +812,6 @@ const BottomChart = memo(function BottomChart() {
 // ── Main Dashboard ───────────────────────────────────────────────────────
 
 export function MainDashboard() {
-  const navigate = useNavigate();
   const { data: projects } = useDashboardProjectsMap();
   const [selected, setSelected] = useState<MapProject | null>(null);
   const [mapReady, setMapReady] = useState(false);
@@ -1218,47 +884,43 @@ export function MainDashboard() {
       <ParticleBackground />
 
       <div className="db-content">
-        {/* Header */}
-        <div className="db-header">
+        {/* Header — reference layout: brand left / title center / time+fullscreen right */}
+        <div className="db-header db-header-enterprise">
           <div className="db-header-left">
-            <button
-              className="db-header-back"
-              onClick={() => navigate({ to: "/app/admin/projects" })}
-            >
-              ← 返回
-            </button>
-            <HeaderFullscreen />
+            <div className="db-brand">
+              <span className="db-brand-mark">山</span>
+              <div className="db-brand-text">
+                <span className="db-brand-name">山淮筑</span>
+                <span className="db-brand-sub">SHANHUAI.TOP</span>
+              </div>
+            </div>
           </div>
 
           <div className="db-header-center">
             <div className="db-header-title">智慧工地驾驶舱</div>
-            <div className="db-header-subtitle">SMART CONSTRUCTION COMMAND CENTER</div>
-            <div className="db-header-title-line" />
-            <div className="db-header-deco" />
           </div>
 
           <div className="db-header-right">
-            <div className="db-header-search">
-              <input
-                type="text"
-                placeholder="搜索项目 / 地点"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-              <span className="db-header-search-icon">⌕</span>
-            </div>
             <HeaderClock />
+            <HeaderFullscreen />
           </div>
         </div>
 
-        {/* Body: left(full) | center-top(map) + center-bottom(chart) | right(full) */}
+        {/* Body: left(full) | center-top(map+search) + center-bottom(chart) | right(full) */}
         <div className="db-body">
           <div className="db-col-left">
             <LeftColumn />
           </div>
 
           <div className="db-col-center-top">
-            {/* Transparent - map shows through from bottom layer */}
+            <div className="db-map-search">
+              <input
+                type="text"
+                placeholder="项目名称搜索"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
           </div>
 
           <div className="db-col-center-bottom">

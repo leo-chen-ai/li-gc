@@ -112,6 +112,14 @@ html:has(.dashboard-root) #root {
   position: absolute;
   inset: 0;
   z-index: 0;
+  background: #091220;
+  pointer-events: auto;
+}
+
+.db-bg-map .db-bmap,
+.db-bg-map .db-amap,
+.db-bg-map .amap-container {
+  background: #091220 !important;
 }
 
 /* ── Content overlay (top layer, transparent to mouse except panels) ───── */
@@ -325,10 +333,10 @@ html:has(.dashboard-root) #root {
 .db-body {
   flex: 1;
   display: grid;
-  grid-template-columns: 410px 1fr 410px;
+  grid-template-columns: 508px 1fr 508px;
   grid-template-rows: 1fr auto;
-  gap: 8px;
-  padding: 6px 14px 8px;
+  gap: 0;
+  padding: 0;
   min-height: 0;
   overflow: hidden;
   pointer-events: none;
@@ -338,8 +346,13 @@ html:has(.dashboard-root) #root {
   grid-row: 1 / 3;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0;
   overflow: hidden;
+  padding: 0;
+  margin: 0;
+  background: url("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/data-screen/side-bg.png") center / 100% 100% no-repeat;
+  border: none;
+  box-shadow: none;
 }
 
 .db-col-center-top {
@@ -353,19 +366,25 @@ html:has(.dashboard-root) #root {
 .db-col-center-bottom {
   grid-column: 2;
   grid-row: 2;
+  padding: 0 8px 6px;
 }
 
 .db-col-right {
   grid-row: 1 / 3;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0;
   overflow: hidden;
+  padding: 0;
+  margin: 0;
+  background: url("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/data-screen/side-bg.png") center / 100% 100% no-repeat;
+  border: none;
+  box-shadow: none;
 }
 .db-col-right .db-grid-site {
-  flex: 1;
+  flex: 0 0 auto;
   min-height: 0;
-  align-content: space-evenly;
+  align-content: start;
 }
 /* Right column: content area fills panel, items spread evenly (title stays at top) */
 .db-col-right .db-content-area {
@@ -373,7 +392,7 @@ html:has(.dashboard-root) #root {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  justify-content: space-evenly;
+  justify-content: flex-start;
 }
 /* Left column: content area also fills panel for balanced spacing */
 .db-col-left .db-content-area {
@@ -735,78 +754,134 @@ html:has(.dashboard-root) #root {
   border-color: rgba(0, 212, 255, 0.12);
 }
 
-/* ── Smart site module grid (right column) ─────────────────────────────── */
+/* ── Smart site module grid — 对齐 tg el-row gutter:20 + numBox 140×55 ── */
 .db-grid-site {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 14px 8px;
+  column-gap: 20px;
+  row-gap: 6px;
+  margin: 15px 12px 0 10px;
+  padding-bottom: 15px;
+  box-sizing: border-box;
 }
 .db-site-item {
   display: flex;
   align-items: center;
-  gap: 7px;
-  min-width: 0;
+  width: 140px;
+  max-width: 100%;
+  height: 55px;
+  margin: 0;
+  box-sizing: border-box;
+  gap: 0;
+  border-radius: 4px;
+  background: url("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/data-screen/site-item-bg.png") left center / 55px 55px no-repeat;
 }
 .db-site-icon {
-  width: 36px;
-  height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  width: 28px;
+  height: 27px;
+  margin: 0 15px;
+  object-fit: contain;
   flex-shrink: 0;
-  color: var(--db-accent);
-  background: rgba(0, 160, 255, 0.06);
-  border: 1px solid rgba(0, 200, 255, 0.28);
-  border-radius: 3px;
-  box-shadow: inset 0 0 8px rgba(0, 200, 255, 0.1), 0 0 6px rgba(0, 200, 255, 0.12);
-  filter: drop-shadow(0 0 3px rgba(0, 200, 255, 0.35));
+  display: block;
+}
+.db-site-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  line-height: 1.15;
+}
+.db-site-qty {
+  margin-left: 5px;
+  font-family: digital-7regular, "Rajdhani", monospace !important;
+  font-size: 18px !important;
+  font-weight: 500 !important;
+  color: #ffffff !important;
+  line-height: 20px;
+  background: none !important;
+  text-shadow: none !important;
+  -webkit-text-fill-color: #ffffff;
 }
 .db-site-label {
-  margin-top: 2px;
-  font-size: 11px;
-  color: var(--db-text-sec);
+  margin-top: 0;
+  margin-left: 5px;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: PingFangSC-Medium, "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: #ffffff;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: 18px;
 }
+/* 今日人员预警 — 对齐 tg .staff .numBox */
 .db-alert-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 0;
+  gap: 0;
 }
 .db-alert-item {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
+  width: 227px;
+  height: 84px;
+  margin-top: 5px;
+  box-sizing: border-box;
   min-width: 0;
-  padding: 8px 6px;
+  padding-left: 21px;
+  border-radius: 4px;
 }
 .db-alert-icon {
-  width: 54px;
-  height: 54px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  width: 50px;
+  height: 50px;
   flex-shrink: 0;
-  color: #38c7f5;
-  border: 1px dashed rgba(0, 212, 255, 0.5);
-  filter: drop-shadow(0 0 4px rgba(0, 200, 255, 0.45));
+  object-fit: contain;
+  border: 1px dashed #666;
+  margin-right: 5px;
+  box-sizing: border-box;
 }
 .db-alert-meta {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 2px;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0;
+  text-align: left;
+}
+.db-alert-count-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0;
+}
+.db-alert-count {
+  font-family: digital-7regular, "Rajdhani", monospace !important;
+  font-size: 26px !important;
+  font-weight: 500 !important;
+  color: #ffffff !important;
+  line-height: 1;
+  background: none !important;
+  text-shadow: none !important;
+  -webkit-text-fill-color: #ffffff;
+}
+.db-alert-unit {
+  font-size: 14px;
+  color: #ffffff;
 }
 .db-alert-label {
-  font-size: 12px;
-  color: var(--db-text);
+  font-size: 16px;
+  font-family: PingFangSC-Medium, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-weight: 500;
+  color: #ffffff;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
+  line-height: 22px;
 }
 
 /* ── Attendance feed scroll ────────────────────────────────────────────── */
@@ -1468,9 +1543,9 @@ html:has(.dashboard-root) #root {
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  background: url("/project-board-bg.png") no-repeat center center;
+  background: url("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/data-screen/board-bg-ref.png") no-repeat center center;
   background-size: cover;
-  opacity: 0.85;
+  opacity: 0.92;
 }
 
 /* Center radial glow — makes the background less flat black */
@@ -2225,4 +2300,2131 @@ html:has(.dashboard-root) #root {
   font-size: 11px;
   letter-spacing: 6px;
   color: var(--db-text-dim);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Reference skin (姜太公企业驾驶舱视觉对齐) — assets on OSS data-screen/*
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.db-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+.db-brand-mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #0f9b88, #0f6b5d);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 800;
+  box-shadow: 0 0 12px rgba(0, 200, 160, 0.35);
+}
+.db-brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+.db-brand-name {
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  color: #ffd24d;
+  text-shadow: 0 0 10px rgba(255, 210, 77, 0.45);
+}
+.db-brand-sub {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #ffffff;
+  opacity: 0.92;
+}
+.db-brand-sm .db-brand-mark {
+  width: 26px;
+  height: 26px;
+  font-size: 12px;
+  border-radius: 4px;
+}
+.db-brand-sm .db-brand-name {
+  font-size: 15px;
+  letter-spacing: 1px;
+}
+.db-brand-sm .db-brand-sub {
+  font-size: 9px;
+}
+
+/* Enterprise cockpit header — 使用用户提供的顶部背景图片 */
+.db-header.db-header-enterprise {
+  height: 88px;
+  padding: 0 28px 6px;
+  align-items: center;
+  background:
+    url("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/data-screen/header-bg.png") center top / 100% 100% no-repeat,
+    linear-gradient(180deg, rgba(0, 10, 24, 0.92) 0%, rgba(0, 10, 24, 0.35) 70%, transparent 100%);
+}
+.db-header.db-header-enterprise::before,
+.db-header.db-header-enterprise::after {
+  display: none;
+}
+.db-header.db-header-enterprise .db-header-left,
+.db-header.db-header-enterprise .db-header-right {
+  height: auto;
+  padding-top: 0;
+  align-self: center;
+  position: relative;
+  z-index: 2;
+}
+.db-header.db-header-enterprise .db-header-center {
+  padding-top: 0;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  z-index: 1;
+}
+.db-header.db-header-enterprise .db-header-center::before,
+.db-header.db-header-enterprise .db-header-center::after {
+  display: none;
+}
+.db-header.db-header-enterprise .db-header-title {
+  text-align: center;
+  width: 100%;
+  height: 72px;
+  border: 0;
+  font-size: 44px;
+  font-family: youshebiaotiheiregular, "YouSheBiaoTiHei", sans-serif;
+  font-weight: 600;
+  color: #fff;
+  line-height: 80px;
+  letter-spacing: 4px;
+  padding-left: 0;
+  background: linear-gradient(180deg, #fff, #80c2f2);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: none;
+  text-shadow: none;
+}
+
+/* Project board header — 同一张用户顶部背景图 */
+.db-header.db-header-board {
+  height: 68px;
+  padding: 0 18px;
+  align-items: center;
+  background:
+    url("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/data-screen/header-bg.png") center top / 100% 100% no-repeat,
+    linear-gradient(180deg, rgba(0, 12, 28, 0.95) 0%, rgba(0, 12, 28, 0.2) 80%, transparent 100%);
+}
+.db-header.db-header-board::before,
+.db-header.db-header-board::after {
+  display: none;
+}
+.db-header.db-header-board .db-header-left,
+.db-header.db-header-board .db-header-right {
+  height: auto;
+  padding-top: 0;
+  gap: 12px;
+  align-self: center;
+  position: relative;
+  z-index: 2;
+}
+.db-header.db-header-board .db-header-left {
+  justify-content: flex-start;
+  padding-right: 0;
+}
+.db-header.db-header-board .db-header-center {
+  padding: 0 8px;
+  align-self: center;
+  position: relative;
+  z-index: 1;
+}
+.db-header.db-header-board .db-header-center::before,
+.db-header.db-header-board .db-header-center::after {
+  display: none;
+}
+.db-header-title-board {
+  font-size: 36px !important;
+  font-weight: 400 !important;
+  font-family: youshebiaotiheiregular, YouSheBiaoTiHei, "优设标题黑", sans-serif !important;
+  width: 100%;
+  max-width: 920px;
+  text-align: center;
+  line-height: 54px !important;
+  letter-spacing: 1px !important;
+  padding-left: 0 !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: transparent !important;
+  background: linear-gradient(180deg, #fff 32%, #117eff) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  filter: none !important;
+  text-shadow: none !important;
+}
+
+.db-header-time {
+  white-space: nowrap;
+  font-size: 14px;
+  letter-spacing: 1px;
+  border: none;
+  background: transparent;
+  backdrop-filter: none;
+  padding: 0;
+  color: #ffffff;
+  text-shadow: 0 0 8px rgba(255, 255, 255, 0.25);
+  font-family: var(--db-font);
+  font-weight: 500;
+}
+
+.db-header-fs {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #ffffff;
+  cursor: pointer;
+  pointer-events: auto;
+  opacity: 0.92;
+  transition: opacity 0.15s, color 0.15s;
+}
+.db-header-fs:hover {
+  opacity: 1;
+  color: #9fe8ff;
+}
+
+/* Map-centered project search (reference layout) */
+.db-col-center-top {
+  position: relative;
+  display: flex;
+  justify-content: stretch;
+  align-items: flex-start;
+  padding: 8px 12px 0;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+.db-map-search {
+  position: relative;
+  pointer-events: auto;
+  width: 100%;
+  flex: 1 1 auto;
+}
+.db-map-search input {
+  width: 100%;
+  height: 40px;
+  padding: 0 24px;
+  border: 1px solid rgba(160, 190, 220, 0.35);
+  border-radius: 999px;
+  background: rgba(28, 38, 55, 0.58);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0.5px;
+  outline: none;
+  box-shadow: none;
+  backdrop-filter: blur(2px);
+}
+.db-map-search input::placeholder {
+  color: #ffffff;
+  opacity: 0.95;
+}
+.db-map-search input:focus {
+  border-color: rgba(180, 210, 235, 0.55);
+  background: rgba(28, 38, 55, 0.68);
+  box-shadow: none;
+}
+.db-map-search-icon {
+  display: none;
+}
+
+/* Panel title bar — 使用安全管理.114ce210.png */
+.db-title.db-title-bar {
+  height: 36px;
+  margin: 0 0 10px;
+  padding: 0 12px 0 42px;
+  border-bottom: none;
+  background: url("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/data-screen/panel-title-safety.png") left center / 100% 100% no-repeat;
+  color: #fff;
+  font-size: 14px;
+  letter-spacing: 2px;
+  position: relative;
+}
+.db-title.db-title-bar::before {
+  display: none;
+}
+.db-title.db-title-bar .db-title-sub {
+  display: none;
+}
+.db-title.db-title-bar .db-tabs {
+  margin-left: auto;
+}
+.db-duo-header {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.db-duo-header .db-title.db-title-bar {
+  margin-bottom: 0;
+}
+
+/* Personnel metric cards */
+.db-mod.db-mod-card {
+  background:
+    linear-gradient(180deg, rgba(0, 90, 160, 0.22), rgba(0, 20, 45, 0.35)),
+    url("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/data-screen/card-frame.png") center / 100% 100% no-repeat;
+  border: 1px solid rgba(0, 180, 255, 0.28);
+  border-radius: 2px;
+  padding: 8px 4px 6px;
+  gap: 2px;
+  min-height: 78px;
+  box-shadow: inset 0 0 12px rgba(0, 140, 255, 0.12);
+}
+.db-mod-icon {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 4px rgba(0, 220, 255, 0.55));
+  margin-bottom: 2px;
+}
+.db-mod.db-mod-card .db-label {
+  font-size: 10px;
+  color: rgba(180, 220, 245, 0.85);
+}
+
+/* Project board panel titles — 同安全管理 tab 图 */
+.pb-title.pb-title-bar-img {
+  height: 36px;
+  margin: 0 0 10px;
+  padding: 0 10px 0 42px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: none;
+  background: url("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/data-screen/panel-title-safety.png") left center / 100% 100% no-repeat;
+}
+.pb-title.pb-title-bar-img .pb-title-text {
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 2px;
+}
+.pb-title.pb-title-bar-img .pb-title-sub {
+  display: none;
+}
+
+/* Trapezoid tabs closer to reference */
+.db-board-tabs {
+  justify-content: center;
+  gap: 6px;
+  padding: 2px 18px 12px;
+}
+.db-board-tab {
+  --cut: 10px;
+  min-width: 98px;
+  padding: 9px 14px;
+  background: linear-gradient(180deg, #9fd8ff 0%, #2f8dff 18%, #0a4fad 55%, #4db8ff 100%);
+  clip-path: polygon(
+    var(--cut) 0%,
+    calc(100% - var(--cut)) 0%,
+    100% 100%,
+    0% 100%
+  );
+}
+.db-board-tab::before {
+  inset: 2px 3px 2px 3px;
+  clip-path: polygon(
+    var(--cut) 0%,
+    calc(100% - var(--cut)) 0%,
+    100% 100%,
+    0% 100%
+  );
+  background:
+    radial-gradient(120% 80% at 50% 120%, rgba(0, 180, 255, 0.45), transparent 60%),
+    linear-gradient(180deg, #0a3f88 0%, #061f4a 58%, #0b4f9c 100%);
+}
+.db-board-tab > span::before,
+.db-board-tab > span::after {
+  content: "";
+  width: 0;
+  height: 0;
+  border-style: solid;
+  color: transparent;
+  text-shadow: none;
+}
+.db-board-tab > span::before {
+  left: -14px;
+  border-width: 5px 0 5px 7px;
+  border-color: transparent transparent transparent #59d7ff;
+}
+.db-board-tab > span::after {
+  right: -14px;
+  border-width: 5px 7px 5px 0;
+  border-color: transparent #59d7ff transparent transparent;
+}
+.db-board-tab.active {
+  background: linear-gradient(180deg, #b9ffe4 0%, #1ed9a0 20%, #08986a 58%, #6dffc8 100%);
+}
+.db-board-tab.active::before {
+  background:
+    radial-gradient(120% 80% at 50% 120%, rgba(0, 255, 180, 0.4), transparent 60%),
+    linear-gradient(180deg, #0b7a55 0%, #064a36 55%, #0ea872 100%);
+}
+.db-board-tab.active > span::before {
+  border-color: transparent transparent transparent #d8ffe9;
+}
+.db-board-tab.active > span::after {
+  border-color: transparent #d8ffe9 transparent transparent;
+}
+
+/* Left/right: flush to screen edges; tab title spans full side-bg width */
+.db-col-left .db-panel,
+.db-col-right .db-panel {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
+  width: 100%;
+}
+.db-col-left .db-panel::before,
+.db-col-left .db-panel::after,
+.db-col-right .db-panel::before,
+.db-col-right .db-panel::after,
+.db-col-left .db-panel-bottom,
+.db-col-right .db-panel-bottom,
+.db-col-left .db-panel-grid,
+.db-col-right .db-panel-grid,
+.db-col-left .db-stream,
+.db-col-right .db-stream,
+.db-col-left .db-corner-bl,
+.db-col-left .db-corner-br,
+.db-col-right .db-corner-bl,
+.db-col-right .db-corner-br {
+  display: none !important;
+}
+
+/* Title/tab bars: full column width (= side-bg width) */
+.db-col-left .db-title.db-title-bar {
+  width: 100%;
+  margin: 0;
+  height: 36px;
+  padding: 0 12px 0 42px;
+  box-sizing: border-box;
+  background: url("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/data-screen/panel-title-safety.png") center / 100% 100% no-repeat;
+}
+/* 右边标题条与左边企业综合数据同款 tab 图 */
+.db-col-right .db-title.db-title-bar {
+  width: 100%;
+  margin: 0;
+  height: 46px;
+  padding: 0 12px 0 55px;
+  box-sizing: border-box;
+  background: url("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/data-screen/panel-title.png") center / 100% 100% no-repeat;
+  font-family: youshebiaotiheiregular, YouSheBiaoTiHei, sans-serif;
+  font-size: 25px;
+  font-weight: 500;
+  line-height: 46px;
+  letter-spacing: 1px;
+  display: flex;
+  align-items: center;
+}
+.db-col-right .db-title.db-title-bar .db-title-text {
+  background: linear-gradient(180deg, #fff 38%, #119bff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+}
+.db-col-right .db-title.db-title-bar .db-title-sub {
+  display: none;
+}
+.db-col-left .db-duo-header,
+.db-col-right .db-duo-header {
+  width: 100%;
+  margin: 0;
+  gap: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+.db-col-left .db-duo-header .db-title.db-title-bar,
+.db-col-right .db-duo-header .db-title.db-title-bar {
+  width: 100%;
+  margin: 0;
+}
+
+/* Content inset only — titles stay edge-to-edge on side-bg */
+.db-col-left .db-content-area,
+.db-col-right .db-content-area {
+  padding: 6px 10px 8px;
+  box-sizing: border-box;
+}
+
+.db-col-center-bottom .db-panel {
+  border-radius: 2px;
+  padding: 6px 10px;
+  background: rgba(2, 12, 28, 0.55);
+  border: 1px solid rgba(0, 190, 255, 0.2);
+  box-shadow: none;
+}
+.db-col-center-bottom .db-panel::before,
+.db-col-center-bottom .db-panel::after,
+.db-col-center-bottom .db-panel-bottom,
+.db-col-center-bottom .db-panel-grid,
+.db-col-center-bottom .db-stream,
+.db-col-center-bottom .db-corner-bl,
+.db-col-center-bottom .db-corner-br {
+  display: none !important;
+}
+.db-col-center-bottom .db-title.db-title-bar {
+  margin-bottom: 4px;
+  height: 32px;
+}
+
+/* 最近三十天考勤统计 — 对齐 tg .statistics / .lineCharts */
+.db-col-center-bottom .db-att30.db-panel {
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+.db-att30-title {
+  width: 100%;
+  height: 46px;
+  margin: 0;
+  padding-left: 55px;
+  box-sizing: border-box;
+  background: url("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/data-screen/panel-title-attendance.png") center / 100% 100% no-repeat;
+  font-family: youshebiaotiheiregular, YouSheBiaoTiHei, sans-serif;
+  font-size: 25px;
+  font-weight: 500;
+  line-height: 46px;
+}
+.db-att30-title-text {
+  background: linear-gradient(180deg, #fff 38%, #119bff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+.db-att30-chart {
+  width: 100%;
+  height: 240px;
+  border-radius: 4px;
+  background: linear-gradient(180deg, #044087, rgba(4, 35, 82, 0));
+  box-sizing: border-box;
+}
+
+/* Tighten metric cards — keep frame, drop extra outer chrome */
+.db-mod.db-mod-card {
+  border: none;
+  box-shadow: none;
+  min-height: 68px;
+  padding: 6px 2px 4px;
+}
+.db-col-right .db-legend-row {
+  background: transparent;
+  padding: 1px 0;
+}
+
+/* ── 企业综合数据 1:1（对齐 tg leftContent/ymContent/human） ───────────── */
+@font-face {
+  font-family: digital-7regular;
+  src:
+    url("/fonts/digital-7.woff2") format("woff2"),
+    url("/fonts/digital-7.woff") format("woff");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: youshebiaotiheiregular;
+  src:
+    url("/fonts/youshebiaotihei.woff2") format("woff2"),
+    url("/fonts/youshebiaotihei.woff") format("woff");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: DINAlternate-Bold;
+  src: url("/fonts/D-DIN-PRO.otf") format("opentype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: DINAlternate;
+  src: url("/fonts/D-DIN-PRO.otf") format("opentype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+.db-enterprise {
+  flex: 0 0 auto !important;
+}
+
+/* 标题条继续铺满侧栏宽度，不改整体左右 */
+.db-enterprise .db-title.db-title-bar {
+  width: 100% !important;
+  height: 46px !important;
+  margin: 0 !important;
+  padding: 0 12px 0 55px !important;
+  background: url("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/data-screen/panel-title.png") center / 100% 100% no-repeat !important;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 46px;
+  letter-spacing: 1px;
+}
+
+.db-col-left .db-enterprise .db-content-area {
+  display: block;
+  padding: 0 10px 8px !important;
+  justify-content: initial;
+}
+
+/* 仅内部纵向节奏：项目统计区 */
+.db-ym-content {
+  height: 136px;
+}
+
+.db-ym-grid {
+  height: calc(100% - 12px);
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-content: space-between;
+  align-items: center;
+  text-align: center;
+}
+
+.db-ym-item {
+  width: 33.33%;
+  box-sizing: border-box;
+  padding: 0;
+  text-align: center;
+}
+
+.db-ym-label {
+  font-size: 14px;
+  font-weight: 400;
+  color: #ffffff;
+  line-height: 1.3;
+  margin-bottom: 0;
+}
+
+.db-ym-value-row {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 2px;
+  margin-top: 2px;
+}
+
+.db-key-num {
+  font-family: digital-7regular, "Rajdhani", monospace;
+  color: #20e4ff !important;
+  font-weight: 700;
+  font-size: 32px !important;
+  line-height: 32px;
+  text-shadow: none;
+  background: none;
+  -webkit-text-fill-color: #20e4ff;
+}
+
+.db-ym-unit {
+  font-size: 14px;
+  font-weight: 400;
+  color: #ffffff;
+  margin-left: 1px;
+}
+
+/* human: 与上方统计区收紧，cards 100×100 */
+.db-human {
+  margin-top: 8px;
+  height: 126px;
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  text-align: center;
+}
+
+.db-human-card {
+  position: relative;
+  width: 100px;
+  height: 100px;
+  box-sizing: border-box;
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0;
+  min-height: 0;
+  border: none;
+  background: url("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/data-screen/card-frame.png") center / 100% 100% no-repeat;
+}
+
+.db-human-card::before {
+  display: none;
+}
+
+.db-human-frame {
+  margin: 0 auto;
+  width: 26px;
+  height: 26px;
+  border: 1px dashed #666;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.db-human-icon {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 3px rgba(0, 220, 255, 0.55));
+}
+
+.db-human-label {
+  margin-top: 9px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #ffffff;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.db-human-qty {
+  margin-top: 6px;
+  font-family: digital-7regular, "Rajdhani", monospace;
+  font-size: 26px !important;
+  font-weight: 700;
+  color: #35ffe5 !important;
+  line-height: 1;
+  text-shadow: none;
+  background: none;
+  -webkit-text-fill-color: #35ffe5;
+}
+
+/* ── 今日出勤 / 合同签署（compact，对齐示例图占比） ─────────────────────── */
+.db-circular {
+  flex: 0 0 auto !important;
+  height: 176px;
+  margin-top: 22px;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+.db-col-left .db-circular.db-panel {
+  padding: 0 !important;
+}
+
+.db-circular-titles {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 0 1px;
+}
+
+.db-circular-shadow {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  background: linear-gradient(
+    180deg,
+    rgba(5, 73, 152, 0),
+    rgba(22, 105, 185, 0.66)
+  );
+}
+
+.db-circular-border {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: calc(100% - 17px);
+  background: linear-gradient(90deg, #0a488c 0, #3eaccc 50%, #0a4688);
+  pointer-events: none;
+}
+
+.db-circular-icon {
+  width: 12px;
+  height: 12px;
+  margin-left: 11px;
+  flex-shrink: 0;
+  background-image: radial-gradient(circle, #3ecfff 1.2px, transparent 1.3px);
+  background-size: 4px 4px;
+  background-repeat: repeat;
+  background-position: 0 0;
+  opacity: 0.95;
+}
+
+.db-circular-text {
+  margin-left: 10px;
+  font-size: 18px;
+  font-weight: 600;
+  color: #ffffff;
+  line-height: 40px;
+  white-space: nowrap;
+}
+
+.db-circular-content {
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  border-radius: 4px;
+  margin-top: 12px;
+  height: 110px;
+  position: relative;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+.db-circular-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex: 1 1 0;
+  max-width: 248px;
+  height: 92px;
+  box-sizing: border-box;
+  padding: 0 8px 0 12px;
+}
+
+.db-circular-meta {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.db-circular-label {
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.db-circular-num-row {
+  display: flex;
+  align-items: baseline;
+  font-size: 22px;
+  font-family: DINAlternate-Bold, DINAlternate, "D-DIN-PRO", sans-serif;
+  font-weight: bold;
+  color: rgb(45, 220, 206);
+  line-height: 28px;
+}
+
+.db-circular-num {
+  font-family: DINAlternate-Bold, DINAlternate, "D-DIN-PRO", sans-serif !important;
+  font-size: 22px !important;
+  font-weight: bold !important;
+  color: rgb(45, 220, 206) !important;
+  line-height: 28px;
+  background: none !important;
+  text-shadow: none !important;
+  -webkit-text-fill-color: rgb(45, 220, 206);
+}
+
+.db-circular-unit {
+  color: rgb(45, 220, 206);
+  font-size: 20px;
+  font-family: DINAlternate-Bold, DINAlternate, "D-DIN-PRO", sans-serif;
+  font-weight: bold;
+  line-height: 28px;
+  -webkit-text-fill-color: rgb(45, 220, 206);
+}
+
+.db-circular-rate {
+  color: #ffffff;
+  font-size: 13px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.db-att-ring {
+  position: relative;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  margin-top: 0;
+}
+
+.db-att-ring > svg {
+  display: block;
+  grid-area: 1 / 1;
+}
+
+.db-att-ring-icon {
+  grid-area: 1 / 1;
+  object-fit: contain;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* 安全质量管理 — 1:1 对齐 tg .manage（禁止 flex 拉高撑间距） */
+.db-col-left .db-safety.db-panel {
+  flex: 0 0 auto !important;
+  height: auto;
+  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  padding: 0 !important;
+  overflow: visible;
+}
+
+.db-safety-tabs {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 46px;
+  flex: 0 0 46px;
+  box-sizing: border-box;
+  background: url("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/data-screen/panel-title-safety.png") center / 100% 100% no-repeat;
+}
+
+.db-safety-tab {
+  position: absolute;
+  top: 2px;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: #0087ff;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 33px;
+  height: 33px;
+  padding: 0 0 3px;
+  cursor: pointer;
+  white-space: nowrap;
+  font-family: PingFangSC-Semibold, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+.db-safety-tab:first-child {
+  left: 77px;
+  width: 100px;
+}
+
+.db-safety-tab:last-child {
+  left: 249px;
+  width: 100px;
+}
+
+.db-safety-tab.active {
+  color: #ffffff !important;
+  border-bottom: 3px solid #00fff2;
+  background: none;
+}
+
+.db-safety-tab.active::after {
+  display: none;
+}
+
+.db-safety-body {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+.db-safety-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  text-align: center;
+}
+
+.db-safety-item {
+  width: 33%;
+  margin-top: 30px;
+  box-sizing: border-box;
+  padding: 0;
+}
+
+.db-safety-fx {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0 6px;
+}
+
+.db-safety-icon {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  flex-shrink: 0;
+  display: block;
+}
+
+.db-safety-box {
+  width: 78px;
+  height: 56px;
+  border-radius: 20px;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  text-align: left;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 28px;
+  color: #ffffff;
+  white-space: nowrap;
+  box-sizing: border-box;
+}
+
+.db-safety-num-wrap {
+  width: 70px;
+  height: 35px;
+  border-radius: 18px;
+  margin-left: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.db-safety-num {
+  font-family: digital-7regular, "Rajdhani", monospace !important;
+  font-size: 30px !important;
+  font-weight: 400 !important;
+  color: #ffffff !important;
+  line-height: 35px;
+  background: none !important;
+  text-shadow: none !important;
+  -webkit-text-fill-color: #ffffff;
+}
+
+/* MaxCircle: ~240×190，环心偏左，图例靠右 */
+.db-safety-pies {
+  display: flex;
+  margin-top: 10px;
+  height: 190px;
+  flex: 0 0 190px;
+  align-items: stretch;
+}
+
+.db-safety-pie {
+  flex: 1 1 0;
+  width: 0;
+  height: 190px;
+  position: relative;
+  box-sizing: border-box;
+}
+
+.db-safety-pie-chart {
+  position: absolute;
+  left: -2px;
+  top: 2px;
+  width: 182px;
+  height: 182px;
+}
+
+.db-safety-pie-legend {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  max-width: 88px;
+}
+
+.db-safety-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #ffffff;
+  font-size: 14px;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.db-safety-legend-sq {
+  width: 18px;
+  height: 10px;
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+
+
+
+/* ── 右侧栏三块高度（对齐 tg rightContent） ───────────────────────────── */
+.db-col-right .db-right-projects.db-panel {
+  flex: 0 0 auto !important;
+  height: auto;
+  overflow: hidden;
+}
+.db-col-right .db-right-stats.db-panel {
+  flex: 0 0 auto !important;
+  height: auto;
+  min-height: 0;
+  overflow: hidden;
+}
+.db-col-right .db-right-staff.db-panel {
+  flex: 0 0 auto !important;
+  height: 240px;
+  overflow: hidden;
+}
+.db-col-right .db-right-projects .db-content-area,
+.db-col-right .db-right-stats .db-content-area,
+.db-col-right .db-right-staff .db-content-area {
+  padding: 0 !important;
+  justify-content: flex-start;
+}
+.db-col-right .db-right-staff .db-content-area {
+  padding: 4px 8px 0 !important;
+}
+
+
+/* 右侧预警环图 — 按参考图：环左、图例右，名称与百分比紧挨 */
+.db-right-warn {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 90px;
+  height: 200px;
+  margin-top: 12px;
+  padding: 0 24px 8px 28px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.db-right-warn-chart {
+  position: relative;
+  width: 168px;
+  height: 168px;
+  flex-shrink: 0;
+}
+.db-right-warn-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  pointer-events: none;
+  line-height: 1.15;
+}
+.db-right-warn-center-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 1px;
+}
+.db-right-warn-num {
+  font-family: digital-7regular, "Rajdhani", monospace !important;
+  font-size: 28px !important;
+  font-weight: 500 !important;
+  color: #ffffff !important;
+  background: none !important;
+  text-shadow: none !important;
+  -webkit-text-fill-color: #ffffff;
+  line-height: 1;
+}
+.db-right-warn-unit {
+  font-size: 14px;
+  color: #ffffff;
+}
+.db-right-warn-sub {
+  margin-top: 2px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.55);
+}
+.db-right-warn-legend {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+  flex: 0 0 auto;
+  width: auto;
+  max-width: none;
+  padding: 0;
+  box-sizing: border-box;
+}
+.db-right-warn-legend-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #ffffff;
+  font-size: 14px;
+  line-height: 20px;
+  white-space: nowrap;
+  width: auto;
+}
+.db-right-warn-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.db-right-warn-legend-name {
+  flex: none;
+}
+.db-right-warn-legend-pct {
+  flex: none;
+  margin-left: 4px;
+  text-align: left;
+  font-family: DINAlternate-Bold, DINAlternate, "D-DIN-PRO", sans-serif;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PROJECT BOARD — 1:1 cutout chrome (项目看板图)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.pb-root .pb-bg-image {
+  background: url("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/data-screen/board-page-bg.png") no-repeat center center;
+  background-size: 100% 100%;
+  opacity: 1;
+}
+
+.pb-root .pb-bg-radial,
+.pb-root .pb-bg-grid,
+.pb-root .pb-bg-hex,
+.pb-root .db-board-dots,
+.pb-root .db-board-floor {
+  display: none;
+}
+
+.pb-root .db-header.db-header-board {
+  height: 64px;
+  margin: 0;
+  padding: 0 48px 0 20px;
+  background: url("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/data-screen/board-header-bg.png") center top / 100% 100% no-repeat;
+}
+.pb-root .db-header.db-header-board .db-header-left {
+  position: relative;
+  justify-content: flex-start;
+  align-items: center;
+  padding-right: 0;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+}
+.pb-root .db-header.db-header-board .db-brand {
+  position: relative;
+  z-index: 2;
+  margin-left: 20px;
+  flex-shrink: 0;
+}
+.pb-root .db-header.db-header-board .db-header-right {
+  min-width: 0;
+  padding-left: 8px;
+  justify-content: flex-end;
+}
+.pb-root .db-header.db-header-board .db-header-center {
+  padding: 0 4px;
+}
+/* 对齐参考：time 靠向中间标题，但与标题留一点间距 */
+.pb-root .db-header.db-header-board .db-header-time {
+  position: absolute;
+  left: 290px;
+  top: 50%;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  font-size: 16px;
+  font-family: youshebiaotiheiregular, YouSheBiaoTiHei, "优设标题黑", sans-serif;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  color: #ffffff;
+  text-shadow: none;
+}
+
+.pb-root .db-header-title-board {
+  font-size: 36px !important;
+  font-weight: 400 !important;
+  font-family: youshebiaotiheiregular, YouSheBiaoTiHei, "优设标题黑", sans-serif !important;
+  width: 100%;
+  max-width: 920px;
+  text-align: center;
+  line-height: 48px !important;
+  letter-spacing: 1px !important;
+  color: transparent !important;
+  background: linear-gradient(180deg, #fff 32%, #117eff) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  text-shadow: none !important;
+  filter: none !important;
+}
+
+.pb-root .db-board-tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: stretch;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 16px 8px;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.pb-root .db-board-tab {
+  --cut: 0;
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  width: 100%;
+  height: 36px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  clip-path: none;
+  background: url("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/data-screen/board-tab.png") center / 100% 100% no-repeat;
+  border: none;
+  box-shadow: none;
+  cursor: pointer;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 1px;
+  white-space: nowrap;
+  line-height: 36px;
+  box-sizing: border-box;
+}
+.pb-root .db-board-tab::before {
+  display: none;
+}
+.pb-root .db-board-tab > span {
+  position: relative;
+  z-index: 1;
+  padding: 0;
+  font-size: 14px;
+  line-height: 36px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pb-root .db-board-tab > span::before,
+.pb-root .db-board-tab > span::after {
+  display: none;
+}
+.pb-root .db-board-tab.active {
+  background: url("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/data-screen/board-tab-active.png") center / 100% 100% no-repeat;
+  color: #d8ffe9;
+  text-shadow: 0 0 8px rgba(0, 255, 170, 0.45);
+}
+.pb-root .db-board-tab.active > span {
+  text-shadow: 0 0 8px rgba(0, 255, 170, 0.55);
+}
+
+.pb-root .db-switcher-btn {
+  width: 292px;
+  max-width: 292px;
+  height: 48px;
+  padding: 0 18px 0 52px;
+  border: none;
+  border-radius: 0;
+  background: url("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/data-screen/board-project-switch.png") center / 100% 100% no-repeat;
+  box-shadow: none;
+  color: #ffffff;
+  font-size: 13px;
+}
+.pb-root .db-switcher-btn:hover {
+  border: none;
+  box-shadow: 0 0 12px rgba(0, 180, 255, 0.25);
+}
+.pb-root .db-switcher-name {
+  max-width: 200px;
+}
+.pb-root .db-switcher-arrow {
+  margin-left: auto;
+}
+
+/* 两行三列：上行概况|班组 等高；下行小时图对齐概况 / 日均|工种；右侧出勤通高 */
+.pb-root .pb-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(300px, 0.92fr) minmax(520px, 1.7fr) minmax(300px, 0.92fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas:
+    "overview team right"
+    "hourly charts right";
+  gap: 12px 14px;
+  padding: 0 18px 14px;
+  min-height: 0;
+  overflow: hidden;
+  align-items: stretch;
+}
+.pb-root .pb-flex-overview {
+  grid-area: overview;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+.pb-root .pb-flex-team {
+  grid-area: team;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.pb-root .pb-flex-hourly {
+  grid-area: hourly;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+.pb-root .pb-charts-row {
+  grid-area: charts;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+.pb-root .pb-cell-right {
+  grid-area: right;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.pb-root .pb-cell-overview .pb-content,
+.pb-root .pb-flex-overview .pb-content {
+  padding-bottom: 4px !important;
+  overflow: hidden;
+}
+
+/* 班组出勤列表 — 对齐参考 .item3 / .gd：固定 880px 居中 */
+.pb-root .pb-team-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+.pb-root .pb-team-head {
+  display: flex;
+  align-items: center;
+  position: relative;
+  width: 880px;
+  max-width: 100%;
+  height: 45px;
+  margin: 0 auto;
+  padding: 0;
+  box-sizing: border-box;
+  line-height: 45px;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 500;
+  flex-shrink: 0;
+  background: url("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/data-screen/board-team-thead.png") center / cover no-repeat;
+}
+.pb-root .pb-team-h-idx,
+.pb-root .pb-team-idx-wrap {
+  width: 100px;
+  flex-shrink: 0;
+  text-align: center;
+  box-sizing: border-box;
+}
+.pb-root .pb-team-h-name,
+.pb-root .pb-team-name {
+  width: 250px;
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0;
+  text-align: center;
+  box-sizing: border-box;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.pb-root .pb-team-h-cen,
+.pb-root .pb-team-cen {
+  width: 130px;
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0;
+  text-align: center;
+  box-sizing: border-box;
+}
+.pb-root .pb-team-h-idx,
+.pb-root .pb-team-h-name,
+.pb-root .pb-team-h-cen {
+  height: 45px;
+  line-height: 45px;
+}
+.pb-root .pb-team-list {
+  list-style: none;
+  width: 880px;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 0;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.pb-root .pb-team-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 880px;
+  max-width: 100%;
+  height: 52px;
+  margin: 0 auto;
+  padding: 0;
+  box-sizing: border-box;
+  line-height: 52px;
+  border-bottom: 1px solid rgba(56, 199, 245, 0.38);
+  background: linear-gradient(
+    270deg,
+    rgba(14, 156, 255, 0),
+    rgba(14, 156, 255, 0.1),
+    rgba(14, 156, 255, 0) 50%,
+    rgba(14, 156, 255, 0.1),
+    rgba(14, 156, 255, 0)
+  );
+}
+.pb-root .pb-team-idx-wrap {
+  position: relative;
+  height: 52px;
+}
+.pb-root .pb-team-bd {
+  position: absolute;
+  left: 30px;
+  top: 6px;
+  width: 40px;
+  height: 40px;
+  line-height: 40px;
+  text-align: center;
+  font-family: youshebiaotiheiregular, YouSheBiaoTiHei, "优设标题黑", sans-serif;
+  font-size: 16px;
+  color: #ffffff;
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+.pb-root .pb-team-bd.bd {
+  background-image: url("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/data-screen/board-idx-1.png");
+}
+.pb-root .pb-team-bd.bd2 {
+  background-image: url("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/data-screen/board-idx-2.png");
+}
+.pb-root .pb-team-bd.bd3 {
+  background-image: url("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/data-screen/board-idx-3.png");
+}
+.pb-root .pb-team-bd.bd4 {
+  background-image: url("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/data-screen/board-idx-4.png");
+}
+.pb-root .pb-team-name {
+  color: #ffffff;
+  font-size: 14px;
+  line-height: 52px;
+  height: 52px;
+}
+.pb-root .pb-team-cen {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 52px;
+  height: 52px;
+}
+.pb-root .pb-team-att {
+  color: #19ff9e;
+}
+.pb-root .pb-team-onsite {
+  color: #19d6ff;
+}
+.pb-root .pb-team-total {
+  color: #ffb03f;
+}
+.pb-root .pb-team-rate {
+  color: #60a9ff;
+}
+
+.pb-root .pb-flex-full {
+  flex: 1 1 0;
+  min-height: 0;
+}
+.pb-root .pb-charts-row .pb-panel {
+  min-height: 0;
+  height: 100%;
+}
+.pb-root .pb-cell {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.pb-root .pb-panel {
+  height: auto;
+  min-height: 0;
+  border-radius: 0;
+  padding: 8px 10px 10px;
+  background: url("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/data-screen/board-card-bg.png") center / 100% 100% no-repeat;
+  border: none;
+  box-shadow: none;
+}
+/* 同在上行的概况/班组、以及下方图表与右侧通高面板，撑满各自格子 */
+.pb-root .pb-flex-overview.pb-panel,
+.pb-root .pb-flex-team.pb-panel,
+.pb-root .pb-flex-hourly.pb-panel,
+.pb-root .pb-flex-full.pb-panel,
+.pb-root .pb-charts-row .pb-panel {
+  height: 100%;
+}
+
+.pb-root .pb-panel-bg,
+.pb-root .pb-panel-glow,
+.pb-root .pb-panel-corner {
+  display: none;
+}
+
+.pb-root .pb-title.pb-title-bar-img {
+  height: 36px;
+  width: 100%;
+  margin: 0 0 10px;
+  padding: 0 12px 0 28px;
+  background: url("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/data-screen/board-card-tab.png") left center / 100% 100% no-repeat;
+  border-bottom: none;
+  box-sizing: border-box;
+}
+.pb-root .pb-title.pb-title-bar-img .pb-title-text {
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  line-height: 36px;
+}
+
+/* 项目概况行 — 对齐参考 .item 高度 36，左右留小间距拉满 */
+.pb-root .pb-info-list {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 0;
+  padding: 2px 8px 0;
+  height: auto;
+  width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+.pb-root .pb-info-line {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 16px;
+  width: 100%;
+  max-width: none;
+  height: 36px;
+  min-height: 36px;
+  max-height: 36px;
+  line-height: 36px;
+  margin: 0 0 6px;
+  padding: 0 12px;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  background-image: url("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/data-screen/board-overview-bg.png");
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+.pb-root .pb-info-line:last-child {
+  margin-bottom: 0;
+}
+.pb-root .pb-info-line.full .pb-info-field {
+  flex: 1;
+  min-width: 0;
+}
+.pb-root .pb-info-line.pair .pb-info-field {
+  flex: 1;
+  min-width: 0;
+}
+.pb-root .pb-info-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  height: 36px;
+  line-height: 36px;
+  background: none;
+  border: none;
+  box-shadow: none;
+}
+.pb-root .pb-info-label {
+  flex-shrink: 0;
+  color: #ffffff;
+  font-size: 14px;
+  font-family: PingFangSC-Regular, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-weight: 400;
+  letter-spacing: 0;
+  white-space: nowrap;
+  line-height: 36px;
+}
+.pb-root .pb-info-value {
+  flex: 1;
+  min-width: 0;
+  color: #19d6ff !important;
+  font-size: 14px;
+  font-family: PingFangSC-Regular, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-weight: 400;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 36px;
+}
+
+/* 出勤流水卡片 — 对齐参考：头像 | 姓名/进出/手机 | 工种+时间 */
+.pb-root .pb-att-feed {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 200, 255, 0.25) transparent;
+  pointer-events: auto;
+}
+.pb-root .pb-att-feed-track {
+  display: block;
+}
+.pb-root .pb-att-feed::-webkit-scrollbar {
+  width: 4px;
+}
+.pb-root .pb-att-feed::-webkit-scrollbar-thumb {
+  background: rgba(0, 200, 255, 0.28);
+  border-radius: 2px;
+}
+.pb-root .pb-feed-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  margin: 0;
+  padding: 14px 10px;
+  border: none;
+  border-bottom: 1px solid rgba(56, 199, 245, 0.16);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  box-sizing: border-box;
+  pointer-events: auto;
+}
+.pb-root .pb-feed-card:hover {
+  background: rgba(14, 120, 220, 0.12);
+}
+.pb-root .pb-feed-avatar {
+  width: 88px;
+  height: 88px;
+  border-radius: 2px;
+  overflow: hidden;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 60, 120, 0.45);
+  border: 1px solid rgba(56, 199, 245, 0.65);
+  box-shadow: 0 0 8px rgba(56, 199, 245, 0.25);
+  color: #9fe8ff;
+  font-size: 28px;
+}
+.pb-root .pb-feed-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.pb-root .pb-feed-mid {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pb-root .pb-feed-name {
+  color: #ffffff;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pb-root .pb-feed-dir-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1;
+}
+.pb-root .pb-feed-dir-line.in {
+  color: #19ff9e;
+}
+.pb-root .pb-feed-dir-line.out {
+  color: #ffb03f;
+}
+.pb-root .pb-feed-dir-icon {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+.pb-root .pb-feed-phone {
+  color: rgba(230, 245, 255, 0.92);
+  font-size: 14px;
+  line-height: 1.2;
+}
+.pb-root .pb-feed-right {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 12px;
+  min-width: 110px;
+}
+.pb-root .pb-feed-job {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 88px;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 2px;
+  border: none;
+  background: url("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/data-screen/board-job-bg.png") center / 100% 100% no-repeat;
+  box-shadow: none;
+  color: #ffffff;
+  font-size: 14px;
+  white-space: nowrap;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pb-root .pb-feed-time {
+  color: rgba(220, 235, 255, 0.9);
+  font-size: 13px;
+  font-family: DINAlternate-Bold, DINAlternate, "D-DIN-PRO", sans-serif;
+  white-space: nowrap;
+}
+
+/* 人员详情弹窗 — 挂到 body，避开 ScreenStage transform */
+.pb-wd-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(2, 10, 28, 0.72);
+  pointer-events: auto;
+}
+.pb-wd-dialog {
+  position: relative;
+  width: min(1180px, 94vw);
+  height: min(780px, 90vh);
+  padding: 28px 36px 24px;
+  box-sizing: border-box;
+  background: url("https://shanhuai-gc.s3.cn-east-2.jdcloud-oss.com/data-screen/board-worker-detail-frame.png") center / 100% 100% no-repeat;
+  color: #ffffff;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.pb-wd-close {
+  position: absolute;
+  top: 18px;
+  right: 28px;
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: transparent;
+  color: #9fd8ff;
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+}
+.pb-wd-title {
+  text-align: center;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  margin-bottom: 18px;
+}
+.pb-wd-loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(200, 230, 255, 0.75);
+}
+.pb-wd-profile {
+  display: flex;
+  gap: 18px;
+  flex-shrink: 0;
+  margin-bottom: 14px;
+}
+.pb-wd-photo {
+  width: 118px;
+  height: 148px;
+  flex-shrink: 0;
+  border: 1px solid rgba(56, 199, 245, 0.55);
+  background: rgba(0, 40, 90, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-size: 36px;
+  color: #9fe8ff;
+}
+.pb-wd-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.pb-wd-fields {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 16px;
+  align-content: start;
+}
+.pb-wd-field {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.pb-wd-field-label {
+  flex-shrink: 0;
+  color: rgba(220, 235, 255, 0.78);
+}
+.pb-wd-field-value {
+  min-width: 0;
+  color: #ffffff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pb-wd-idline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+}
+.pb-wd-link {
+  border: none;
+  background: none;
+  color: #38c7f5;
+  cursor: pointer;
+  padding: 0;
+  font-size: 13px;
+}
+.pb-wd-tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  border: 1px solid rgba(56, 160, 255, 0.45);
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+.pb-wd-tab {
+  flex: 1 0 auto;
+  min-width: 88px;
+  height: 36px;
+  border: none;
+  border-right: 1px solid rgba(56, 160, 255, 0.35);
+  background: rgba(4, 30, 70, 0.55);
+  color: rgba(220, 235, 255, 0.85);
+  font-size: 13px;
+  cursor: pointer;
+}
+.pb-wd-tab:last-child {
+  border-right: none;
+}
+.pb-wd-tab.active {
+  color: #19d6ff;
+  background: rgba(10, 70, 140, 0.75);
+  box-shadow: inset 0 -2px 0 #19d6ff;
+}
+.pb-wd-tab-body {
+  flex: 1;
+  min-height: 0;
+  margin-top: 12px;
+  overflow: auto;
+}
+.pb-wd-table-wrap {
+  border: 1px solid rgba(56, 160, 255, 0.4);
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+}
+.pb-wd-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.pb-wd-table th,
+.pb-wd-table td {
+  border: 1px solid rgba(56, 160, 255, 0.28);
+  padding: 10px 8px;
+  text-align: center;
+  color: #ffffff;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pb-wd-table th {
+  background: rgba(8, 50, 110, 0.55);
+  font-weight: 600;
+}
+.pb-wd-pager {
+  margin-top: auto;
+  padding: 8px 12px;
+  text-align: right;
+  color: rgba(200, 230, 255, 0.75);
+  font-size: 12px;
+}
+.pb-wd-att-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+.pb-wd-att-filters label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: rgba(220, 235, 255, 0.9);
+}
+.pb-wd-att-filters select,
+.pb-wd-att-filters input[type="month"] {
+  height: 30px;
+  min-width: 160px;
+  padding: 0 8px;
+  border: 1px solid rgba(56, 160, 255, 0.45);
+  background: rgba(4, 28, 64, 0.85);
+  color: #ffffff;
+  border-radius: 2px;
+}
+.pb-wd-btn {
+  height: 30px;
+  padding: 0 14px;
+  border: 1px solid rgba(56, 160, 255, 0.55);
+  background: rgba(20, 90, 180, 0.35);
+  color: #ffffff;
+  border-radius: 2px;
+  cursor: pointer;
+}
+.pb-wd-btn.primary {
+  background: linear-gradient(180deg, #2f8dff, #0a4fad);
+  border-color: rgba(90, 190, 255, 0.65);
+}
+.pb-wd-att-sum {
+  margin-left: auto;
+  color: rgba(220, 235, 255, 0.92);
+}
+.pb-wd-att-sum em {
+  margin-left: 16px;
+  font-style: normal;
+}
+
+
+/* 工种图例 — 对齐参考：色点 + 文字，无底图 */
+.pb-root .pb-chart-with-legend {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 4px;
+}
+.pb-root .pb-pie-chart {
+  flex: 1;
+  min-height: 0;
+}
+.pb-root .pb-pie-legend {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  justify-content: center;
+  align-content: center;
+  padding: 6px 8px 2px;
+  overflow: visible;
+}
+.pb-root .pb-pie-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  background: none;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 12px;
+  line-height: 1.2;
+}
+.pb-root .pb-pie-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 6px currentColor;
+}
+.pb-root .pb-pie-legend-name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pb-root .pb-pie-legend-count,
+.pb-root .pb-pie-legend-pct {
+  display: none;
+}
+
+.pb-root .pb-chart-wrap {
+  height: 100%;
+  min-height: 160px;
+}
+.pb-root .pb-chart-ref .recharts-cartesian-axis-tick-value {
+  fill: rgba(255, 255, 255, 0.88);
 }

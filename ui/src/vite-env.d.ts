@@ -6,6 +6,8 @@ interface ImportMetaEnv {
   readonly VITE_AMAP_KEY?: string;
   /** 高德 JS API 安全密钥（2021-12 后申请的 Key 必配） */
   readonly VITE_AMAP_SECURITY_CODE?: string;
+  /** 百度地图浏览器端 AK（数据大屏底图样式对齐用） */
+  readonly VITE_BAIDU_MAP_AK?: string;
 }
 
 interface ImportMeta {

@@ -261,15 +261,15 @@ pub async fn get_smart_site(
     })
 }
 
-// ─── Alerts (placeholder) ──────────────────────────────────────────────────
+// ─── Alerts（暂无真实数据源，先返回 0，避免演示假数）────────────────────
 
 pub fn get_alerts_30d() -> Alert30dResponse {
     Alert30dResponse {
-        pending: 3,
-        resolved: 12,
-        no_risk: 8,
-        low_risk: 5,
-        medium_risk: 2,
+        pending: 0,
+        resolved: 0,
+        no_risk: 0,
+        low_risk: 0,
+        medium_risk: 0,
         high_risk: 0,
     }
 }
@@ -279,22 +279,22 @@ pub fn get_alerts_today() -> AlertTodayResponse {
         items: vec![
             AlertTodayItem {
                 label: "管理人员出勤预警".into(),
-                count: 2,
+                count: 0,
                 color: "#00d4ff".into(),
             },
             AlertTodayItem {
                 label: "人证不相似预警".into(),
-                count: 5,
+                count: 0,
                 color: "#00d4ff".into(),
             },
             AlertTodayItem {
                 label: "手机定位关闭预警".into(),
-                count: 1,
+                count: 0,
                 color: "#00d4ff".into(),
             },
             AlertTodayItem {
                 label: "手机进程终止预警".into(),
-                count: 8,
+                count: 0,
                 color: "#00d4ff".into(),
             },
         ],
@@ -619,7 +619,8 @@ pub async fn get_attendance_feed(
     }
 
     let rows = sqlx::query_as::<_, AttendanceFeedRow>(
-        "SELECT a.id, w.name AS worker_name, w.avatar AS worker_photo_url, \
+        "SELECT a.id, a.worker_id, w.name AS worker_name, w.avatar AS worker_photo_url, \
+                w.phone, w.work_type, \
                 TO_CHAR(a.trigger_time AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') AS trigger_time, \
                 d.device_name AS equipment_name, a.direction \
          FROM construction_attendance_records a \
@@ -638,8 +639,11 @@ pub async fn get_attendance_feed(
         rows.into_iter()
             .map(|r| AttendanceFeedItem {
                 id: r.id,
+                worker_id: r.worker_id,
                 worker_name: r.worker_name.unwrap_or_default(),
                 worker_photo_url: r.worker_photo_url,
+                phone: r.phone,
+                work_type: r.work_type,
                 trigger_time: r.trigger_time,
                 equipment_name: r.equipment_name,
                 direction: r.direction,
@@ -651,8 +655,11 @@ pub async fn get_attendance_feed(
 #[derive(sqlx::FromRow)]
 struct AttendanceFeedRow {
     id: Uuid,
+    worker_id: Uuid,
     worker_name: Option<String>,
     worker_photo_url: Option<String>,
+    phone: Option<String>,
+    work_type: Option<i32>,
     trigger_time: String,
     equipment_name: Option<String>,
     direction: i16,

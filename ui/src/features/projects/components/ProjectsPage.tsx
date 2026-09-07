@@ -206,7 +206,7 @@ export function ProjectsPage() {
             <Button
               variant="outline"
               className="h-9 gap-2"
-              onClick={() => navigate({ to: "/app/data-screen" })}
+              onClick={() => window.open("/app/data-screen", "_blank", "noopener,noreferrer")}
             >
               <Monitor className="size-4" />
               数据大屏
