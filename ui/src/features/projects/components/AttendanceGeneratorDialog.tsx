@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type ReactNode } from "react";
-import { CalendarClock, ChevronLeft, Database, Download, Eye, Loader2, Sparkles, Upload, Users } from "lucide-react";
+import { CalendarClock, CalendarDays, ChevronLeft, Database, Download, Eye, Loader2, Shuffle, Sparkles, Upload, Users } from "lucide-react";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
 
@@ -21,7 +21,9 @@ const currentMonth = () => {
 
 const DEFAULT_FORM: Omit<AttendanceGeneratorPreviewRequest, "worker_ids"> = {
   month: currentMonth(),
+  selection_mode: "random",
   attendance_days: 0,
+  selected_days: [],
   include_weekends: false,
   prioritize_weekends: false,
   morning_start: "07:00",
@@ -80,6 +82,7 @@ export function AttendanceGeneratorDialog({ open, projectId, projectName, worker
   const createPreview = async () => {
     if (workerIds.length === 0) return toast.info("请先选择需要生成考勤的人员");
     if (!form.month) return toast.info("请选择生成月份");
+    if (form.selection_mode === "manual" && form.selected_days.length === 0) return toast.info("请至少选择一个生成日期");
     setLoading(true);
     try {
       const result = await constructionProjectService.previewGeneratedAttendance(projectId, { ...form, worker_ids: workerIds });
@@ -183,6 +186,17 @@ export function AttendanceGeneratorDialog({ open, projectId, projectName, worker
     if (!next) setPreview(null);
     onOpenChange(next);
   };
+  const daysInMonth = useMemo(() => getDaysInMonth(form.month), [form.month]);
+  const firstWeekday = useMemo(() => getFirstWeekday(form.month), [form.month]);
+  const setSelectionMode = (selection_mode: "random" | "manual") => patchForm({
+    selection_mode,
+    selected_days: selection_mode === "manual" ? form.selected_days.filter((day) => day <= daysInMonth) : [],
+  });
+  const toggleSelectedDay = (day: number) => patchForm({
+    selected_days: form.selected_days.includes(day)
+      ? form.selected_days.filter((selectedDay) => selectedDay !== day)
+      : [...form.selected_days, day].sort((left, right) => left - right),
+  });
 
   return (
     <Dialog open={open} onOpenChange={changeOpen}>
@@ -203,16 +217,21 @@ export function AttendanceGeneratorDialog({ open, projectId, projectName, worker
               </section>
 
               <section className="rounded-xl border p-4">
-                <div className="mb-4"><h3 className="font-semibold">2. 生成规则</h3><p className="text-xs text-muted-foreground">每个时间段内会随机到秒，指定天数时每个人独立随机日期</p></div>
+                <div className="mb-4"><h3 className="font-semibold">2. 生成规则</h3><p className="text-xs text-muted-foreground">打卡时间会随机到秒；随机天数和手动选日期两种方式只能选择一种</p></div>
+                <div className="mb-4 grid gap-3 sm:grid-cols-2">
+                  <ModeOption icon={Shuffle} title="随机生成日期" description="每个人独立随机日期" selected={form.selection_mode === "random"} onClick={() => setSelectionMode("random")} />
+                  <ModeOption icon={CalendarDays} title="手动选择日期" description="所有人按指定日期生成" selected={form.selection_mode === "manual"} onClick={() => setSelectionMode("manual")} />
+                </div>
                 <div className="grid gap-4 md:grid-cols-2">
-                  <Field label="生成月份"><Input type="month" value={form.month} onChange={(event) => patchForm({ month: event.target.value })} /></Field>
-                  <Field label="每人生成天数" hint="0 = 整月"><Input type="number" min={0} max={31} value={form.attendance_days} onChange={(event) => patchForm({ attendance_days: Math.max(0, Number(event.target.value) || 0) })} /></Field>
+                  <Field label="生成月份"><Input type="month" value={form.month} onChange={(event) => patchForm({ month: event.target.value, selected_days: [] })} /></Field>
+                  {form.selection_mode === "random" ? <Field label="每人随机天数" hint="0 = 全部可用日期；超过工作日时自动补足周末"><Input type="number" min={0} value={form.attendance_days} onChange={(event) => patchForm({ attendance_days: Math.max(0, Math.trunc(Number(event.target.value) || 0)) })} /></Field> : <Field label="已选日期" hint="点击下方日期可多选"><div className="flex h-10 items-center rounded-md border bg-muted/30 px-3 text-sm">已选择 {form.selected_days.length} 天</div></Field>}
                   <TimeRange label="早上进场时间" start={form.morning_start} end={form.morning_end} onChange={(morning_start, morning_end) => patchForm({ morning_start, morning_end })} />
                   <TimeRange label="晚上出场时间" start={form.evening_start} end={form.evening_end} onChange={(evening_start, evening_end) => patchForm({ evening_start, evening_end })} />
                 </div>
+                {form.selection_mode === "manual" ? <DayPicker daysInMonth={daysInMonth} firstWeekday={firstWeekday} selectedDays={form.selected_days} onToggle={toggleSelectedDay} /> : null}
                 <div className="mt-4 grid gap-3 rounded-lg bg-slate-50 p-3 sm:grid-cols-3 dark:bg-muted/30">
-                  <CheckOption label="包含周末" checked={form.include_weekends} onChange={(include_weekends) => patchForm({ include_weekends, prioritize_weekends: include_weekends ? form.prioritize_weekends : false })} />
-                  <CheckOption label="优先生成周末" checked={form.prioritize_weekends} disabled={!form.include_weekends || form.attendance_days === 0} onChange={(prioritize_weekends) => patchForm({ prioritize_weekends })} />
+                  {form.selection_mode === "random" ? <CheckOption label="包含周末" checked={form.include_weekends} onChange={(include_weekends) => patchForm({ include_weekends, prioritize_weekends: include_weekends ? form.prioritize_weekends : false })} /> : <span className="text-sm text-muted-foreground">手动选择时按所选日期生成</span>}
+                  {form.selection_mode === "random" ? <CheckOption label="优先生成周末" checked={form.prioritize_weekends} disabled={!form.include_weekends || form.attendance_days === 0} onChange={(prioritize_weekends) => patchForm({ prioritize_weekends })} /> : <span />}
                   <CheckOption label="增加午间进出场" checked={form.include_midday} onChange={(include_midday) => patchForm({ include_midday })} />
                 </div>
                 {form.include_midday ? <div className="mt-4 grid gap-4 md:grid-cols-2"><TimeRange label="午间出场时间" start={form.lunch_out_start!} end={form.lunch_out_end!} onChange={(lunch_out_start, lunch_out_end) => patchForm({ lunch_out_start, lunch_out_end })} /><TimeRange label="午间进场时间" start={form.lunch_in_start!} end={form.lunch_in_end!} onChange={(lunch_in_start, lunch_in_end) => patchForm({ lunch_in_start, lunch_in_end })} /></div> : null}
@@ -248,6 +267,8 @@ export function AttendanceGeneratorDialog({ open, projectId, projectName, worker
 function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) { return <label className="grid gap-2 text-sm font-medium"><span>{label}{hint ? <span className="ml-2 text-xs font-normal text-muted-foreground">{hint}</span> : null}</span>{children}</label>; }
 function TimeRange({ label, start, end, onChange }: { label: string; start: string; end: string; onChange: (start: string, end: string) => void }) { return <Field label={label}><div className="flex items-center gap-2"><Input type="time" value={start} onChange={(event) => onChange(event.target.value, end)} /><span className="text-muted-foreground">—</span><Input type="time" value={end} onChange={(event) => onChange(start, event.target.value)} /></div></Field>; }
 function CheckOption({ label, checked, disabled, onChange }: { label: string; checked: boolean; disabled?: boolean; onChange: (checked: boolean) => void }) { return <label className={cn("flex items-center gap-2 text-sm", disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer")}><Checkbox disabled={disabled} checked={checked} onCheckedChange={(value) => onChange(value === true)} />{label}</label>; }
+function ModeOption({ icon: Icon, title, description, selected, onClick }: { icon: typeof CalendarDays; title: string; description: string; selected: boolean; onClick: () => void }) { return <button type="button" onClick={onClick} className={cn("flex items-center gap-3 rounded-xl border p-3 text-left transition-colors", selected ? "border-emerald-600 bg-emerald-50 text-emerald-800 ring-1 ring-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-200" : "hover:bg-muted/50")}><span className={cn("flex size-9 items-center justify-center rounded-lg", selected ? "bg-emerald-600 text-white" : "bg-muted")}><Icon className="size-4" /></span><span><span className="block text-sm font-semibold">{title}</span><span className="block text-xs text-muted-foreground">{description}</span></span></button>; }
+function DayPicker({ daysInMonth, firstWeekday, selectedDays, onToggle }: { daysInMonth: number; firstWeekday: number; selectedDays: number[]; onToggle: (day: number) => void }) { return <div className="mt-4 rounded-xl border bg-slate-50/70 p-3 dark:bg-muted/20"><div className="mb-2 grid grid-cols-7 text-center text-xs text-muted-foreground">{["一", "二", "三", "四", "五", "六", "日"].map((label) => <span key={label}>周{label}</span>)}</div><div className="grid grid-cols-7 gap-1">{Array.from({ length: firstWeekday }).map((_, index) => <span key={`blank-${index}`} />)}{Array.from({ length: daysInMonth }, (_, index) => index + 1).map((day) => { const selected = selectedDays.includes(day); return <button key={day} type="button" aria-pressed={selected} onClick={() => onToggle(day)} className={cn("h-9 rounded-md text-sm transition-colors", selected ? "bg-emerald-600 font-semibold text-white hover:bg-emerald-700" : "bg-background hover:bg-emerald-100 dark:hover:bg-emerald-950")}>{day}</button>; })}</div></div>; }
 function Summary({ icon: Icon, label, value }: { icon: typeof CalendarClock; label: string; value: string }) { return <div className="flex items-center gap-3 rounded-xl border bg-slate-50 p-4 dark:bg-muted/20"><span className="flex size-9 items-center justify-center rounded-lg bg-emerald-100 text-[#0f6b5d] dark:bg-emerald-950"><Icon className="size-5" /></span><div><div className="text-xs text-muted-foreground">{label}</div><div className="font-semibold">{value}</div></div></div>; }
 const UsersIcon = Users;
 function formatDateTime(value: string) { return new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date(value)); }
@@ -274,4 +295,17 @@ function parseImportDateTime(value: string): string {
 function formatDateForFile(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}`;
+}
+
+function getDaysInMonth(month: string): number {
+  const match = /^(\d{4})-(\d{2})$/.exec(month);
+  if (!match) return 0;
+  return new Date(Number(match[1]), Number(match[2]), 0).getDate();
+}
+
+function getFirstWeekday(month: string): number {
+  const match = /^(\d{4})-(\d{2})$/.exec(month);
+  if (!match) return 0;
+  const sundayBased = new Date(Number(match[1]), Number(match[2]) - 1, 1).getDay();
+  return (sundayBased + 6) % 7;
 }

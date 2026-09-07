@@ -344,7 +344,9 @@ export type ConstructionAttendanceCalendarResponse = {
 export type AttendanceGeneratorPreviewRequest = {
   worker_ids: string[];
   month: string;
+  selection_mode: "random" | "manual";
   attendance_days: number;
+  selected_days: number[];
   include_weekends: boolean;
   prioritize_weekends: boolean;
   morning_start: string;

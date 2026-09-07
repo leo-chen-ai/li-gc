@@ -236,7 +236,11 @@ const ATTENDANCE_COLUMNS: &[ColumnSpec] = &[
 pub struct AttendanceGeneratorPreviewRequest {
     worker_ids: Vec<Uuid>,
     month: String,
+    #[serde(default = "default_attendance_selection_mode")]
+    selection_mode: String,
     attendance_days: u32,
+    #[serde(default)]
+    selected_days: Vec<u32>,
     include_weekends: bool,
     prioritize_weekends: bool,
     morning_start: String,
@@ -249,6 +253,10 @@ pub struct AttendanceGeneratorPreviewRequest {
     lunch_out_end: Option<String>,
     lunch_in_start: Option<String>,
     lunch_in_end: Option<String>,
+}
+
+fn default_attendance_selection_mode() -> String {
+    "random".to_owned()
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -8041,33 +8049,66 @@ pub async fn preview_generated_attendance(
         ));
     }
 
-    let mut eligible_dates = Vec::new();
+    let mut month_dates = Vec::new();
     let mut date = month;
     while date < next_month {
-        let is_weekend = date.weekday().number_from_monday() >= 6;
-        if body.include_weekends || !is_weekend {
-            eligible_dates.push(date);
-        }
+        month_dates.push(date);
         date += ChronoDuration::days(1);
+    }
+    let manually_selected_dates = if body.selection_mode == "manual" {
+        if body.selected_days.is_empty() {
+            return Err(invalid_column_value("selected_days", "at least one day"));
+        }
+        let unique_days: HashSet<u32> = body.selected_days.iter().copied().collect();
+        if unique_days.len() != body.selected_days.len() {
+            return Err(invalid_column_value(
+                "selected_days",
+                "unique days in selected month",
+            ));
+        }
+        let dates = body
+            .selected_days
+            .iter()
+            .map(|day| {
+                month
+                    .with_day(*day)
+                    .ok_or_else(|| invalid_column_value("selected_days", "days in selected month"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Some(dates)
+    } else if body.selection_mode == "random" {
+        None
+    } else {
+        return Err(invalid_column_value("selection_mode", "random or manual"));
+    };
+    let mut eligible_dates: Vec<_> = month_dates
+        .iter()
+        .copied()
+        .filter(|date| body.include_weekends || date.weekday().number_from_monday() < 6)
+        .collect();
+    if body.selection_mode == "random"
+        && body.attendance_days > 0
+        && usize::try_from(body.attendance_days).unwrap_or(usize::MAX) > eligible_dates.len()
+    {
+        eligible_dates = month_dates;
     }
     let requested_days = if body.attendance_days == 0 {
         eligible_dates.len()
     } else {
-        usize::try_from(body.attendance_days).unwrap_or(usize::MAX)
+        usize::try_from(body.attendance_days)
+            .unwrap_or(usize::MAX)
+            .min(eligible_dates.len())
     };
-    if requested_days > eligible_dates.len() {
-        return Err(invalid_column_value(
-            "attendance_days",
-            "not greater than eligible days",
-        ));
-    }
 
     let timezone = FixedOffset::east_opt(8 * 3600).expect("valid UTC+8 offset");
     let mut rng = rand::thread_rng();
     let mut records = Vec::new();
     for (worker_id, worker_name, team_name) in workers {
-        let mut selected_dates = eligible_dates.clone();
-        if body.prioritize_weekends
+        let mut selected_dates = manually_selected_dates
+            .clone()
+            .unwrap_or_else(|| eligible_dates.clone());
+        if manually_selected_dates.is_none()
+            && body.prioritize_weekends
             && body.include_weekends
             && requested_days < selected_dates.len()
         {
@@ -8085,10 +8126,12 @@ pub async fn preview_generated_attendance(
             weekdays.shuffle(&mut rng);
             weekends.extend(weekdays);
             selected_dates = weekends;
-        } else {
+        } else if manually_selected_dates.is_none() {
             selected_dates.shuffle(&mut rng);
         }
-        selected_dates.truncate(requested_days);
+        if manually_selected_dates.is_none() {
+            selected_dates.truncate(requested_days);
+        }
         selected_dates.sort_unstable();
 
         for attendance_date in selected_dates {
