@@ -600,6 +600,22 @@ async fn admin_can_manage_project_nested_resources_and_fake_attendance() {
             .iter()
             .any(|project| project["id"].as_str() == Some(project_id))
     );
+    for (table, id) in [
+        ("construction_projects", project_id),
+        ("construction_units", unit_id),
+        ("construction_teams", team_id),
+        ("construction_workers", worker_id),
+        ("construction_attendance_records", attendance_id),
+    ] {
+        let preserved: bool = sqlx::query_scalar(&format!(
+            "SELECT is_deleted AND deleted_at IS NOT NULL FROM {table} WHERE id=$1"
+        ))
+        .bind(Uuid::parse_str(id).unwrap())
+        .fetch_one(&pool)
+        .await
+        .expect("deleted row must remain in database");
+        assert!(preserved, "{table} must be soft deleted");
+    }
 }
 
 #[tokio::test]
@@ -3742,4 +3758,102 @@ async fn miniapp_project_routes_support_construction_crud() {
             get_authed(app.clone(), &format!("{base}/{resource}/{id}"), &token).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
     }
+}
+
+#[tokio::test]
+async fn worker_phone_and_id_card_are_unique_within_project() {
+    let (app, pool, _container) = build_test_app_with_pool().await;
+    let token = persisted_admin_token(&pool).await;
+    let project_id = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO construction_projects (name) VALUES ('唯一性测试') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let other_project_id = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO construction_projects (name) VALUES ('另一个项目') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let mut scopes = Vec::new();
+    for id in [project_id, other_project_id] {
+        let unit_id = sqlx::query_scalar::<_, Uuid>("INSERT INTO construction_units (project_id, company_name) VALUES ($1, '测试单位') RETURNING id").bind(id).fetch_one(&pool).await.unwrap();
+        let team_id = sqlx::query_scalar::<_, Uuid>("INSERT INTO construction_teams (project_id, unit_id, name, work_type) VALUES ($1, $2, '测试班组', 900) RETURNING id").bind(id).bind(unit_id).fetch_one(&pool).await.unwrap();
+        scopes.push((unit_id, team_id));
+    }
+    let (unit_id, team_id) = scopes[0];
+    let uri = format!("/api/v1/admin/projects/{project_id}/workers");
+    let payload = json!({"unit_id":unit_id,"team_id":team_id,"name":"测试人员", "phone":" 13800000001 ", "id_card":" 32080019900101888x ", "work_type":1});
+    let (status, first) = authed_json(app.clone(), "POST", &uri, &token, payload.clone()).await;
+    assert_eq!(status, StatusCode::CREATED, "{first}");
+    assert_eq!(first["data"]["phone"], "13800000001");
+    assert_eq!(first["data"]["id_card"], "32080019900101888X");
+    let worker_uri = format!("{uri}/{}", first["data"]["id"].as_str().unwrap());
+    let (status, body) =
+        authed_json(app.clone(), "PATCH", &worker_uri, &token, payload.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    for (phone, id_card, message) in [
+        ("13800000001", "320800199001018889", "手机号"),
+        ("13800000002", "32080019900101888x", "身份证号"),
+    ] {
+        let candidate = json!({"unit_id":unit_id,"team_id":team_id,"phone":phone,"id_card":id_card,"work_type":1});
+        let (status, body) = authed_json(app.clone(), "POST", &uri, &token, candidate).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert!(body["message"].as_str().unwrap().contains(message));
+    }
+    let mut payload = payload;
+    payload["unit_id"] = json!(scopes[1].0);
+    payload["team_id"] = json!(scopes[1].1);
+    let (status, body) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{other_project_id}/workers"),
+        &token,
+        payload,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let (status, second) = authed_json(
+        app.clone(),
+        "POST",
+        &uri,
+        &token,
+        json!({"unit_id":unit_id,"team_id":team_id,"phone":"13800000002","id_card":"320800199001018889","work_type":1}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{second}");
+    let second_uri = format!("{uri}/{}", second["data"]["id"].as_str().unwrap());
+    for patch in [
+        json!({"phone":13800000001_i64}),
+        json!({"unit_id":unit_id,"team_id":team_id,"phone":" 13800000001 "}),
+        json!({"unit_id":unit_id,"team_id":team_id,"id_card":"32080019900101888x"}),
+    ] {
+        let (status, body) = authed_json(app.clone(), "PATCH", &second_uri, &token, patch).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    }
+    let saved = sqlx::query_as::<_, (String, String)>(
+        "SELECT phone, id_card FROM construction_workers WHERE id = $1",
+    )
+    .bind(Uuid::parse_str(second["data"]["id"].as_str().unwrap()).unwrap())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        saved,
+        ("13800000002".to_owned(), "320800199001018889".to_owned())
+    );
+    let concurrent = json!({"unit_id":unit_id,"team_id":team_id,"phone":"13800000003","id_card":"320800199001018887","work_type":1});
+    let (left, right) = tokio::join!(
+        authed_json(app.clone(), "POST", &uri, &token, concurrent.clone()),
+        authed_json(app.clone(), "POST", &uri, &token, concurrent)
+    );
+    assert!(
+        matches!(
+            (left.0, right.0),
+            (StatusCode::CREATED, StatusCode::BAD_REQUEST)
+                | (StatusCode::BAD_REQUEST, StatusCode::CREATED)
+        ),
+        "{left:?} {right:?}"
+    );
 }

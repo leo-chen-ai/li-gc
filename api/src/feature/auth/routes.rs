@@ -7,7 +7,7 @@ use crate::{
     feature::auth::handlers, infrastructure::web::middleware::auth_middleware, state::AppState,
 };
 
-/// Routes that need brute-force rate limiting (login, register)
+/// Public login and registration routes.
 pub fn auth_sensitive_routes() -> Router<AppState> {
     Router::new()
         .route("/register", post(handlers::register))
@@ -18,7 +18,7 @@ pub fn auth_sensitive_routes() -> Router<AppState> {
         .route("/login", post(handlers::login))
 }
 
-/// Remaining auth routes — refresh + protected (global rate limit only)
+/// Refresh, scan login, and protected session routes.
 pub fn auth_routes() -> Router<AppState> {
     let public = Router::new()
         .route("/refresh", post(handlers::refresh))

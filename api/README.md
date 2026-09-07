@@ -22,7 +22,6 @@ Production-ready Rust backend with Axum, SQLx, and JWT authentication.
 - **API Keys**: Machine-to-machine authentication with scoped permissions
 - **Admin Dashboard**: User management, API key management, system statistics
 - **File Uploads**: Local filesystem storage with configurable base URL
-- **Rate Limiting**: Per-IP rate limiting via `DashMap`
 - **Request Tracing**: Request ID + structured HTTP logging
 - **Bootstrap System**: Automatic initial admin creation
 - **Graceful Degradation**: Works without Redis (cache/blacklist disabled)
@@ -64,7 +63,7 @@ src/
 │       └── log/           # Log management
 ├── infrastructure/
 │   ├── web/
-│   │   ├── middleware/    # Auth, rate limit, request ID, API key
+│   │   ├── middleware/    # Auth, request ID, API key
 │   │   └── response/      # ApiSuccess, ApiError, error codes
 │   ├── persistence/       # Database pool, Redis, cache traits
 │   ├── storage/           # File upload providers (local, S3)
@@ -267,7 +266,6 @@ tests/
   - Long-lived refresh tokens with rotation (7 days default)
 - **Session Blacklisting**: Redis-based revocation for logout/token theft
 - **API Keys**: Scoped permissions, hashed storage, expiration support
-- **Rate Limiting**: Sliding window rate limiting per IP
 - **File Uploads**: 
   - MIME type validation
   - Size limits (2MB default for avatars)

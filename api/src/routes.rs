@@ -1,50 +1,21 @@
-use axum::{Extension, Router, extract::DefaultBodyLimit, middleware::from_fn};
-use std::time::Duration;
+use axum::{Extension, Router, extract::DefaultBodyLimit};
 use tower_http::services::ServeDir;
 
 use crate::{
     feature::{admin, auth, device_vendor_b, health, miniapp, ocr, upload, user},
-    infrastructure::web::middleware::{RateLimiter, rate_limit_middleware},
     state::AppState,
 };
 
 const API_REQUEST_BODY_LIMIT_BYTES: usize = 50 * 1024 * 1024;
 
 pub fn app_routes(state: AppState) -> Router {
-    // Global: 120 req/min per IP
-    let global_limiter = RateLimiter::new(120, Duration::from_secs(60));
-    // Auth: 10 req/min per IP (anti brute-force)
-    let auth_limiter = RateLimiter::new(10, Duration::from_secs(60));
-    // B vendor devices may share the same reverse-proxy address. Keep their
-    // polling budget isolated from management API traffic.
-    let device_vendor_b_limiter = RateLimiter::new(600, Duration::from_secs(60));
-
-    // Cleanup expired entries every minute
-    let g = global_limiter.clone();
-    let a = auth_limiter.clone();
-    let d = device_vendor_b_limiter.clone();
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(Duration::from_secs(60)).await;
-            g.cleanup();
-            a.cleanup();
-            d.cleanup();
-        }
-    });
-
-    // login & register: strict rate limit (anti brute-force)
-    let auth_sensitive = auth::auth_sensitive_routes()
-        .layer(from_fn(rate_limit_middleware))
-        .layer(Extension(auth_limiter));
-
-    let device_vendor_b_routes = device_vendor_b::routes()
-        .layer(from_fn(rate_limit_middleware))
-        .layer(Extension(device_vendor_b_limiter));
-
     // Provide session_blacklist to auth middleware
     let blacklist = state.session_blacklist.clone();
     let api_routes = Router::new()
-        .nest("/auth", auth::auth_routes().merge(auth_sensitive))
+        .nest(
+            "/auth",
+            auth::auth_routes().merge(auth::auth_sensitive_routes()),
+        )
         .nest("/users", user::user_routes())
         .nest("/uploads", upload::upload_routes())
         .nest("/ocr", ocr::ocr_routes())
@@ -57,13 +28,11 @@ pub fn app_routes(state: AppState) -> Router {
         .nest("/admin/api-keys", admin::api_key::api_key_routes())
         .nest("/dashboard", admin::dashboard::dashboard_routes())
         .layer(Extension(blacklist)) // Inject blacklist for auth middleware
-        .layer(DefaultBodyLimit::max(API_REQUEST_BODY_LIMIT_BYTES))
-        .layer(from_fn(rate_limit_middleware))
-        .layer(Extension(global_limiter));
+        .layer(DefaultBodyLimit::max(API_REQUEST_BODY_LIMIT_BYTES));
 
     Router::new()
         .nest("/health", health::health_routes())
-        .merge(device_vendor_b_routes)
+        .merge(device_vendor_b::routes())
         .nest("/api/v1", api_routes)
         .nest_service("/media", ServeDir::new("uploads"))
         .fallback(handle_404)

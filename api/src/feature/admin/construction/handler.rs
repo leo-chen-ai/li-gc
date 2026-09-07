@@ -2828,7 +2828,7 @@ pub async fn delete_project(
     State(state): State<AppState>,
     Path(project_id): Path<Uuid>,
 ) -> ApiResult<()> {
-    delete_row(
+    soft_delete_row(
         state.db.pool(),
         "construction_projects",
         &[("id", project_id)],
@@ -2997,7 +2997,7 @@ pub async fn delete_unit(
     Path((project_id, unit_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<()> {
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
-    delete_row(
+    soft_delete_row(
         state.db.pool(),
         "construction_units",
         &[("project_id", project_id), ("id", unit_id)],
@@ -4840,7 +4840,7 @@ pub async fn delete_team(
     Path((project_id, team_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<()> {
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
-    let response = delete_row(
+    let response = soft_delete_row(
         state.db.pool(),
         "construction_teams",
         &[("project_id", project_id), ("id", team_id)],
@@ -4866,9 +4866,11 @@ pub async fn create_worker(
 ) -> ApiResult<Value> {
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     let body = normalize_worker_body(body, true)?;
-    check_worker_phone_id_card_unique(state.db.pool(), project_id, None, &body).await?;
+    let mut tx = state.db.pool().begin().await.map_err(db_error)?;
+    lock_worker_project(&mut tx, project_id).await?;
+    check_worker_phone_id_card_unique(&mut tx, project_id, None, &body).await?;
     let response = create_row(
-        state.db.pool(),
+        &mut *tx,
         "construction_workers",
         WORKER_COLUMNS,
         &body,
@@ -4876,6 +4878,8 @@ pub async fn create_worker(
         StatusCode::CREATED,
     )
     .await?;
+
+    tx.commit().await.map_err(db_error)?;
 
     if let Some(worker_id) = response
         .data
@@ -7049,15 +7053,19 @@ pub async fn update_worker(
     let before_issue_fields =
         fetch_worker_issue_fields(state.db.pool(), project_id, worker_id).await?;
     let body = normalize_worker_body(body, false)?;
-    check_worker_phone_id_card_unique(state.db.pool(), project_id, Some(worker_id), &body).await?;
+    let mut tx = state.db.pool().begin().await.map_err(db_error)?;
+    lock_worker_project(&mut tx, project_id).await?;
+    check_worker_phone_id_card_unique(&mut tx, project_id, Some(worker_id), &body).await?;
     let response = update_row(
-        state.db.pool(),
+        &mut *tx,
         "construction_workers",
         WORKER_COLUMNS,
         &body,
         &[("project_id", project_id), ("id", worker_id)],
     )
     .await?;
+
+    tx.commit().await.map_err(db_error)?;
 
     let after_platform_fields =
         fetch_worker_platform_fields(state.db.pool(), project_id, worker_id).await?;
@@ -7336,7 +7344,7 @@ pub async fn delete_worker(
     {
         tracing::warn!(%project_id, %worker_id, error = %error, "删除人员前考勤机同步失败");
     }
-    let response = delete_row(
+    let response = soft_delete_row(
         state.db.pool(),
         "construction_workers",
         &[("project_id", project_id), ("id", worker_id)],
@@ -8221,7 +8229,7 @@ pub async fn delete_attendance(
     Path((project_id, attendance_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<()> {
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
-    delete_row(
+    soft_delete_row(
         state.db.pool(),
         "construction_attendance_records",
         &[("project_id", project_id), ("id", attendance_id)],
@@ -8373,7 +8381,7 @@ pub async fn delete_attendance_device(
     .execute(state.db.pool())
     .await
     .map_err(db_error)?;
-    delete_row(
+    soft_delete_row(
         state.db.pool(),
         "construction_attendance_devices",
         &[("project_id", project_id), ("id", device_id)],
@@ -8535,7 +8543,7 @@ pub async fn delete_attendance_point(
     let _face_lock = crate::feature::face::lock_project(state.db.pool(), project_id)
         .await
         .map_err(db_error)?;
-    delete_row(
+    soft_delete_row(
         state.db.pool(),
         "construction_attendance_points",
         &[("project_id", project_id), ("id", point_id)],
@@ -9037,7 +9045,7 @@ pub async fn delete_attendance_device_issue_report(
 ) -> ApiResult<()> {
     let project_id = attendance_device_issue_report_project_id(state.db.pool(), report_id).await?;
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
-    delete_row(
+    soft_delete_row(
         state.db.pool(),
         "construction_attendance_device_issue_reports",
         &[("id", report_id)],
@@ -14574,7 +14582,7 @@ async fn update_row(
         query.push(column.name).push(" = ");
         push_typed_bind_query(&mut query, *column, value)?;
     }
-    query.push(" WHERE ");
+    query.push(" WHERE is_deleted = FALSE AND ");
     for (index, (column, value)) in where_uuid_columns.iter().enumerate() {
         if index > 0 {
             query.push(" AND ");
@@ -14598,6 +14606,18 @@ fn normalize_worker_body(body: Value, default_entry_time: bool) -> Result<Value,
         .as_object()
         .cloned()
         .ok_or_else(|| invalid_input("Request body must be a JSON object"))?;
+
+    for field in ["phone", "id_card"] {
+        if let Some(value) = object.get_mut(field) {
+            if let Some(text) = value_to_optional_text(value) {
+                *value = Value::String(if field == "id_card" {
+                    text.trim().to_ascii_uppercase()
+                } else {
+                    text.trim().to_owned()
+                });
+            }
+        }
+    }
 
     if default_entry_time || object.contains_key("phone") {
         validate_worker_phone(&object)?;
@@ -14625,65 +14645,61 @@ fn normalize_worker_body(body: Value, default_entry_time: bool) -> Result<Value,
     Ok(Value::Object(object))
 }
 
+// 同项目新增、编辑共用行锁，校验与保存必须在同一事务内完成。
+async fn lock_worker_project(
+    connection: &mut sqlx::PgConnection,
+    project_id: Uuid,
+) -> Result<(), ApiError> {
+    sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM construction_projects WHERE id = $1 AND is_deleted = FALSE FOR UPDATE",
+    )
+    .bind(project_id)
+    .fetch_optional(connection)
+    .await
+    .map_err(db_error)?
+    .ok_or_else(not_found)?;
+    Ok(())
+}
+
 async fn check_worker_phone_id_card_unique(
-    pool: &sqlx::PgPool,
+    connection: &mut sqlx::PgConnection,
     project_id: Uuid,
     exclude_worker_id: Option<Uuid>,
     body: &Value,
 ) -> Result<(), ApiError> {
-    let phone = body
-        .get("phone")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
-    let id_card = body
-        .get("id_card")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
-
-    if let Some(phone) = phone {
-        let mut query = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM construction_workers WHERE project_id = $1 AND phone = $2 AND is_deleted = FALSE",
-        )
-        .bind(project_id)
-        .bind(phone);
-        if let Some(wid) = exclude_worker_id {
-            query = sqlx::query_scalar::<_, i64>(
-                "SELECT COUNT(*) FROM construction_workers WHERE project_id = $1 AND phone = $2 AND is_deleted = FALSE AND id != $3",
-            )
+    for (field, expression, message) in [
+        (
+            "phone",
+            "btrim(phone)",
+            "保存失败：该手机号在当前项目中已存在，请修改手机号",
+        ),
+        (
+            "id_card",
+            "upper(btrim(id_card))",
+            "保存失败：该身份证号在当前项目中已存在，请修改身份证号",
+        ),
+    ] {
+        let Some(value) = body
+            .get(field)
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+        else {
+            continue;
+        };
+        let query = format!(
+            "SELECT EXISTS(SELECT 1 FROM construction_workers WHERE project_id = $1 AND {expression} = $2 AND is_deleted = FALSE AND ($3::uuid IS NULL OR id <> $3))"
+        );
+        let exists = sqlx::query_scalar::<_, bool>(&query)
             .bind(project_id)
-            .bind(phone)
-            .bind(wid);
-        }
-        let count = query.fetch_one(pool).await.map_err(db_error)?;
-        if count > 0 {
-            return Err(invalid_input("该手机号在当前项目中已存在，不允许重复录入"));
+            .bind(value)
+            .bind(exclude_worker_id)
+            .fetch_one(&mut *connection)
+            .await
+            .map_err(db_error)?;
+        if exists {
+            return Err(invalid_input(message));
         }
     }
-
-    if let Some(id_card) = id_card {
-        let mut query = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM construction_workers WHERE project_id = $1 AND id_card = $2 AND is_deleted = FALSE",
-        )
-        .bind(project_id)
-        .bind(id_card);
-        if let Some(wid) = exclude_worker_id {
-            query = sqlx::query_scalar::<_, i64>(
-                "SELECT COUNT(*) FROM construction_workers WHERE project_id = $1 AND id_card = $2 AND is_deleted = FALSE AND id != $3",
-            )
-            .bind(project_id)
-            .bind(id_card)
-            .bind(wid);
-        }
-        let count = query.fetch_one(pool).await.map_err(db_error)?;
-        if count > 0 {
-            return Err(invalid_input(
-                "该身份证号在当前项目中已存在，不允许重复录入",
-            ));
-        }
-    }
-
     Ok(())
 }
 
@@ -14741,28 +14757,6 @@ fn is_blank_json_value(value: Option<&Value>) -> bool {
         Some(Value::String(value)) => value.trim().is_empty(),
         Some(_) => false,
     }
-}
-
-async fn delete_row(
-    pool: &sqlx::PgPool,
-    table: &'static str,
-    where_uuid_columns: &[(&'static str, Uuid)],
-) -> ApiResult<()> {
-    let mut query = QueryBuilder::<Postgres>::new("DELETE FROM ");
-    query.push(table).push(" WHERE ");
-    for (index, (column, value)) in where_uuid_columns.iter().enumerate() {
-        if index > 0 {
-            query.push(" AND ");
-        }
-        query.push(*column).push(" = ").push_bind(*value);
-    }
-
-    let result = query.build().execute(pool).await.map_err(db_error)?;
-    if result.rows_affected() == 0 {
-        return Err(not_found());
-    }
-
-    Ok(ApiSuccess::default().with_data(()))
 }
 
 fn extract_fields<'a>(

@@ -715,7 +715,8 @@ async fn delete_duplicate_photo_quality_reports(
 ) -> Result<(), VendorError> {
     sqlx::query(
         r#"
-        DELETE FROM construction_attendance_device_issue_reports
+        UPDATE construction_attendance_device_issue_reports
+        SET is_deleted = TRUE, deleted_at = NOW(), updated_at = NOW()
         WHERE is_deleted = FALSE
           AND attendance_device_id = $1
           AND worker_id = $2

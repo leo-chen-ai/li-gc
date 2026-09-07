@@ -495,6 +495,10 @@ async fn b_vendor_quality_feedback_is_visible_as_idempotent_issue_reports() {
     .await
     .unwrap();
     assert_eq!(report_count, 1, "同一时间戳的设备重试不应产生重复记录");
+    let deleted_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM construction_attendance_device_issue_reports WHERE worker_id=$1 AND attendance_device_id=$2 AND is_deleted=TRUE AND deleted_at IS NOT NULL"
+    ).bind(worker_id).bind(device_record_id).fetch_one(&pool).await.unwrap();
+    assert_eq!(deleted_count, 1, "重复回执应软删除保留，不能物理清除");
 
     let success_payload = serde_json::json!({
         "productId": 1,
