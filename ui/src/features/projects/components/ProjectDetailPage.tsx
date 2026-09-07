@@ -2232,14 +2232,14 @@ function ModuleFilters({
   }
 
   return (
-    <FilterGrid onSearch={onSearch} onReset={onReset}>
+    <FilterGrid className="xl:grid-cols-[minmax(180px,0.75fr)_minmax(400px,1.35fr)_minmax(180px,0.75fr)_auto]" onSearch={onSearch} onReset={onReset}>
       <FilterInput label="关键词" placeholder="工人姓名、班组、设备" value={attendanceFilters.keyword} onChange={(event) => onAttendanceFiltersChange({ keyword: event.target.value })} />
       <div className="grid gap-1.5">
         <span className="text-xs font-medium text-muted-foreground">考勤范围</span>
-        <div className="flex items-center gap-2">
-          <Input aria-label="考勤开始日期" type="date" value={attendanceFilters.attendanceStartDate} max={attendanceFilters.attendanceEndDate || undefined} onChange={(event) => onAttendanceFiltersChange({ attendanceStartDate: event.target.value })} />
+        <div className="flex min-w-0 items-center gap-2">
+          <Input className="min-w-0" aria-label="考勤开始日期" type="date" value={attendanceFilters.attendanceStartDate} max={attendanceFilters.attendanceEndDate || undefined} onChange={(event) => onAttendanceFiltersChange({ attendanceStartDate: event.target.value })} />
           <span className="shrink-0 text-sm text-muted-foreground">至</span>
-          <Input aria-label="考勤结束日期" type="date" value={attendanceFilters.attendanceEndDate} min={attendanceFilters.attendanceStartDate || undefined} onChange={(event) => onAttendanceFiltersChange({ attendanceEndDate: event.target.value })} />
+          <Input className="min-w-0" aria-label="考勤结束日期" type="date" value={attendanceFilters.attendanceEndDate} min={attendanceFilters.attendanceStartDate || undefined} onChange={(event) => onAttendanceFiltersChange({ attendanceEndDate: event.target.value })} />
         </div>
       </div>
       <FilterSelect label="进出方向" value={attendanceFilters.direction} onValueChange={(direction) => onAttendanceFiltersChange({ direction })} options={selectOptionsFromField(attendanceFormFields, "direction", "全部方向")} />
@@ -2491,18 +2491,21 @@ function FilterGrid({
   onSearch,
   onReset,
   compact = false,
+  className,
 }: {
   children: ReactNode;
   onSearch: () => void;
   onReset: () => void;
   compact?: boolean;
+  className?: string;
 }) {
   return (
     <div className={cn(
       "grid gap-2 rounded-lg border border-slate-200 bg-white p-2 dark:border-border dark:bg-background sm:grid-cols-2",
       compact
         ? "2xl:grid-cols-[minmax(180px,2fr)_repeat(3,minmax(120px,1fr))_auto]"
-        : "xl:grid-cols-[minmax(240px,2fr)_repeat(3,minmax(140px,1fr))_auto]"
+        : "xl:grid-cols-[minmax(240px,2fr)_repeat(3,minmax(140px,1fr))_auto]",
+      className
     )}>
       {children}
       <div className="flex items-end gap-2 sm:col-span-2 xl:col-span-1 xl:justify-end">
