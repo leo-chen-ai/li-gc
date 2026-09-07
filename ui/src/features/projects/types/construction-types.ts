@@ -801,6 +801,8 @@ export type ConstructionResourceListFilters = {
   work_status?: number;
   direction?: number;
   attendance_date?: string;
+  attendance_start_date?: string;
+  attendance_end_date?: string;
   month?: string;
   attendance_month?: string;
   attendance_configured?: boolean;

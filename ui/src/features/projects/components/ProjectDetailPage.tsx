@@ -218,7 +218,8 @@ type WorkerLedgerFilters = {
 };
 type AttendanceLedgerFilters = {
   keyword: string;
-  attendanceDate: string;
+  attendanceStartDate: string;
+  attendanceEndDate: string;
   direction: string;
 };
 type AdvancedExportTarget = "workers" | "attendance";
@@ -278,7 +279,8 @@ const DEFAULT_WORKER_FILTERS: WorkerLedgerFilters = {
 };
 const DEFAULT_ATTENDANCE_FILTERS: AttendanceLedgerFilters = {
   keyword: "",
-  attendanceDate: "",
+  attendanceStartDate: "",
+  attendanceEndDate: "",
   direction: "all",
 };
 const DEFAULT_ADVANCED_EXPORT_SCOPE: AdvancedExportScopeFilters = {
@@ -468,20 +470,22 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
         page: attendancePage,
         pageSize: attendancePageSize,
         keyword: appliedAttendanceFilters.keyword,
-        attendanceDate: appliedAttendanceFilters.attendanceDate || null,
+        attendanceStartDate: appliedAttendanceFilters.attendanceStartDate || null,
+        attendanceEndDate: appliedAttendanceFilters.attendanceEndDate || null,
         direction: normalizeSelectFilter(appliedAttendanceFilters.direction),
       }),
-    [appliedAttendanceFilters.attendanceDate, appliedAttendanceFilters.direction, appliedAttendanceFilters.keyword, attendancePage, attendancePageSize]
+    [appliedAttendanceFilters.attendanceEndDate, appliedAttendanceFilters.attendanceStartDate, appliedAttendanceFilters.direction, appliedAttendanceFilters.keyword, attendancePage, attendancePageSize]
   );
   const attendanceCalendarFilters = useMemo(
     () =>
       buildProjectResourceListParams({
         page: 1,
         keyword: appliedAttendanceFilters.keyword,
-        attendanceDate: appliedAttendanceFilters.attendanceDate || null,
+        attendanceStartDate: appliedAttendanceFilters.attendanceStartDate || null,
+        attendanceEndDate: appliedAttendanceFilters.attendanceEndDate || null,
         direction: normalizeSelectFilter(appliedAttendanceFilters.direction),
       }),
-    [appliedAttendanceFilters.attendanceDate, appliedAttendanceFilters.direction, appliedAttendanceFilters.keyword]
+    [appliedAttendanceFilters.attendanceEndDate, appliedAttendanceFilters.attendanceStartDate, appliedAttendanceFilters.direction, appliedAttendanceFilters.keyword]
   );
   const attendanceDeviceListFilters = useMemo(
     () => buildProjectResourceListParams({ page: 1, pageSize: 100 }),
@@ -507,8 +511,8 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   );
   const attendanceCalendarQuery = useProjectAttendanceCalendarQuery(
     projectId,
-    appliedAttendanceFilters.attendanceDate
-      ? appliedAttendanceFilters.attendanceDate.slice(0, 7)
+    appliedAttendanceFilters.attendanceStartDate
+      ? appliedAttendanceFilters.attendanceStartDate.slice(0, 7)
       : attendanceCalendarMonth,
     attendanceCalendarPage,
     attendanceCalendarPageSize,
@@ -744,9 +748,13 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       });
     }
     if (activeTab === "考勤记录") {
+      if (attendanceFilters.attendanceStartDate && attendanceFilters.attendanceEndDate && attendanceFilters.attendanceStartDate > attendanceFilters.attendanceEndDate) {
+        toast.error("考勤开始日期不能晚于结束日期");
+        return;
+      }
       setAppliedAttendanceFilters(attendanceFilters);
-      if (attendanceFilters.attendanceDate) {
-        setAttendanceCalendarMonth(attendanceFilters.attendanceDate.slice(0, 7));
+      if (attendanceFilters.attendanceStartDate) {
+        setAttendanceCalendarMonth(attendanceFilters.attendanceStartDate.slice(0, 7));
       }
       setAttendancePage(1);
       void queryClient.invalidateQueries({
@@ -1202,7 +1210,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   // Reset calendar page when month or filters change
   useEffect(() => {
     setAttendanceCalendarPage(1);
-  }, [attendanceCalendarMonth, appliedAttendanceFilters.attendanceDate, appliedAttendanceFilters.direction, appliedAttendanceFilters.keyword]);
+  }, [attendanceCalendarMonth, appliedAttendanceFilters.attendanceEndDate, appliedAttendanceFilters.attendanceStartDate, appliedAttendanceFilters.direction, appliedAttendanceFilters.keyword]);
 
   if (!project || !projectMetrics) {
     return (
@@ -2226,7 +2234,14 @@ function ModuleFilters({
   return (
     <FilterGrid onSearch={onSearch} onReset={onReset}>
       <FilterInput label="关键词" placeholder="工人姓名、班组、设备" value={attendanceFilters.keyword} onChange={(event) => onAttendanceFiltersChange({ keyword: event.target.value })} />
-      <FilterInput label="考勤日期" type="date" value={attendanceFilters.attendanceDate} onChange={(event) => onAttendanceFiltersChange({ attendanceDate: event.target.value })} />
+      <div className="grid gap-1.5">
+        <span className="text-xs font-medium text-muted-foreground">考勤范围</span>
+        <div className="flex items-center gap-2">
+          <Input aria-label="考勤开始日期" type="date" value={attendanceFilters.attendanceStartDate} max={attendanceFilters.attendanceEndDate || undefined} onChange={(event) => onAttendanceFiltersChange({ attendanceStartDate: event.target.value })} />
+          <span className="shrink-0 text-sm text-muted-foreground">至</span>
+          <Input aria-label="考勤结束日期" type="date" value={attendanceFilters.attendanceEndDate} min={attendanceFilters.attendanceStartDate || undefined} onChange={(event) => onAttendanceFiltersChange({ attendanceEndDate: event.target.value })} />
+        </div>
+      </div>
       <FilterSelect label="进出方向" value={attendanceFilters.direction} onValueChange={(direction) => onAttendanceFiltersChange({ direction })} options={selectOptionsFromField(attendanceFormFields, "direction", "全部方向")} />
     </FilterGrid>
   );

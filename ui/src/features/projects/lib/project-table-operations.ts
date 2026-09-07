@@ -60,6 +60,8 @@ export type ProjectResourceListParamInput = {
   workStatus?: number | string | null;
   direction?: number | string | null;
   attendanceDate?: string | null;
+  attendanceStartDate?: string | null;
+  attendanceEndDate?: string | null;
   attendanceConfigured?: boolean | null;
 };
 
@@ -101,6 +103,8 @@ export function buildProjectResourceListParams(input: ProjectResourceListParamIn
     ...buildOptionalNumericParam("work_status", input.workStatus),
     ...buildOptionalNumericParam("direction", input.direction),
     ...(input.attendanceDate ? { attendance_date: input.attendanceDate } : {}),
+    ...(input.attendanceStartDate ? { attendance_start_date: input.attendanceStartDate } : {}),
+    ...(input.attendanceEndDate ? { attendance_end_date: input.attendanceEndDate } : {}),
     ...(input.attendanceConfigured == null ? {} : { attendance_configured: input.attendanceConfigured }),
   };
 }

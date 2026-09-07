@@ -767,6 +767,8 @@ struct ResourceListParams {
     auth_status: Option<AuthStatusFilter>,
     direction: Option<i16>,
     attendance_date: Option<chrono::NaiveDate>,
+    attendance_start_date: Option<chrono::NaiveDate>,
+    attendance_end_date: Option<chrono::NaiveDate>,
     attendance_month: Option<chrono::NaiveDate>,
     attendance_configured: Option<bool>,
 }
@@ -886,6 +888,8 @@ fn resource_list_params(uri: &Uri) -> Result<ResourceListParams, ApiError> {
     let mut auth_status = None;
     let mut direction = None;
     let mut attendance_date = None;
+    let mut attendance_start_date = None;
+    let mut attendance_end_date = None;
     let mut attendance_month = None;
     let mut attendance_configured = None;
 
@@ -990,12 +994,34 @@ fn resource_list_params(uri: &Uri) -> Result<ResourceListParams, ApiError> {
                             .map_err(|_| invalid_column_value("attendance_date", "YYYY-MM-DD"))?,
                     );
                 }
+                "attendance_start_date" if !trimmed.is_empty() => {
+                    attendance_start_date = Some(
+                        chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d").map_err(|_| {
+                            invalid_column_value("attendance_start_date", "YYYY-MM-DD")
+                        })?,
+                    );
+                }
+                "attendance_end_date" if !trimmed.is_empty() => {
+                    attendance_end_date = Some(
+                        chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d").map_err(|_| {
+                            invalid_column_value("attendance_end_date", "YYYY-MM-DD")
+                        })?,
+                    );
+                }
                 "attendance_configured" if !trimmed.is_empty() => {
                     attendance_configured = Some(trimmed == "true" || trimmed == "1");
                 }
                 _ => {}
             }
         }
+    }
+
+    if matches!((attendance_start_date, attendance_end_date), (Some(start), Some(end)) if start > end)
+    {
+        return Err(invalid_column_value(
+            "attendance_end_date",
+            "not earlier than attendance_start_date",
+        ));
     }
 
     Ok(ResourceListParams {
@@ -1015,6 +1041,8 @@ fn resource_list_params(uri: &Uri) -> Result<ResourceListParams, ApiError> {
         auth_status,
         direction,
         attendance_date,
+        attendance_start_date,
+        attendance_end_date,
         attendance_month,
         attendance_configured,
     })
@@ -14633,6 +14661,16 @@ fn push_resource_filters(
                     .push(" AND (r.trigger_time AT TIME ZONE 'Asia/Shanghai')::date = ")
                     .push_bind(attendance_date);
             }
+            if let Some(attendance_start_date) = params.attendance_start_date {
+                query
+                    .push(" AND (r.trigger_time AT TIME ZONE 'Asia/Shanghai')::date >= ")
+                    .push_bind(attendance_start_date);
+            }
+            if let Some(attendance_end_date) = params.attendance_end_date {
+                query
+                    .push(" AND (r.trigger_time AT TIME ZONE 'Asia/Shanghai')::date <= ")
+                    .push_bind(attendance_end_date);
+            }
         }
         "construction_attendance_devices" => {
             if !params.keyword.is_empty() {
@@ -15542,6 +15580,33 @@ mod tests {
         );
         assert_eq!(params.page, 1);
         assert_eq!(params.page_size, 10);
+    }
+
+    #[test]
+    fn resource_list_params_parse_attendance_date_range() {
+        let uri: Uri = "/api/v1/admin/projects/00000000-0000-0000-0000-000000000000/attendance-records?attendance_start_date=2026-06-01&attendance_end_date=2026-06-30"
+            .parse()
+            .expect("valid uri");
+
+        let params = resource_list_params(&uri).expect("params");
+
+        assert_eq!(
+            params.attendance_start_date,
+            Some(chrono::NaiveDate::from_ymd_opt(2026, 6, 1).unwrap())
+        );
+        assert_eq!(
+            params.attendance_end_date,
+            Some(chrono::NaiveDate::from_ymd_opt(2026, 6, 30).unwrap())
+        );
+    }
+
+    #[test]
+    fn resource_list_params_reject_reversed_attendance_date_range() {
+        let uri: Uri = "/api/v1/admin/projects/00000000-0000-0000-0000-000000000000/attendance-records?attendance_start_date=2026-06-30&attendance_end_date=2026-06-01"
+            .parse()
+            .expect("valid uri");
+
+        assert!(resource_list_params(&uri).is_err());
     }
 
     #[test]

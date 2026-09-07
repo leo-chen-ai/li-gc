@@ -200,15 +200,15 @@ export function AttendanceGeneratorDialog({ open, projectId, projectName, worker
 
   return (
     <Dialog open={open} onOpenChange={changeOpen}>
-      <DialogContent className="max-h-[92vh] overflow-hidden p-0 sm:max-w-5xl">
-        <div className="border-b bg-gradient-to-r from-emerald-50 via-white to-teal-50 px-6 py-5 dark:from-emerald-950/30 dark:via-background dark:to-teal-950/20">
+      <DialogContent className="flex max-h-[calc(100vh-2rem)] flex-col overflow-hidden p-0 sm:max-w-5xl">
+        <div className="shrink-0 border-b bg-gradient-to-r from-emerald-50 via-white to-teal-50 px-6 py-5 dark:from-emerald-950/30 dark:via-background dark:to-teal-950/20">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-xl"><span className="flex size-9 items-center justify-center rounded-lg bg-[#0f6b5d] text-white"><Sparkles className="size-5" /></span>考勤生成工具</DialogTitle>
             <DialogDescription>结构化选择人员并随机生成打卡时间。预览确认后才会写入正式考勤记录。</DialogDescription>
           </DialogHeader>
         </div>
 
-        <div className="max-h-[calc(92vh-180px)] overflow-y-auto px-6 py-5">
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
           {!preview ? (
             <div className="space-y-5">
               <section className="rounded-xl border bg-slate-50/60 p-4 dark:bg-muted/20">
@@ -249,7 +249,7 @@ export function AttendanceGeneratorDialog({ open, projectId, projectName, worker
           )}
         </div>
 
-        <DialogFooter className="border-t bg-slate-50 px-6 py-4 dark:bg-muted/20">
+        <DialogFooter className="shrink-0 border-t bg-slate-50 px-6 py-4 dark:bg-muted/20">
           <Button variant="outline" disabled={loading || committing || importing} onClick={() => changeOpen(false)}>取消</Button>
           {!preview ? (
             <div className="flex items-center gap-2">

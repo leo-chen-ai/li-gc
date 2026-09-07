@@ -46,6 +46,8 @@ test("builds backend pagination params for project resource tables", () => {
       workStatus: 2,
       direction: 1,
       attendanceDate: "2026-06-23",
+      attendanceStartDate: "2026-06-01",
+      attendanceEndDate: "2026-06-30",
       attendanceConfigured: true,
     }),
     {
@@ -58,6 +60,8 @@ test("builds backend pagination params for project resource tables", () => {
       work_status: 2,
       direction: 1,
       attendance_date: "2026-06-23",
+      attendance_start_date: "2026-06-01",
+      attendance_end_date: "2026-06-30",
       attendance_configured: true,
     }
   );
