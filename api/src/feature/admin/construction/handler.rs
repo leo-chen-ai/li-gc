@@ -387,6 +387,7 @@ const MANAGED_ATTENDANCE_CONFIG_COLUMNS: &[ColumnSpec] = &[
     column("check_in_end_time", ColumnKind::Text),
     column("check_out_time", ColumnKind::Text),
     column("check_out_end_time", ColumnKind::Text),
+    column("use_attendance_record_photos", ColumnKind::Boolean),
     column("is_enabled", ColumnKind::Boolean),
     column("remark", ColumnKind::Text),
 ];
@@ -7405,7 +7406,7 @@ async fn list_attendance_rows_page(
 SELECT COALESCE(jsonb_agg(row_json ORDER BY created_at DESC), '[]'::jsonb)
 FROM (
     SELECT
-        to_jsonb(r) || jsonb_build_object(
+        (to_jsonb(r) - 'is_managed_generated') || jsonb_build_object(
             'overall_photo', COALESCE(r.overall_photo, overall_photo.photo_data),
             'closeup_photo', NULLIF(closeup_photo.photo_data, ''),
             'yongxin_reporting', jsonb_build_object(
@@ -7831,7 +7832,7 @@ async fn get_attendance_row(
 ) -> ApiResult<Value> {
     let row = sqlx::query_scalar::<_, Value>(
         r#"
-        SELECT to_jsonb(r) || jsonb_build_object(
+        SELECT (to_jsonb(r) - 'is_managed_generated') || jsonb_build_object(
             'overall_photo', COALESCE(r.overall_photo, overall_photo.photo_data),
             'closeup_photo', NULLIF(closeup_photo.photo_data, '')
         )
@@ -7899,7 +7900,7 @@ async fn save_attendance(
     let mut row = if let Some(id) = attendance_id {
         // Lock even for photo-only edits, serializing concurrent updates on this record.
         let current = sqlx::query_scalar::<_, Value>(
-            "SELECT to_jsonb(r) FROM construction_attendance_records r WHERE project_id=$1 AND id=$2 FOR UPDATE",
+            "SELECT to_jsonb(r) - 'is_managed_generated' FROM construction_attendance_records r WHERE project_id=$1 AND id=$2 FOR UPDATE",
         ).bind(project_id).bind(id).fetch_optional(&mut *tx).await.map_err(db_error)?.ok_or_else(not_found)?;
         if fields.is_empty() {
             if body.get("closeup_photo").is_none() {
@@ -7954,6 +7955,9 @@ async fn save_attendance(
     .map_err(db_error)?
     .flatten();
     row["closeup_photo"] = photo.map(Value::String).unwrap_or(Value::Null);
+    if let Some(object) = row.as_object_mut() {
+        object.remove("is_managed_generated");
+    }
     tx.commit().await.map_err(db_error)?;
     Ok(ApiSuccess::default()
         .with_code(if attendance_id.is_some() {
@@ -12865,6 +12869,7 @@ pub(crate) async fn generate_managed_records_for_month(
             c.check_in_end_time,
             c.check_out_time,
             c.check_out_end_time,
+            c.use_attendance_record_photos,
             c.is_enabled,
             w.name AS worker_name,
             w.id_card AS worker_id_card,
@@ -12897,6 +12902,7 @@ pub(crate) async fn generate_managed_records_for_month(
     let check_in_end_time: String = row.get("check_in_end_time");
     let check_out_time: String = row.get("check_out_time");
     let check_out_end_time: String = row.get("check_out_end_time");
+    let use_attendance_record_photos: bool = row.get("use_attendance_record_photos");
     let worker_name: Option<String> = row.try_get("worker_name").ok();
     let worker_id_card: Option<String> = row.try_get("worker_id_card").ok();
     let in_photos: Option<Value> = row.try_get("in_photos").ok();
@@ -12909,6 +12915,20 @@ pub(crate) async fn generate_managed_records_for_month(
     let attendance_days = selected_month_days(month, monthly_attendance_days, config_id)?;
     let next_month =
         next_month_start(month).ok_or_else(|| invalid_column_value("month", "YYYY-MM"))?;
+    let mut photo_pairs =
+        deterministic_photo_pairs(in_photos.as_ref(), out_photos.as_ref(), config_id, month);
+    if use_attendance_record_photos {
+        photo_pairs.extend(
+            historical_attendance_photo_pairs(pool, project_id, worker_id, config_id, month)
+                .await?,
+        );
+        shuffle_photo_pairs(&mut photo_pairs, config_id, month);
+    }
+    if photo_pairs.is_empty() {
+        return Err(invalid_input(
+            "没有可用的成对照片：请上传照片组，或确认该人员存在7天前且同日有进有出的真实考勤照片",
+        ));
+    }
 
     let mut generated_count = 0_i64;
     let mut tx = pool.begin().await.map_err(db_error)?;
@@ -12966,8 +12986,6 @@ pub(crate) async fn generate_managed_records_for_month(
     .execute(&mut *tx)
     .await
     .map_err(db_error)?;
-    let photo_pairs =
-        deterministic_photo_pairs(in_photos.as_ref(), out_photos.as_ref(), config_id, month);
     for (day_index, attendance_date) in attendance_days.iter().enumerate() {
         for direction in [0_i16, 1_i16] {
             let (range_start, range_end) = if direction == 0 {
@@ -12992,6 +13010,10 @@ pub(crate) async fn generate_managed_records_for_month(
                         pair.1.clone()
                     }
                 });
+            let photo_source = photo_pairs
+                .get(day_index % photo_pairs.len().max(1))
+                .map(|pair| pair.2.as_str())
+                .unwrap_or("photo_group");
 
             let existing_dispatch_states = sqlx::query_as::<_, (String, String)>(
                 r#"
@@ -13038,13 +13060,14 @@ pub(crate) async fn generate_managed_records_for_month(
                     shift,
                     planned_at,
                     photo_url,
+                    photo_source,
                     status,
                     error_message,
                     generated_at,
                     is_deleted,
                     deleted_at
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'generated', NULL, NOW(), FALSE, NULL)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'generated', NULL, NOW(), FALSE, NULL)
                 ON CONFLICT (config_id, attendance_date, direction)
                     WHERE is_deleted = FALSE
                 DO UPDATE SET
@@ -13056,6 +13079,7 @@ pub(crate) async fn generate_managed_records_for_month(
                     shift = EXCLUDED.shift,
                     planned_at = EXCLUDED.planned_at,
                     photo_url = EXCLUDED.photo_url,
+                    photo_source = EXCLUDED.photo_source,
                     status = 'generated',
                     error_message = NULL,
                     generated_at = NOW(),
@@ -13074,6 +13098,7 @@ pub(crate) async fn generate_managed_records_for_month(
             .bind(shift.clone())
             .bind(planned_at)
             .bind(photo_url.clone())
+            .bind(photo_source)
             .fetch_one(&mut *tx)
             .await
             .map_err(db_error)?;
@@ -13686,7 +13711,7 @@ fn deterministic_photo_pairs(
     out_value: Option<&Value>,
     config_id: Uuid,
     month: chrono::NaiveDate,
-) -> Vec<(String, String)> {
+) -> Vec<(String, String, String)> {
     let strings = |value: Option<&Value>| {
         value
             .and_then(Value::as_array)
@@ -13701,6 +13726,7 @@ fn deterministic_photo_pairs(
     let mut pairs = strings(in_value)
         .into_iter()
         .zip(strings(out_value))
+        .map(|(in_photo, out_photo)| (in_photo, out_photo, "photo_group".to_owned()))
         .collect::<Vec<_>>();
     let mut seed = [0_u8; 32];
     seed[..16].copy_from_slice(config_id.as_bytes());
@@ -13708,6 +13734,108 @@ fn deterministic_photo_pairs(
     seed[20..24].copy_from_slice(&month.month().to_le_bytes());
     pairs.shuffle(&mut StdRng::from_seed(seed));
     pairs
+}
+
+async fn historical_attendance_photo_pairs(
+    pool: &sqlx::PgPool,
+    project_id: Uuid,
+    worker_id: Uuid,
+    config_id: Uuid,
+    month: chrono::NaiveDate,
+) -> Result<Vec<(String, String, String)>, ApiError> {
+    let seed = format!("{config_id}:{}", month.format("%Y-%m"));
+    sqlx::query_as::<_, (String, String, String)>(
+        r#"
+        WITH photographed AS (
+            SELECT
+                r.id,
+                r.direction,
+                (r.trigger_time AT TIME ZONE 'Asia/Shanghai')::date AS attendance_date,
+                COALESCE(NULLIF(photo.photo_data, ''), NULLIF(r.photo_path, '')) AS photo_url
+            FROM construction_attendance_records r
+            LEFT JOIN LATERAL (
+                SELECT p.photo_data
+                FROM construction_attendance_record_photos p
+                WHERE p.attendance_record_id = r.id
+                  AND p.photo_kind IN ('closeup', 'snapshot')
+                  AND NULLIF(BTRIM(p.photo_data), '') IS NOT NULL
+                ORDER BY
+                    (p.photo_kind = 'closeup') DESC,
+                    (p.source = 'admin_upload') ASC,
+                    p.created_at DESC,
+                    p.id DESC
+                LIMIT 1
+            ) photo ON TRUE
+            WHERE r.project_id = $1
+              AND r.worker_id = $2
+              AND r.is_deleted = FALSE
+              AND r.is_generated = FALSE
+              AND r.is_managed_generated = FALSE
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM device_dispatch_jobs job
+                  JOIN construction_managed_attendance_records managed
+                    ON managed.id = job.managed_attendance_record_id
+                   AND managed.is_deleted = FALSE
+                  WHERE job.job_type = 'supplemental_attendance'
+                    AND job.worker_id = r.worker_id
+                    AND managed.direction = r.direction
+                    AND job.device_sn = COALESCE(
+                        NULLIF(BTRIM(r.serial_number), ''),
+                        NULLIF(BTRIM(r.equipment_id), '')
+                    )
+                    AND ABS(EXTRACT(EPOCH FROM (r.trigger_time - managed.planned_at))) <= 600
+              )
+              AND COALESCE(r.record_type, 'device') = 'device'
+              AND NULLIF(BTRIM(COALESCE(r.serial_number, r.equipment_id)), '') IS NOT NULL
+              AND (r.trigger_time AT TIME ZONE 'Asia/Shanghai')::date
+                    < (NOW() AT TIME ZONE 'Asia/Shanghai')::date - 7
+              AND COALESCE(NULLIF(photo.photo_data, ''), NULLIF(r.photo_path, '')) IS NOT NULL
+        ), complete_days AS (
+            SELECT attendance_date
+            FROM photographed
+            GROUP BY attendance_date
+            HAVING COUNT(*) FILTER (WHERE direction = 0) > 0
+               AND COUNT(*) FILTER (WHERE direction = 1) > 0
+        ), picked AS (
+            SELECT
+                photographed.*,
+                ROW_NUMBER() OVER (
+                    PARTITION BY photographed.attendance_date, photographed.direction
+                    ORDER BY md5(photographed.id::text || $3)
+                ) AS pick_number
+            FROM photographed
+            JOIN complete_days USING (attendance_date)
+        )
+        SELECT
+            MAX(photo_url) FILTER (WHERE direction = 0) AS in_photo,
+            MAX(photo_url) FILTER (WHERE direction = 1) AS out_photo,
+            'attendance_history'::text AS photo_source
+        FROM picked
+        WHERE pick_number = 1
+        GROUP BY attendance_date
+        ORDER BY md5(attendance_date::text || $3)
+        "#,
+    )
+    .bind(project_id)
+    .bind(worker_id)
+    .bind(seed)
+    .fetch_all(pool)
+    .await
+    .map_err(db_error)
+}
+
+fn shuffle_photo_pairs(
+    pairs: &mut [(String, String, String)],
+    config_id: Uuid,
+    month: chrono::NaiveDate,
+) {
+    let mut seed = [0_u8; 32];
+    seed[..16].copy_from_slice(config_id.as_bytes());
+    seed[16..20].copy_from_slice(&month.year().to_le_bytes());
+    seed[20..24].copy_from_slice(&month.month().to_le_bytes());
+    seed[24..28].copy_from_slice(b"real");
+    pairs.shuffle(&mut StdRng::from_seed(seed));
 }
 
 fn mask_id_card(value: &str) -> String {

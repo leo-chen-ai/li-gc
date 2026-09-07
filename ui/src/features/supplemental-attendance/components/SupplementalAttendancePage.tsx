@@ -558,6 +558,9 @@ function DesktopRecords({
                     无照片
                   </div>
                 )}
+                <Badge variant="outline" className="mt-2 block w-fit text-[10px]">
+                  {record.photo_source === "attendance_history" ? "历史考勤" : "照片组"}
+                </Badge>
               </TableCell>
               <TableCell>
                 <DeviceIdentity record={record} />
@@ -648,6 +651,10 @@ function MobileRecords({
             <Detail
               label="计划时间"
               value={formatDateTime(record.planned_at)}
+            />
+            <Detail
+              label="照片来源"
+              value={record.photo_source === "attendance_history" ? "历史考勤" : "照片组"}
             />
             <div className="col-span-2">
               <DeviceIdentity record={record} />

@@ -91,6 +91,7 @@ type ConfigForm = {
   checkOutTime: string;
   checkOutEndTime: string;
   remark: string;
+  useAttendanceRecordPhotos: boolean;
   photoPairs: PhotoPair[];
 };
 type PhotoPair = { inPhoto: string; outPhoto: string };
@@ -103,6 +104,7 @@ const defaultConfigForm: ConfigForm = {
   checkOutTime: "17:30",
   checkOutEndTime: "18:00",
   remark: "",
+  useAttendanceRecordPhotos: false,
   photoPairs: [{ inPhoto: "", outPhoto: "" }],
 };
 
@@ -187,6 +189,7 @@ export function ManagedAttendancePage(_props: { embedded?: boolean }) {
       checkOutTime: config.check_out_time,
       checkOutEndTime: config.check_out_end_time || config.check_out_time,
       remark: config.remark || "",
+      useAttendanceRecordPhotos: config.use_attendance_record_photos,
       photoPairs: Array.from(
         { length: Math.max(config.in_photos?.length || 0, config.out_photos?.length || 0, 1) },
         (_, index) => ({
@@ -245,6 +248,7 @@ export function ManagedAttendancePage(_props: { embedded?: boolean }) {
           check_in_end_time: config.check_in_end_time,
           check_out_time: config.check_out_time,
           check_out_end_time: config.check_out_end_time,
+          use_attendance_record_photos: config.use_attendance_record_photos,
           is_enabled: !config.is_enabled,
           remark: config.remark || null,
         },
@@ -284,10 +288,13 @@ export function ManagedAttendancePage(_props: { embedded?: boolean }) {
       return toast.error("进场结束时间不能早于开始时间");
     if (configForm.checkOutEndTime < configForm.checkOutTime)
       return toast.error("出场结束时间不能早于开始时间");
-    if (!configForm.photoPairs.length || configForm.photoPairs.length > 30)
-      return toast.error("照片组数量需为 1 到 30 组");
-    if (configForm.photoPairs.some((pair) => !pair.inPhoto || !pair.outPhoto))
+    const completePhotoPairs = configForm.photoPairs.filter((pair) => pair.inPhoto || pair.outPhoto);
+    if (completePhotoPairs.length > 30)
+      return toast.error("照片组数量最多 30 组");
+    if (completePhotoPairs.some((pair) => !pair.inPhoto || !pair.outPhoto))
       return toast.error("每个照片组都需要上传 1 张进场和 1 张出场照片");
+    if (!completePhotoPairs.length && !configForm.useAttendanceRecordPhotos)
+      return toast.error("请至少上传 1 组照片，或启用人员考勤机历史照片");
     let newlyCreatedPhotoGroupId: string | null = null;
     try {
       const workerName = workerOptions.find((worker) => worker.id === configForm.workerId)?.name || "托管人员";
@@ -295,24 +302,27 @@ export function ManagedAttendancePage(_props: { embedded?: boolean }) {
         project_id: selectedProjectId,
         name: `${workerName}托管照片组`,
         generation_status: "ready",
-        in_photos: configForm.photoPairs.map((pair) => pair.inPhoto),
-        out_photos: configForm.photoPairs.map((pair) => pair.outPhoto),
+        in_photos: completePhotoPairs.map((pair) => pair.inPhoto),
+        out_photos: completePhotoPairs.map((pair) => pair.outPhoto),
         remark: configForm.remark.trim() || null,
       };
-      const photoGroup = editingConfig?.photo_group_id
-        ? await updatePhotoGroup.mutateAsync({ photoGroupId: editingConfig.photo_group_id, payload: photoPayload })
-        : await createPhotoGroup.mutateAsync(photoPayload);
-      if (!editingConfig?.photo_group_id) newlyCreatedPhotoGroupId = photoGroup.id;
+      const photoGroup = completePhotoPairs.length
+        ? (editingConfig?.photo_group_id
+          ? await updatePhotoGroup.mutateAsync({ photoGroupId: editingConfig.photo_group_id, payload: photoPayload })
+          : await createPhotoGroup.mutateAsync(photoPayload))
+        : null;
+      if (photoGroup && !editingConfig?.photo_group_id) newlyCreatedPhotoGroupId = photoGroup.id;
       const payload: ManagedAttendanceConfigPayload = {
         project_id: selectedProjectId,
         worker_id: configForm.workerId,
-        photo_group_id: photoGroup.id,
+        photo_group_id: photoGroup?.id || null,
         monthly_attendance_days: days,
         shift: editingConfig?.shift === "night" ? "night" : "day",
         check_in_time: configForm.checkInTime,
         check_in_end_time: configForm.checkInEndTime,
         check_out_time: configForm.checkOutTime,
         check_out_end_time: configForm.checkOutEndTime,
+        use_attendance_record_photos: configForm.useAttendanceRecordPhotos,
         is_enabled: editingConfig?.is_enabled ?? true,
         remark: configForm.remark.trim() || null,
       };
@@ -846,6 +856,9 @@ function CalendarPunch({ record }: { record: ManagedAttendanceRecord }) {
           {record.dispatch_message}
         </div>
       ) : null}
+      <div className="border-t px-2 py-1 text-[10px] text-muted-foreground">
+        照片来源：{record.photo_source === "attendance_history" ? "历史考勤" : "照片组"}
+      </div>
     </div>
   );
 }
@@ -1094,11 +1107,26 @@ function ConfigDialog({
                 <Input type="time" aria-label="出场结束时间" value={form.checkOutEndTime} min={form.checkOutTime} onChange={(event) => onFormChange({ ...form, checkOutEndTime: event.target.value })} />
               </div>
             </Field>
+            <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-sky-200 bg-sky-50/60 p-3 lg:col-span-3 dark:border-sky-900 dark:bg-sky-950/20">
+              <input
+                type="checkbox"
+                className="mt-1 size-4 accent-sky-700"
+                checked={form.useAttendanceRecordPhotos}
+                disabled={saving}
+                onChange={(event) => onFormChange({ ...form, useAttendanceRecordPhotos: event.target.checked })}
+              />
+              <span>
+                <span className="block text-sm font-medium">启用人员考勤机考勤数据为照片</span>
+                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                  开启后，系统会把照片组与该人员 7 天前的真实考勤照片混合随机使用。历史照片必须来自同一天且同时有进场、出场记录；同方向多次打卡时随机选 1 张。托管产生的数据和后台生成数据不会参与抽取。
+                </span>
+              </span>
+            </label>
             <div className="space-y-3 lg:col-span-3">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <Label>进出场照片组</Label>
-                  <p className="mt-1 text-xs text-muted-foreground">每组各 1 张进场、出场照片；每天随机使用一组，全部轮完后才会重复（最多 30 组）。</p>
+                  <p className="mt-1 text-xs text-muted-foreground">每组各 1 张进场、出场照片；可与考勤机历史照片一起随机使用。启用上方开关后允许不上传照片组（最多 30 组）。</p>
                 </div>
                 <Button type="button" variant="outline" size="sm" disabled={form.photoPairs.length >= 30 || saving} onClick={() => onFormChange({ ...form, photoPairs: [...form.photoPairs, { inPhoto: "", outPhoto: "" }] })}>
                   <Plus className="mr-1 size-4" />添加一组

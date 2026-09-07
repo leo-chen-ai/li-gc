@@ -9,6 +9,7 @@ export type ManagedAttendanceConfigLike = {
   check_in_end_time: string;
   check_out_time: string;
   check_out_end_time: string;
+  use_attendance_record_photos: boolean;
 };
 
 export type ManagedAttendancePhotoGroupLike = {
@@ -75,6 +76,7 @@ export type ManagedAttendanceConfigPayload = {
   check_in_end_time: string;
   check_out_time: string;
   check_out_end_time: string;
+  use_attendance_record_photos: boolean;
   is_enabled: boolean;
   remark?: string | null;
 };
@@ -94,6 +96,7 @@ export type ManagedAttendanceRecord = {
   shift: ManagedAttendanceShift;
   planned_at: string;
   photo_url?: string | null;
+  photo_source: "photo_group" | "attendance_history";
   status: string;
   dispatch_status: "pending" | "processing" | "success" | "failed" | "skipped";
   dispatched_at?: string | null;

@@ -17,6 +17,7 @@ export type SupplementalAttendanceRecord = {
   shift: string;
   planned_at: string;
   photo_url: string | null;
+  photo_source: "photo_group" | "attendance_history";
   device_id: string | null;
   device_name: string | null;
   device_sn: string | null;

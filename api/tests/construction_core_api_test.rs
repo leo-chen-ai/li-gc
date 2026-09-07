@@ -427,6 +427,7 @@ async fn admin_can_manage_project_nested_resources_and_fake_attendance() {
     .await;
     assert_eq!(status, StatusCode::CREATED);
     let worker_id = body["data"]["id"].as_str().expect("worker id");
+
     let worker_uuid = Uuid::parse_str(worker_id).expect("worker uuid");
 
     let (status, body) = authed_json(
@@ -646,7 +647,8 @@ async fn admin_can_configure_generate_and_list_managed_attendance() {
         json!({
             "device_type": "B厂家",
             "serial_number": "MANAGED-B-001",
-            "device_name": "托管考勤补录机"
+            "device_name": "托管考勤补录机",
+            "direction": 2
         }),
     )
     .await;
@@ -705,6 +707,66 @@ async fn admin_can_configure_generate_and_list_managed_attendance() {
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
     let worker_id = body["data"]["id"].as_str().expect("worker id");
+
+    let worker_uuid = Uuid::parse_str(worker_id).unwrap();
+    let project_uuid = Uuid::parse_str(project_id).unwrap();
+    for (direction, photo, minute) in [
+        (0_i16, "https://example.com/real-in-a.jpg", 0_i64),
+        (0_i16, "https://example.com/real-in-b.jpg", 5_i64),
+        (1_i16, "https://example.com/real-out-a.jpg", 600_i64),
+        (1_i16, "https://example.com/real-out-b.jpg", 605_i64),
+    ] {
+        sqlx::query(
+            r#"
+            INSERT INTO construction_attendance_records (
+                worker_id, project_id, direction, trigger_time, serial_number,
+                photo_path, original_time
+            )
+            VALUES ($1, $2, $3, TIMESTAMPTZ '2025-12-01 00:00:00+00' + make_interval(mins => $4::int),
+                    'MANAGED-B-001', $5, $6)
+            "#,
+        )
+        .bind(worker_uuid)
+        .bind(project_uuid)
+        .bind(direction)
+        .bind(minute)
+        .bind(photo)
+        .bind(format!("real-history-{direction}-{minute}"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    sqlx::query(
+        r#"
+        INSERT INTO construction_attendance_records (
+            worker_id, project_id, direction, trigger_time, serial_number,
+            photo_path, original_time, is_managed_generated
+        ) VALUES
+            ($1, $2, 0, TIMESTAMPTZ '2025-11-01 00:00:00+00', 'MANAGED-B-001',
+             'https://example.com/managed-in.jpg', 'managed-history-in', TRUE),
+            ($1, $2, 1, TIMESTAMPTZ '2025-11-01 10:00:00+00', 'MANAGED-B-001',
+             'https://example.com/managed-out.jpg', 'managed-history-out', TRUE)
+        "#,
+    )
+    .bind(worker_uuid)
+    .bind(project_uuid)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, attendance_body) = get_authed(
+        app.clone(),
+        &format!("/api/v1/admin/projects/{project_id}/attendance-records?page=1&page_size=20"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{attendance_body}");
+    assert!(
+        attendance_body["data"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|record| record.get("is_managed_generated").is_none())
+    );
 
     let a_only_project_id: Uuid = sqlx::query_scalar(
         "INSERT INTO construction_projects (name, status) VALUES ('仅海厂家项目', 1) RETURNING id",
@@ -828,11 +890,21 @@ async fn admin_can_configure_generate_and_list_managed_attendance() {
             "monthly_attendance_days": 3,
             "shift": "night",
             "check_in_time": "19:10",
-            "check_out_time": "23:05"
+            "check_in_end_time": "19:20",
+            "check_out_time": "23:05",
+            "check_out_end_time": "23:15"
         }),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let ignored_device_config_id = body["data"]["id"].as_str().unwrap();
+    let (status, body) = delete_authed(
+        app.clone(),
+        &format!("/api/v1/admin/managed-attendance/configs/{ignored_device_config_id}"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
 
     let (status, body) = authed_json(
         app.clone(),
@@ -847,7 +919,10 @@ async fn admin_can_configure_generate_and_list_managed_attendance() {
             "monthly_attendance_days": 3,
             "shift": "night",
             "check_in_time": "19:10",
+            "check_in_end_time": "19:20",
             "check_out_time": "23:05",
+            "check_out_end_time": "23:15",
+            "use_attendance_record_photos": true,
             "is_enabled": true,
             "remark": "张三夜班托管"
         }),
@@ -857,12 +932,7 @@ async fn admin_can_configure_generate_and_list_managed_attendance() {
     let config_id = body["data"]["id"].as_str().expect("config id");
     assert_eq!(body["data"]["worker_name"], "张三");
     assert_eq!(body["data"]["shift"], "night");
-    assert_eq!(body["data"]["attendance_device_name"], "托管考勤补录机");
-    assert_eq!(
-        body["data"]["attendance_device_serial_number"],
-        "MANAGED-B-001"
-    );
-    assert_eq!(body["data"]["attendance_device_type"], "B厂家");
+    assert_eq!(body["data"]["use_attendance_record_photos"], true);
 
     let (status, body) = authed_json(
         app.clone(),
@@ -914,10 +984,43 @@ async fn admin_can_configure_generate_and_list_managed_attendance() {
         .collect::<std::collections::HashSet<_>>();
     assert_eq!(attendance_dates.len(), 3);
     assert!(records.iter().any(|record| {
-        record["direction"] == 0 && record["photo_url"] == "https://example.com/zhangsan-in.jpg"
+        record["direction"] == 0
+            && record["photo_url"] == "https://example.com/zhangsan-in.jpg"
+            && record["photo_source"] == "photo_group"
     }));
     assert!(records.iter().any(|record| {
         record["direction"] == 1 && record["photo_url"] == "https://example.com/zhangsan-out.jpg"
+    }));
+    let real_in_urls = [
+        "https://example.com/real-in-a.jpg",
+        "https://example.com/real-in-b.jpg",
+    ];
+    let real_out_urls = [
+        "https://example.com/real-out-a.jpg",
+        "https://example.com/real-out-b.jpg",
+    ];
+    let real_pair_date = records.iter().find_map(|record| {
+        record["photo_url"]
+            .as_str()
+            .filter(|url| real_in_urls.contains(url))
+            .and_then(|_| record["attendance_date"].as_str())
+    });
+    assert!(
+        real_pair_date.is_some(),
+        "historical photo pair should be used"
+    );
+    assert!(records.iter().any(|record| {
+        record["attendance_date"].as_str() == real_pair_date
+            && record["photo_source"] == "attendance_history"
+            && record["photo_url"]
+                .as_str()
+                .is_some_and(|url| real_out_urls.contains(&url))
+    }));
+    assert!(!records.iter().any(|record| {
+        matches!(
+            record["photo_url"].as_str(),
+            Some("https://example.com/managed-in.jpg" | "https://example.com/managed-out.jpg")
+        )
     }));
 
     let protected: (Uuid, chrono::DateTime<chrono::Utc>, serde_json::Value) = sqlx::query_as(
@@ -942,7 +1045,7 @@ async fn admin_can_configure_generate_and_list_managed_attendance() {
     .await
     .unwrap();
     sqlx::query(
-        "UPDATE construction_managed_attendance_configs SET check_in_time = '20:10' WHERE id = $1",
+        "UPDATE construction_managed_attendance_configs SET check_in_time = '19:15' WHERE id = $1",
     )
     .bind(Uuid::parse_str(config_id).unwrap())
     .execute(&pool)
