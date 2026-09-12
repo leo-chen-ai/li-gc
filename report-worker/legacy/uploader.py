@@ -22,6 +22,10 @@ from browser_runtime import browser_profile_dir, close_driver, create_driver
 logger = logging.getLogger(__name__)
 
 HOME_URL = "https://www.zjzwfw.gov.cn/zjservice-fe/#/home"
+WORKGUIDE_URL = (
+    "https://www.zjzwfw.gov.cn/zjservice-fe/#/workguide"
+    "?localInnerCode=1603e521-478e-45ff-9162-138fc818df6b"
+)
 DEFAULT_UPLOAD_TIMEOUT = 900
 PAGE_LOAD_TIMEOUT = 30
 EXISTING_MARKERS = ('已存在', '已经存在', '人员已备案', '重复参保', '重复申报')
@@ -634,10 +638,12 @@ class Uploader:
                     )
                 except TimeoutException:
                     pass
+                self._recover_message_center_navigation()
                 time.sleep(1)
                 return True
             if self.driver.current_url != original_url:
                 logger.info(f"当前窗口已跳转到办事页面: {self.driver.current_url}")
+                self._recover_message_center_navigation()
                 time.sleep(1)
                 return True
             if _find_first(self.driver, [
@@ -654,6 +660,29 @@ class Uploader:
         if strict:
             raise RuntimeError(message)
         return False
+
+    def _recover_message_center_navigation(self):
+        """Bypass the portal's broken service redirect to the user message center."""
+        current_url = (self.driver.current_url or '').lower()
+        if 'zjucenter' not in current_url or '#/mymessage' not in current_url:
+            return False
+        logger.warning("办事入口错误跳转到用户消息中心，改用明确办事指南地址")
+        try:
+            self.driver.get(WORKGUIDE_URL)
+        except TimeoutException:
+            logger.warning("直接打开办事指南超时，继续检查已渲染页面")
+            try:
+                self.driver.execute_script('window.stop();')
+            except Exception:
+                pass
+        try:
+            self.long_wait.until(
+                lambda d: d.execute_script('return document.readyState') in ('complete', 'interactive')
+            )
+        except TimeoutException:
+            pass
+        logger.info("已切换到明确办事指南地址: %s", self.driver.current_url)
+        return True
 
     def _handle_site_selection(self):
         logger.info("检查站点选择弹窗")
@@ -773,12 +802,21 @@ class Uploader:
 
     def _target_session_expired(self):
         current_url = (self.driver.current_url or '').lower()
-        if '#/mymessage' not in current_url and 'zjucenter' not in current_url:
-            return False
-        return _find_first(self.driver, [
-            (By.XPATH, "//*[self::a or self::button or self::span][normalize-space(.)='立即登录']"),
+        # The portal can reject the cross-domain session in two different ways:
+        # redirect to the user center, or leave us on the workguide shell while
+        # rendering a login entry.  The entry is currently wrapped by a div, so
+        # restricting this check to a/button/span misses the real expired page.
+        login_entry = _find_first(self.driver, [
+            (By.XPATH, "//*[normalize-space(.)='立即登录']"),
             (By.XPATH, "//*[self::a or self::button][normalize-space(.)='登录']"),
-        ]) is not None
+        ])
+        if login_entry is not None:
+            return True
+
+        # A service click must never land on the message center.  Even when its
+        # login component has not finished rendering, this route means the
+        # business-system session was rejected and should be rebuilt promptly.
+        return '#/mymessage' in current_url and 'zjucenter' in current_url
 
     def _log_page_state(self, label):
         try:

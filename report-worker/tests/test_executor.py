@@ -367,7 +367,13 @@ def test_target_login_fails_when_confirmation_button_is_missing(monkeypatch):
     assert login.login() is False
 
 
-def test_sms_code_must_arrive_after_current_login_request(tmp_path):
+def test_sms_code_must_arrive_after_current_login_request(tmp_path, monkeypatch):
+    class FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 8, 7, 10, 0, 12, tzinfo=tz)
+
+    monkeypatch.setattr(feishu_listener, "datetime", FixedDatetime)
     csv_path = tmp_path / "verification_codes.csv"
     csv_path.write_text(
         "code,sms_time,raw_message,received_at\n"
@@ -1049,6 +1055,7 @@ def test_online_handle_does_not_treat_workguide_text_as_navigation(monkeypatch):
     instance.driver = FakeDriver()
     instance.long_wait = object()
     instance._is_upload_form_visible = lambda: False
+    instance._target_session_expired = lambda: False
 
     def fake_find(_driver, selectors, **_kwargs):
         if any("在线办理" in selector for _by, selector in selectors):
@@ -1082,15 +1089,68 @@ def test_online_handle_rejects_expired_user_center_session(monkeypatch):
         instance._click_online_handle()
 
 
-def test_target_session_expired_requires_login_entry(monkeypatch):
+def test_target_session_expired_detects_login_entry_on_workguide(monkeypatch):
+    class FakeDriver:
+        current_url = "https://www.zjzwfw.gov.cn/zjservice-fe/#/workguide"
+
+    instance = uploader.Uploader.__new__(uploader.Uploader)
+    instance.driver = FakeDriver()
+
+    def fake_find(_driver, selectors, **_kwargs):
+        assert any(
+            selector == "//*[normalize-space(.)='立即登录']"
+            for _by, selector in selectors
+        )
+        return object()
+
+    monkeypatch.setattr(uploader, "_find_first", fake_find)
+
+    assert instance._target_session_expired() is True
+
+
+def test_target_session_expired_detects_message_center_before_login_renders(monkeypatch):
     class FakeDriver:
         current_url = "https://www.zjzwfw.gov.cn/zjucenter/#/mymessage"
 
     instance = uploader.Uploader.__new__(uploader.Uploader)
     instance.driver = FakeDriver()
-    monkeypatch.setattr(uploader, "_find_first", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(uploader, "_find_first", lambda *_args, **_kwargs: None)
 
     assert instance._target_session_expired() is True
+
+
+def test_target_session_expired_ignores_authenticated_workguide(monkeypatch):
+    class FakeDriver:
+        current_url = "https://www.zjzwfw.gov.cn/zjservice-fe/#/workguide"
+
+    instance = uploader.Uploader.__new__(uploader.Uploader)
+    instance.driver = FakeDriver()
+    monkeypatch.setattr(uploader, "_find_first", lambda *_args, **_kwargs: None)
+
+    assert instance._target_session_expired() is False
+
+
+def test_message_center_navigation_recovers_to_direct_workguide():
+    class FakeWait:
+        def until(self, condition):
+            return condition(driver)
+
+    class FakeDriver:
+        current_url = "https://www.zjzwfw.gov.cn/zjucenter/#/mymessage"
+
+        def get(self, url):
+            self.current_url = url
+
+        def execute_script(self, _script):
+            return "complete"
+
+    driver = FakeDriver()
+    instance = uploader.Uploader.__new__(uploader.Uploader)
+    instance.driver = driver
+    instance.long_wait = FakeWait()
+
+    assert instance._recover_message_center_navigation() is True
+    assert driver.current_url == uploader.WORKGUIDE_URL
 
 
 def test_confirmation_is_skipped_when_form_is_already_visible():
