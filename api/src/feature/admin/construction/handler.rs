@@ -15009,10 +15009,10 @@ fn push_typed_bind_query(
         }
         ColumnKind::Money => match value_to_optional_money(column.name, value)? {
             Some(value) => {
-                query.push_bind(value).push("::numeric(16,2)");
+                query.push_bind(value).push("::numeric(18,4)");
             }
             None => {
-                query.push("NULL::numeric(16,2)");
+                query.push("NULL::numeric(18,4)");
             }
         },
         ColumnKind::Boolean => {
@@ -15112,7 +15112,7 @@ fn parse_money_amount(column: &str, value: &str) -> Result<String, ApiError> {
         .trim()
         .to_owned();
     if normalized.is_empty() {
-        return Ok("0.00".to_owned());
+        return Ok("0.0000".to_owned());
     }
 
     let (sign, number) = normalized
@@ -15121,17 +15121,23 @@ fn parse_money_amount(column: &str, value: &str) -> Result<String, ApiError> {
         .unwrap_or(("", normalized.as_str()));
     let mut parts = number.split('.');
     let yuan = parts.next().unwrap_or_default();
-    let cents = parts.next().unwrap_or_default();
+    let decimals = parts.next().unwrap_or_default();
     if parts.next().is_some()
         || yuan.is_empty()
         || !yuan.chars().all(|ch| ch.is_ascii_digit())
-        || cents.len() > 2
-        || !cents.chars().all(|ch| ch.is_ascii_digit())
+        || !decimals.chars().all(|ch| ch.is_ascii_digit())
     {
         return Err(invalid_column_value(column, "amount"));
     }
 
-    Ok(format!("{sign}{yuan}.{}", format!("{cents:0<2}")))
+    if decimals.len() > 4 {
+        return Err(invalid_column_value(
+            column,
+            "amount with up to 4 decimal places",
+        ));
+    }
+
+    Ok(format!("{sign}{yuan}.{}", format!("{decimals:0<4}")))
 }
 
 #[cfg(test)]
@@ -15643,18 +15649,24 @@ mod tests {
     }
 
     #[test]
-    fn money_amount_parser_accepts_two_decimal_places() {
+    fn money_amount_parser_accepts_four_decimal_places() {
         assert_eq!(
             value_to_optional_money("contract_amount", &Value::String("1234.56".into())).unwrap(),
-            Some("1234.56".to_owned())
+            Some("1234.5600".to_owned())
         );
         assert_eq!(
             value_to_optional_money("unit_price", &serde_json::json!(86.5)).unwrap(),
-            Some("86.50".to_owned())
+            Some("86.5000".to_owned())
         );
-        assert!(
-            value_to_optional_money("contract_amount", &Value::String("1.234".into())).is_err()
+        assert_eq!(
+            value_to_optional_money("contract_amount", &Value::String("9697.7884".into())).unwrap(),
+            Some("9697.7884".to_owned())
         );
+        assert_eq!(
+            value_to_optional_money("margin_amount", &Value::String("-1.235".into())).unwrap(),
+            Some("-1.2350".to_owned())
+        );
+        assert!(value_to_optional_money("labor_cost", &Value::String("99.99999".into())).is_err());
     }
 
     #[test]

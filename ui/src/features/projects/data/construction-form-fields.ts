@@ -379,7 +379,7 @@ const workStatusOptions: ConstructionFormOption[] = [
 ];
 
 const moneyInput = {
-  step: "0.01",
+  step: "0.0001",
   inputMode: "decimal" as const,
 };
 
