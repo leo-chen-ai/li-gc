@@ -9217,6 +9217,8 @@ pub async fn create_managed_attendance_config(
         .and_then(|value| Uuid::parse_str(value).ok())
         .ok_or_else(|| invalid_input("Failed to read managed attendance config id"))?;
 
+    generate_managed_records_for_current_month(state.db.pool(), config_id).await?;
+
     let row = fetch_managed_attendance_config(state.db.pool(), config_id).await?;
     Ok(ApiSuccess::default()
         .with_code(StatusCode::CREATED)
@@ -9257,6 +9259,7 @@ pub async fn update_managed_attendance_config(
     )
     .await?;
     retire_ineligible_managed_dispatch_jobs(state.db.pool(), config_id, "托管配置已停用").await?;
+    generate_managed_records_for_current_month(state.db.pool(), config_id).await?;
     let row = fetch_managed_attendance_config(state.db.pool(), config_id).await?;
     Ok(ApiSuccess::default().with_data(row))
 }
@@ -12927,6 +12930,41 @@ pub(crate) async fn generate_managed_records_for_month(
     config_id: Uuid,
     month: chrono::NaiveDate,
 ) -> Result<Value, ApiError> {
+    generate_managed_records_for_month_from(pool, config_id, month, month).await
+}
+
+async fn generate_managed_records_for_current_month(
+    pool: &sqlx::PgPool,
+    config_id: Uuid,
+) -> Result<Option<Value>, ApiError> {
+    let timezone = chrono::FixedOffset::east_opt(8 * 3600)
+        .ok_or_else(|| invalid_column_value("timezone", "UTC+8"))?;
+    let today = chrono::Utc::now().with_timezone(&timezone).date_naive();
+    let month = chrono::NaiveDate::from_ymd_opt(today.year(), today.month(), 1)
+        .ok_or_else(|| invalid_column_value("month", "YYYY-MM"))?;
+    let is_enabled = sqlx::query_scalar::<_, bool>(
+        "SELECT is_enabled FROM construction_managed_attendance_configs WHERE id = $1 AND is_deleted = FALSE",
+    )
+    .bind(config_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(db_error)?
+    .ok_or_else(not_found)?;
+    if !is_enabled {
+        return Ok(None);
+    }
+
+    generate_managed_records_for_month_from(pool, config_id, month, today)
+        .await
+        .map(Some)
+}
+
+async fn generate_managed_records_for_month_from(
+    pool: &sqlx::PgPool,
+    config_id: Uuid,
+    month: chrono::NaiveDate,
+    generation_start: chrono::NaiveDate,
+) -> Result<Value, ApiError> {
     let row = sqlx::query(
         r#"
         SELECT
@@ -12983,7 +13021,8 @@ pub(crate) async fn generate_managed_records_for_month(
     let in_end_time = parse_managed_time("check_in_end_time", &check_in_end_time)?;
     let out_time = parse_managed_time("check_out_time", &check_out_time)?;
     let out_end_time = parse_managed_time("check_out_end_time", &check_out_end_time)?;
-    let attendance_days = selected_month_days(month, monthly_attendance_days, config_id)?;
+    let attendance_days =
+        selected_month_days_from(month, monthly_attendance_days, config_id, generation_start)?;
     let next_month =
         next_month_start(month).ok_or_else(|| invalid_column_value("month", "YYYY-MM"))?;
     let mut photo_pairs =
@@ -13017,6 +13056,7 @@ pub(crate) async fn generate_managed_records_for_month(
           AND j.status = 'pending'
           AND r.config_id = $1 AND r.is_deleted = FALSE
           AND r.attendance_date >= $2 AND r.attendance_date < $3
+          AND r.attendance_date >= $5
           AND NOT (r.attendance_date = ANY($4))
         "#,
     )
@@ -13024,6 +13064,7 @@ pub(crate) async fn generate_managed_records_for_month(
     .bind(month)
     .bind(next_month)
     .bind(&attendance_days)
+    .bind(generation_start)
     .execute(&mut *tx)
     .await
     .map_err(db_error)?;
@@ -13037,6 +13078,7 @@ pub(crate) async fn generate_managed_records_for_month(
             updated_at = NOW()
         WHERE config_id = $1 AND is_deleted = FALSE
           AND attendance_date >= $2 AND attendance_date < $3
+          AND attendance_date >= $5
           AND NOT (attendance_date = ANY($4))
           AND NOT EXISTS (
               SELECT 1
@@ -13054,6 +13096,7 @@ pub(crate) async fn generate_managed_records_for_month(
     .bind(month)
     .bind(next_month)
     .bind(&attendance_days)
+    .bind(generation_start)
     .execute(&mut *tx)
     .await
     .map_err(db_error)?;
@@ -13678,27 +13721,39 @@ fn push_managed_record_filters(
     }
 }
 
+#[cfg(test)]
 fn selected_month_days(
     month: chrono::NaiveDate,
     monthly_attendance_days: i16,
     config_id: Uuid,
 ) -> Result<Vec<chrono::NaiveDate>, ApiError> {
+    selected_month_days_from(month, monthly_attendance_days, config_id, month)
+}
+
+fn selected_month_days_from(
+    month: chrono::NaiveDate,
+    monthly_attendance_days: i16,
+    config_id: Uuid,
+    generation_start: chrono::NaiveDate,
+) -> Result<Vec<chrono::NaiveDate>, ApiError> {
     let next_month =
         next_month_start(month).ok_or_else(|| invalid_column_value("month", "YYYY-MM"))?;
     let days_in_month = (next_month - chrono::Duration::days(1)).day();
-    let target_days = u32::try_from(monthly_attendance_days)
-        .map_err(|_| invalid_column_value("monthly_attendance_days", "1-31"))?
-        .min(days_in_month);
+    let generation_start = generation_start.max(month);
     let mut days = (1..=days_in_month)
         .filter_map(|day| chrono::NaiveDate::from_ymd_opt(month.year(), month.month(), day))
+        .filter(|day| *day >= generation_start)
         .collect::<Vec<_>>();
+    let target_days = usize::try_from(monthly_attendance_days)
+        .map_err(|_| invalid_column_value("monthly_attendance_days", "1-31"))?
+        .min(days.len());
     let mut seed = [0_u8; 32];
     seed[..16].copy_from_slice(config_id.as_bytes());
     seed[16..20].copy_from_slice(&month.year().to_le_bytes());
     seed[20..24].copy_from_slice(&month.month().to_le_bytes());
     let mut rng = StdRng::from_seed(seed);
     days.shuffle(&mut rng);
-    days.truncate(target_days as usize);
+    days.truncate(target_days);
     days.sort_unstable();
     Ok(days)
 }
@@ -15769,6 +15824,22 @@ mod tests {
     }
 
     #[test]
+    fn managed_attendance_days_can_start_from_today() {
+        let config_id = Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
+        let month = chrono::NaiveDate::from_ymd_opt(2026, 9, 1).unwrap();
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 9, 15).unwrap();
+
+        let days = selected_month_days_from(month, 26, config_id, today).unwrap();
+
+        assert_eq!(days.len(), 16);
+        assert!(days.iter().all(|day| *day >= today));
+        assert_eq!(
+            days.last().copied(),
+            chrono::NaiveDate::from_ymd_opt(2026, 9, 30)
+        );
+    }
+
+    #[test]
     fn managed_planned_time_is_stable_and_inside_configured_range() {
         let config_id = Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
         let date = chrono::NaiveDate::from_ymd_opt(2026, 8, 9).unwrap();
@@ -15805,7 +15876,7 @@ mod tests {
                 .len(),
             3
         );
-        for (in_photo, out_photo) in first {
+        for (in_photo, out_photo, _) in first {
             assert_eq!(
                 in_photo.trim_start_matches("in-"),
                 out_photo.trim_start_matches("out-")

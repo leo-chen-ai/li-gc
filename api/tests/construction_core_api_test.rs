@@ -933,6 +933,23 @@ async fn admin_can_configure_generate_and_list_managed_attendance() {
     assert_eq!(body["data"]["worker_name"], "张三");
     assert_eq!(body["data"]["shift"], "night");
     assert_eq!(body["data"]["use_attendance_record_photos"], true);
+    let current_month_records: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)
+        FROM construction_managed_attendance_records
+        WHERE config_id = $1
+          AND is_deleted = FALSE
+          AND attendance_date >= (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Shanghai')::date
+        "#,
+    )
+    .bind(Uuid::parse_str(config_id).unwrap())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(
+        current_month_records > 0,
+        "创建托管配置后应自动生成今天及之后的记录"
+    );
 
     let (status, body) = authed_json(
         app.clone(),
@@ -949,10 +966,14 @@ async fn admin_can_configure_generate_and_list_managed_attendance() {
         r#"
         SELECT COUNT(*)
         FROM device_dispatch_jobs
+        JOIN construction_managed_attendance_records r
+          ON r.id = device_dispatch_jobs.managed_attendance_record_id
         WHERE job_type = 'supplemental_attendance'
           AND adapter_code = 'vendor_b'
           AND transport = 'http_push'
           AND attendance_device_id = $1
+          AND r.attendance_date >= DATE '2026-07-01'
+          AND r.attendance_date < DATE '2026-08-01'
         "#,
     )
     .bind(Uuid::parse_str(attendance_device_id).unwrap())
