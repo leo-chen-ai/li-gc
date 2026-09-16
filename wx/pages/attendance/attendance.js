@@ -62,14 +62,89 @@ function buildMonthCalendar(month, activeDate, days = []) {
   return cells;
 }
 
+/** 展示用时间：兼容月历已格式化的 HH:MM，以及 ISO/原始时间串 */
 function formatTime(value) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  const seconds = String(date.getSeconds()).padStart(2, "0");
-  return `${hours}:${minutes}:${seconds}`;
+  if (value == null || value === "") return "";
+  const raw = String(value).trim();
+  if (!raw) return "";
+
+  const hm = raw.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (hm) {
+    const base = `${pad2(hm[1])}:${hm[2]}`;
+    return hm[3] != null ? `${base}:${hm[3]}` : base;
+  }
+
+  // 去掉时区后缀再解析，避免部分机型对 +08:00 / Z 解析异常
+  const normalized = raw
+    .replace(" ", "T")
+    .replace(/([+-]\d{2}:\d{2}|Z)$/i, "");
+  const date = new Date(normalized.includes("T") ? normalized : raw);
+  if (Number.isNaN(date.getTime())) {
+    const fallback = raw.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+    if (!fallback) return "";
+    const base = `${pad2(fallback[1])}:${fallback[2]}`;
+    return fallback[3] != null ? `${base}:${fallback[3]}` : base;
+  }
+  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
+}
+
+function isDirectionIn(direction) {
+  return Number(direction) === 0;
+}
+
+function isDirectionOut(direction) {
+  return Number(direction) === 1;
+}
+
+/** 月历按工人分页，需翻页拉全，避免大项目只拿到前 100 人 */
+async function fetchAttendanceCalendarAll(projectId, month) {
+  const pageSize = 100;
+  const all = [];
+  let page = 1;
+  let total = Infinity;
+
+  while (all.length < total && page <= 50) {
+    const result = await listResource(projectId, "attendance-records", {
+      view: "calendar",
+      month,
+      page,
+      page_size: pageSize,
+    });
+    const items = Array.isArray(result.items) ? result.items : [];
+    total = Number(result.total);
+    if (!Number.isFinite(total) || total < 0) total = items.length;
+    all.push(...items);
+    if (!items.length || items.length < pageSize) break;
+    page += 1;
+  }
+
+  return all;
+}
+
+/** 从月历行提取某日每人最早进 / 最晚出（与 PC 月历同源） */
+function buildDaySummaryByWorker(calendarRows, dateIso) {
+  const dayNum = Number(String(dateIso || "").slice(8, 10));
+  const map = {};
+  if (!dayNum) return map;
+
+  (calendarRows || []).forEach((row) => {
+    const workerId = row.worker_id;
+    if (!workerId || !Array.isArray(row.days)) return;
+    const day = row.days.find((item) => Number(item.day) === dayNum);
+    if (!day) return;
+    const firstIn = day.first_in_time || "";
+    const lastOut = day.last_out_time || "";
+    const present = Boolean(
+      day.first_in_record_id
+      || day.last_out_record_id
+      || firstIn
+      || lastOut,
+    );
+    if (!present) return;
+    map[workerId] = { firstIn, lastOut, present: true };
+  });
+
+  return map;
 }
 
 function recentDates(days = 8) {
@@ -110,6 +185,7 @@ Page({
     detailVisible: false,
     currentDetail: null,
     calendarRowsByMonth: {},
+    daySummaryByWorker: {},
     calendarWeekdays: ["日", "一", "二", "三", "四", "五", "六"],
     dailyRecordsByDate: {},
     dateLoading: false,
@@ -186,8 +262,9 @@ Page({
     this.setData({ project, projectName: project.title || project.name || "已授权项目" });
 
     try {
-      // 后端 page_size 最大 100，传更大值无效；首屏并行拉取基础数据
-      const [unitsResult, teamsResult, workersResult, attendanceResult] = await Promise.all([
+      // 列表签入/签出时间改走月历汇总（全量打卡聚合），避免当日明细最多 100 条截断导致早签入丢失
+      const month = monthKey(this.data.activeDateValue);
+      const [unitsResult, teamsResult, workersResult, attendanceResult, calendarRows] = await Promise.all([
         listResource(project.id, "units", { page: 1, page_size: 100 }),
         listResource(project.id, "teams", { page: 1, page_size: 100 }),
         listResource(project.id, "workers", { page: 1, page_size: 100 }),
@@ -196,23 +273,27 @@ Page({
           page_size: 100,
           attendance_date: this.data.activeDateValue,
         }),
+        fetchAttendanceCalendarAll(project.id, month),
       ]);
       const units = unitsResult.items || [];
       const teams = teamsResult.items || [];
       const workers = workersResult.items || [];
       const records = attendanceResult.items || [];
+      const daySummaryByWorker = buildDaySummaryByWorker(calendarRows, this.data.activeDateValue);
       this.setData({
         dateLoading: false,
         units,
         teams,
         workers,
         records,
+        daySummaryByWorker,
+        calendarRowsByMonth: { ...this.data.calendarRowsByMonth, [month]: calendarRows },
         dailyRecordsByDate: { ...this.data.dailyRecordsByDate, [this.data.activeDateValue]: records },
         teamOptions: ["全部班组"].concat(teams.map((team) => team.name || "未命名班组")),
         companyOptions: ["全部参建单位"].concat(units.map((unit) => unit.company_name || "未命名单位")),
       }, () => {
         this.refresh();
-        this.loadMonthCalendarCounts();
+        this.applyMonthCalendarCounts(calendarRows, month);
       });
     } catch (error) {
       this.setData({ dateLoading: false });
@@ -239,28 +320,66 @@ Page({
     const project = this.data.project;
     if (!project || !project.id) return;
     const date = this.data.activeDateValue;
-    const cached = this.data.dailyRecordsByDate[date];
-    if (cached) {
-      this.setData({ records: cached }, () => this.refresh());
-      return;
-    }
-    this.setData({ dateLoading: true });
-    try {
-      const attendanceResult = await listResource(project.id, "attendance-records", {
-        page: 1,
-        page_size: 100,
-        attendance_date: date,
-      });
-      const records = attendanceResult.items || [];
+    const month = monthKey(date);
+
+    const applyDay = (records, calendarRows) => {
+      const daySummaryByWorker = buildDaySummaryByWorker(calendarRows, date);
       this.setData({
         records,
+        daySummaryByWorker,
+        calendarRowsByMonth: { ...this.data.calendarRowsByMonth, [month]: calendarRows },
         dailyRecordsByDate: { ...this.data.dailyRecordsByDate, [date]: records },
         dateLoading: false,
-      }, () => this.refresh());
+      }, () => {
+        this.refresh();
+        this.applyMonthCalendarCounts(calendarRows, month);
+      });
+    };
+
+    const cachedRecords = this.data.dailyRecordsByDate[date];
+    const cachedCalendar = this.data.calendarRowsByMonth[month];
+    if (cachedRecords && cachedCalendar) {
+      applyDay(cachedRecords, cachedCalendar);
+      return;
+    }
+
+    this.setData({ dateLoading: true });
+    try {
+      const [attendanceResult, calendarRows] = await Promise.all([
+        cachedRecords
+          ? Promise.resolve({ items: cachedRecords })
+          : listResource(project.id, "attendance-records", {
+            page: 1,
+            page_size: 100,
+            attendance_date: date,
+          }),
+        cachedCalendar
+          ? Promise.resolve(cachedCalendar)
+          : fetchAttendanceCalendarAll(project.id, month),
+      ]);
+      applyDay(attendanceResult.items || cachedRecords || [], calendarRows);
     } catch (error) {
       this.setData({ dateLoading: false });
       wx.showToast({ title: error.message || "考勤加载失败", icon: "none" });
     }
+  },
+
+  applyMonthCalendarCounts(calendarRows, month) {
+    const countMap = {};
+    (calendarRows || []).forEach((row) => {
+      if (!Array.isArray(row.days)) return;
+      row.days.forEach((day) => {
+        const dayNum = Number(day.day);
+        if (!dayNum || dayNum < 1 || dayNum > 31) return;
+        const date = `${month}-${pad2(dayNum)}`;
+        countMap[date] = (countMap[date] || 0) + 1;
+      });
+    });
+    const dateItems = this.data.dateItems.map((item) => ({
+      ...item,
+      count: countMap[item.value] || 0,
+    }));
+    this.setData({ dateItems });
   },
 
   async loadMonthCalendarCounts() {
@@ -268,28 +387,15 @@ Page({
     if (!project || !project.id) return;
     try {
       const month = monthKey(this.data.activeDateValue);
-      const result = await listResource(project.id, "attendance-records", {
-        view: "calendar",
-        month,
-        page: 1,
-        page_size: 100,
-      });
-      const rows = result.items || [];
-      const countMap = {};
-      rows.forEach((row) => {
-        if (!Array.isArray(row.days)) return;
-        row.days.forEach((day) => {
-          const dayNum = Number(day.day);
-          if (!dayNum || dayNum < 1 || dayNum > 31) return;
-          const date = `${month}-${pad2(dayNum)}`;
-          countMap[date] = (countMap[date] || 0) + 1;
-        });
-      });
-      const dateItems = this.data.dateItems.map((item) => ({
-        ...item,
-        count: countMap[item.value] || 0,
-      }));
-      this.setData({ dateItems });
+      const cached = this.data.calendarRowsByMonth[month];
+      const rows = cached || await fetchAttendanceCalendarAll(project.id, month);
+      if (!cached) {
+        this.setData({
+          calendarRowsByMonth: { ...this.data.calendarRowsByMonth, [month]: rows },
+          daySummaryByWorker: buildDaySummaryByWorker(rows, this.data.activeDateValue),
+        }, () => this.refresh());
+      }
+      this.applyMonthCalendarCounts(rows, month);
     } catch (error) {
       console.error("加载月出勤计数失败", error);
     }
@@ -340,11 +446,18 @@ Page({
   buildWorkerAttendance(worker) {
     const team = this.data.teams.find((item) => item.id === worker.team_id);
     const unit = this.data.units.find((item) => item.id === worker.unit_id);
+    const summary = this.data.daySummaryByWorker[worker.id];
     const records = this.data.records
       .filter((record) => record.worker_id === worker.id)
       .sort((left, right) => new Date(left.trigger_time) - new Date(right.trigger_time));
-    const inRecord = records.find((record) => record.direction === 0);
-    const outRecord = records.slice().reverse().find((record) => record.direction === 1);
+    const inRecord = records.find((record) => isDirectionIn(record.direction));
+    const outRecord = records.slice().reverse().find((record) => isDirectionOut(record.direction));
+    // 优先用月历汇总（全量），截断的当日明细仅作兜底
+    const signIn = formatTime(summary && summary.firstIn)
+      || formatTime(inRecord && (inRecord.trigger_time || inRecord.original_time));
+    const signOut = formatTime(summary && summary.lastOut)
+      || formatTime(outRecord && (outRecord.trigger_time || outRecord.original_time));
+    const present = Boolean((summary && summary.present) || records.length);
     return {
       id: worker.id,
       name: worker.name || "未命名工人",
@@ -352,13 +465,13 @@ Page({
       workType: optionLabel(fieldSets.workers, "work_type", worker.work_type),
       teamName: team ? team.name || "未命名班组" : "未匹配班组",
       companyName: unit ? unit.company_name || "未命名单位" : "未匹配单位",
-      signIn: formatTime(inRecord && inRecord.trigger_time),
-      signOut: formatTime(outRecord && outRecord.trigger_time),
-      status: records.length ? "已出勤" : "未出勤",
+      signIn,
+      signOut,
+      status: present ? "已出勤" : "未出勤",
       avatar: worker.avatar || assetPath("/module-workers.png"),
       records: records.map((record) => ({
         ...record,
-        timeText: formatTime(record.trigger_time),
+        timeText: formatTime(record.trigger_time || record.original_time),
         directionText: optionLabel(fieldSets.attendance, "direction", record.direction),
         photo: record.closeup_photo || record.photo_path || record.overall_photo || "",
       })),
@@ -381,7 +494,41 @@ Page({
       },
       detailVisible: true,
     });
+    // 详情里补拉该工人当日全量打卡，避免列表截断导致流水缺签入
+    this.loadWorkerDayRecords(id);
     await this.loadWorkerMonthCalendar(id, month);
+  },
+
+  async loadWorkerDayRecords(workerId) {
+    const project = this.data.project;
+    const date = this.data.activeDateValue;
+    if (!project || !project.id || !workerId || !date) return;
+    try {
+      const result = await listResource(project.id, "attendance-records", {
+        page: 1,
+        page_size: 100,
+        attendance_date: date,
+        worker_id: workerId,
+      });
+      const records = (result.items || [])
+        .slice()
+        .sort((left, right) => new Date(left.trigger_time) - new Date(right.trigger_time))
+        .map((record) => ({
+          ...record,
+          timeText: formatTime(record.trigger_time || record.original_time),
+          directionText: optionLabel(fieldSets.attendance, "direction", record.direction),
+          photo: record.closeup_photo || record.photo_path || record.overall_photo || "",
+        }));
+      if (!this.data.currentDetail || this.data.currentDetail.id !== workerId) return;
+      this.setData({
+        currentDetail: {
+          ...this.data.currentDetail,
+          records,
+        },
+      });
+    } catch (error) {
+      console.error("加载工人当日打卡失败", error);
+    }
   },
 
   async loadWorkerMonthCalendar(workerId, month) {
@@ -392,19 +539,14 @@ Page({
     }
 
     try {
-      const result = await listResource(this.data.project.id, "attendance-records", {
-        view: "calendar",
-        month,
-        page: 1,
-        page_size: 100,
-      });
-      const rows = result.items || [];
+      const rows = await fetchAttendanceCalendarAll(this.data.project.id, month);
       this.setData({
         calendarRowsByMonth: {
           ...this.data.calendarRowsByMonth,
           [month]: rows,
         },
-      });
+        daySummaryByWorker: buildDaySummaryByWorker(rows, this.data.activeDateValue),
+      }, () => this.refresh());
       this.applyWorkerMonthCalendar(workerId, month, rows);
     } catch (error) {
       this.setData({
