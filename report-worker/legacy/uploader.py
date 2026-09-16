@@ -161,7 +161,7 @@ def _find_first(driver, selectors, check_displayed=True):
 def extract_project_name(file_path):
     filename = os.path.basename(file_path)
     name = filename
-    for suffix in ['_姜太公导出.xlsx', '_姜太公导出', '项目工人花名册', '工人花名册']:
+    for suffix in ['_华瑆导出.xlsx', '_华瑆导出', '_姜太公导出.xlsx', '_姜太公导出', '项目工人花名册', '工人花名册']:
         if suffix in name:
             name = name.split(suffix)[0]
             break
@@ -191,12 +191,12 @@ def split_upload_workbook(file_path, max_rows=200):
     batch_dir = os.path.join(os.path.dirname(file_path), '.upload_batches')
     os.makedirs(batch_dir, exist_ok=True)
     filename = os.path.basename(file_path)
-    suffix = '_姜太公导出.xlsx'
+    suffix = '_华瑆导出.xlsx' if filename.endswith('_华瑆导出.xlsx') else '_姜太公导出.xlsx'
     stem = filename[:-len(suffix)] if filename.endswith(suffix) else os.path.splitext(filename)[0]
     batch_paths = []
     for batch_number, offset in enumerate(range(0, len(data_rows), max_rows), start=1):
         selected_rows = data_rows[offset:offset + max_rows]
-        batch_path = os.path.join(batch_dir, f'{stem}_第{batch_number:03d}批_姜太公导出.xlsx')
+        batch_path = os.path.join(batch_dir, f'{stem}_第{batch_number:03d}批{suffix}')
         shutil.copy2(file_path, batch_path)
         batch_workbook = openpyxl.load_workbook(batch_path)
         try:

@@ -19,6 +19,9 @@ export const reportService = {
   run: async (id: string) => data(await apiClient.get<ApiSuccess<ReportRun>>(API_ENDPOINTS.ADMIN.REPORT_FORWARD_RUN(id)), null as unknown as ReportRun),
   createRun: async (configId: string, runMode: RunMode, options: Record<string, unknown> = {}) => data(await apiClient.post<ApiSuccess<ReportRun>>(API_ENDPOINTS.ADMIN.REPORT_FORWARD_CONFIG_RUNS(configId), { run_mode: runMode, options }), null as unknown as ReportRun),
   cancelRun: async (id: string) => data(await apiClient.post<ApiSuccess<ReportRun>>(API_ENDPOINTS.ADMIN.REPORT_FORWARD_RUN_CANCEL(id)), null as unknown as ReportRun),
+  submitVerification: async (id: string, requestId: string, code: string) => {
+    await apiClient.post(`${API_ENDPOINTS.ADMIN.REPORT_FORWARD_RUN(id)}/verification`, { request_id: requestId, code });
+  },
   retryRun: async (id: string) => data(await apiClient.post<ApiSuccess<ReportRun>>(API_ENDPOINTS.ADMIN.REPORT_FORWARD_RUN_RETRY(id)), null as unknown as ReportRun),
   items: async (runId: string, page = 1, outcome = "all", keyword = "") => data(await apiClient.get<ApiSuccess<PageResult<ReportItem>>>(API_ENDPOINTS.ADMIN.REPORT_FORWARD_ITEMS, { params: { run_id: runId, page, page_size: 50, outcome, keyword } }), { items: [], total: 0, page, page_size: 50, counts: { all: 0, success: 0, failed: 0, unknown: 0 } }),
   exportItems: async (runId: string, outcome = "all", keyword = "") => {

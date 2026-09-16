@@ -1,0 +1,2 @@
+DROP TABLE construction_attendance_geofences;
+DROP TABLE construction_project_attendance_settings;

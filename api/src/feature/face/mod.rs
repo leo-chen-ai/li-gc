@@ -9,6 +9,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::state::AppState;
+pub mod library;
 pub mod logs;
 
 #[derive(Debug, Serialize)]
@@ -160,14 +161,14 @@ pub async fn recognize_face(
         .map_err(|error| format!("人脸服务响应解析失败（HTTP {status}）：{error}"))
 }
 
-/// 项目是否已开启至少一个考勤机模式考勤点。
+/// 项目是否因移动人脸机或电子围栏人脸校验而需要人脸库。
 pub async fn project_machine_mode_enabled(pool: &PgPool, project_id: Uuid) -> bool {
-    project_machine_mode_enabled_checked(pool, project_id)
+    project_face_library_enabled_checked(pool, project_id)
         .await
         .unwrap_or(false)
 }
 
-pub(crate) async fn project_machine_mode_enabled_checked(
+pub(crate) async fn project_face_library_enabled_checked(
     pool: &PgPool,
     project_id: Uuid,
 ) -> Result<bool, sqlx::Error> {
@@ -176,6 +177,12 @@ pub(crate) async fn project_machine_mode_enabled_checked(
         SELECT EXISTS (
             SELECT 1 FROM construction_attendance_points
             WHERE project_id = $1 AND is_deleted = FALSE AND machine_mode_enabled = TRUE
+        )
+        OR EXISTS (
+            SELECT 1 FROM construction_project_attendance_settings
+            WHERE project_id = $1
+              AND worker_attendance_enabled = TRUE
+              AND require_face = TRUE
         )
         "#,
     )
@@ -266,16 +273,33 @@ async fn clear_project(state: &AppState, project_id: Uuid) -> Result<(), String>
 }
 
 async fn cleanup_disabled_projects(state: &AppState) -> Result<(), sqlx::Error> {
-    // 包含已删除点位，确保最后一个点位删除后仍会清理；失败下轮继续。
+    // 同时扫描两类启用来源；任一来源仍启用时不得清理。
     let projects = sqlx::query_scalar::<_, Uuid>(
-        "SELECT DISTINCT p.project_id FROM construction_attendance_points p WHERE NOT EXISTS (SELECT 1 FROM construction_attendance_points active WHERE active.project_id=p.project_id AND active.is_deleted=FALSE AND active.machine_mode_enabled=TRUE)"
-    ).fetch_all(state.db.pool()).await?;
+        r#"SELECT DISTINCT project_id FROM (
+            SELECT project_id FROM construction_attendance_points
+            UNION
+            SELECT project_id FROM construction_project_attendance_settings
+        ) candidates
+        WHERE NOT EXISTS (
+            SELECT 1 FROM construction_attendance_points active
+            WHERE active.project_id=candidates.project_id
+              AND active.is_deleted=FALSE
+              AND active.machine_mode_enabled=TRUE
+        ) AND NOT EXISTS (
+            SELECT 1 FROM construction_project_attendance_settings settings
+            WHERE settings.project_id=candidates.project_id
+              AND settings.worker_attendance_enabled=TRUE
+              AND settings.require_face=TRUE
+        )"#,
+    )
+    .fetch_all(state.db.pool())
+    .await?;
     for project_id in projects {
         let lock = lock_project(state.db.pool(), project_id).await?;
-        if !project_machine_mode_enabled_checked(state.db.pool(), project_id).await? {
+        if !project_face_library_enabled_checked(state.db.pool(), project_id).await? {
             match clear_project(state, project_id).await {
                 Ok(()) => {
-                    sqlx::query("UPDATE construction_face_enrollments SET status='cancelled', last_error='项目考勤机模式已关闭，人脸库已清理', updated_at=NOW() WHERE project_id=$1 AND status <> 'cancelled'")
+                    sqlx::query("UPDATE construction_face_enrollments SET status='cancelled', last_error='项目人脸库使用来源均已关闭，人脸库已清理', updated_at=NOW() WHERE project_id=$1 AND status <> 'cancelled'")
                         .bind(project_id).execute(state.db.pool()).await?;
                 }
                 Err(error) => {
@@ -292,7 +316,7 @@ pub async fn sync_summary(
     state: &AppState,
     project_id: Uuid,
 ) -> Result<serde_json::Value, sqlx::Error> {
-    let enabled = project_machine_mode_enabled_checked(state.db.pool(), project_id).await?;
+    let enabled = project_face_library_enabled_checked(state.db.pool(), project_id).await?;
     let rows = sqlx::query_as::<_, (Uuid, String, Option<String>, Option<i32>, Option<String>)>(
         "SELECT w.id, COALESCE(w.name,''), latest.status, latest.attempt_count, latest.last_error FROM construction_workers w LEFT JOIN LATERAL (SELECT status, attempt_count, last_error FROM construction_face_enrollments e WHERE e.worker_id=w.id AND e.project_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1) latest ON TRUE WHERE w.project_id=$1 AND w.is_deleted=FALSE AND NULLIF(TRIM(COALESCE(w.avatar,'')),'') IS NOT NULL"
     ).bind(project_id).fetch_all(state.db.pool()).await?;
@@ -389,7 +413,10 @@ async fn process_pending_enrollments(state: &AppState) -> Result<(), sqlx::Error
             FROM construction_face_enrollments
             WHERE (status IN ('pending', 'failed') OR (status='processing' AND updated_at < NOW()-INTERVAL '10 minutes'))
               AND attempt_count < $1
-              AND EXISTS (SELECT 1 FROM construction_attendance_points p WHERE p.project_id=construction_face_enrollments.project_id AND p.is_deleted=FALSE AND p.machine_mode_enabled=TRUE)
+              AND (
+                EXISTS (SELECT 1 FROM construction_attendance_points p WHERE p.project_id=construction_face_enrollments.project_id AND p.is_deleted=FALSE AND p.machine_mode_enabled=TRUE)
+                OR EXISTS (SELECT 1 FROM construction_project_attendance_settings s WHERE s.project_id=construction_face_enrollments.project_id AND s.worker_attendance_enabled=TRUE AND s.require_face=TRUE)
+              )
             ORDER BY created_at
             LIMIT 20
             FOR UPDATE SKIP LOCKED
@@ -414,7 +441,7 @@ async fn process_pending_enrollments(state: &AppState) -> Result<(), sqlx::Error
             lock.commit().await?;
             continue;
         }
-        if !project_machine_mode_enabled_checked(pool, project_id).await? {
+        if !project_face_library_enabled_checked(pool, project_id).await? {
             sqlx::query("UPDATE construction_face_enrollments SET status='cancelled',updated_at=NOW() WHERE id=$1")
                 .bind(task_id).execute(pool).await?;
             lock.commit().await?;

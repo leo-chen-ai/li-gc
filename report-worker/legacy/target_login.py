@@ -80,6 +80,8 @@ class TargetLogin:
                 pass
 
     def _start_feishu_listener(self):
+        if self.config.get('verification_type') == 'manual':
+            return True
         listener_script = os.path.join(self.script_dir, 'feishu_listener.py')
 
         log_dir = os.path.join(self.script_dir, 'logs')
@@ -479,6 +481,8 @@ class TargetLogin:
         return False
 
     def _wait_for_sms_code(self, timeout=SMS_CODE_WAIT_TIMEOUT, exclude_code=None, requested_at=None):
+        if self.config.get('verification_type') == 'manual':
+            return self.config['manual_code_provider'](timeout=timeout, exclude_code=exclude_code)
         logger.info(f"等待短信验证码（超时 {timeout} 秒）")
 
         csv_path = os.environ.get('REPORT_FORWARD_CODES_CSV', os.path.join(self.script_dir, 'verification_codes.csv'))

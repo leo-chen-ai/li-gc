@@ -7,6 +7,7 @@ SSH_KEY="${SHANHUAI_SSH_KEY:-$HOME/.ssh/shanhuai_k3s_deploy_ed25519}"
 DB_PORT="${LOCAL_TEST_DB_PORT:-15432}"
 REDIS_PORT="${LOCAL_TEST_REDIS_PORT:-16379}"
 MQTT_PORT="${LOCAL_TEST_MQTT_PORT:-11883}"
+FACE_SERVICE_PORT="${LOCAL_TEST_FACE_SERVICE_PORT:-17100}"
 
 if [[ ! -f "$DEPLOY_ENV" ]]; then
   echo "Missing $DEPLOY_ENV" >&2
@@ -37,12 +38,14 @@ secret() {
 db_ip="$(remote "k3s kubectl -n shanhuai-infra get svc postgresql -o jsonpath='{.spec.clusterIP}'")"
 redis_ip="$(remote "k3s kubectl -n shanhuai-infra get svc redis -o jsonpath='{.spec.clusterIP}'")"
 mqtt_ip="$(remote "k3s kubectl -n shanhuai-infra get svc emqx -o jsonpath='{.spec.clusterIP}'")"
+face_service_ip="$(remote "k3s kubectl -n shanhuai-app get svc shanhuai-face-service -o jsonpath='{.spec.clusterIP}'")"
 
 ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 \
   -i "$SSH_KEY" -p "$VPS_SSH_PORT" \
   -L "127.0.0.1:$DB_PORT:$db_ip:5432" \
   -L "127.0.0.1:$REDIS_PORT:$redis_ip:6379" \
   -L "127.0.0.1:$MQTT_PORT:$mqtt_ip:1883" \
+  -L "127.0.0.1:$FACE_SERVICE_PORT:$face_service_ip:7100" \
   "$VPS_USER@$VPS_HOST" &
 tunnel_pid=$!
 trap 'kill "$tunnel_pid" 2>/dev/null || true' EXIT INT TERM
@@ -51,6 +54,7 @@ sleep 1
 export DATABASE_URL="$(secret DATABASE_URL | sed -E "s/@[^:/]+:5432\//@127.0.0.1:$DB_PORT\//")"
 export REDIS_URL="$(secret REDIS_URL | sed -E "s/@?[^/@:]+:6379/@127.0.0.1:$REDIS_PORT/")"
 export MQTT_BROKER_URL="mqtt://127.0.0.1:$MQTT_PORT"
+export FACE_SERVICE_URL="http://127.0.0.1:$FACE_SERVICE_PORT"
 export JWT_ACCESS_SECRET="$(secret JWT_ACCESS_SECRET)"
 export JWT_REFRESH_SECRET="$(secret JWT_REFRESH_SECRET)"
 export REPORT_FORWARD_CREDENTIAL_KEY="$(secret REPORT_FORWARD_CREDENTIAL_KEY)"
@@ -58,7 +62,7 @@ export SERVER_PORT="${SERVER_PORT:-8080}"
 export BACKGROUND_WORKERS_ENABLED="${BACKGROUND_WORKERS_ENABLED:-false}"
 export NINGBO_HOUSING_ALLOWED_HOSTS="${NINGBO_HOUSING_ALLOWED_HOSTS:-$VPS_HOST}"
 
-echo "Starting local API on http://localhost:$SERVER_PORT with K3s database, Redis, and MQTT"
+echo "Starting local API on http://localhost:$SERVER_PORT with K3s database, Redis, MQTT, and face service"
 echo "Background workers enabled: $BACKGROUND_WORKERS_ENABLED"
 echo "SQL query logging enabled: ${LOCAL_SQL_LOGGING:-false}"
 cd "$ROOT_DIR/api"

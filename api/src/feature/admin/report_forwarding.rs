@@ -42,6 +42,8 @@ const RUN_MODES: &[&str] = &[
 #[derive(Debug, Deserialize)]
 pub struct ConfigInput {
     pub name: String,
+    #[serde(default = "default_adapter")]
+    pub adapter: String,
     #[serde(default = "default_source_url")]
     pub source_base_url: String,
     pub source_username: String,
@@ -204,7 +206,7 @@ pub async fn create_config(
     let id = sqlx::query_scalar::<_, Uuid>(
         r#"
         INSERT INTO report_forward_configs (
-            name, source_base_url, source_username, source_password_cipher,
+            adapter, name, source_base_url, source_username, source_password_cipher,
             project_mode, include_projects, exclude_projects,
             target_base_url, target_username, target_password_cipher,
             verification_type, verification_config_cipher,
@@ -212,7 +214,7 @@ pub async fn create_config(
             next_run_at, settings, remark, created_by_user_id, updated_by_user_id
         )
         VALUES (
-            $1, $2, $3, pgp_sym_encrypt($4, $20, 'cipher-algo=aes256'),
+            $21, $1, $2, $3, pgp_sym_encrypt($4, $20, 'cipher-algo=aes256'),
             $5, $6, $7,
             $8, $9, pgp_sym_encrypt($10, $20, 'cipher-algo=aes256'),
             $11, CASE WHEN $12::text IS NULL THEN NULL ELSE pgp_sym_encrypt($12, $20, 'cipher-algo=aes256') END,
@@ -243,6 +245,7 @@ pub async fn create_config(
     .bind(normalized.remark.as_deref())
     .bind(auth_user.user_id)
     .bind(key)
+    .bind(&normalized.adapter)
     .fetch_one(state.db.pool())
     .await
     .map_err(db_error)?;
@@ -268,8 +271,22 @@ pub async fn update_config(
     Path(config_id): Path<Uuid>,
     TrimmedJson(input): TrimmedJson<ConfigInput>,
 ) -> ApiResult<Value> {
-    fetch_config(state.db.pool(), config_id).await?;
+    let current = fetch_config(state.db.pool(), config_id).await?;
     let normalized = validate_config(input, false)?;
+    if normalized.verification_type == "feishu"
+        && normalized.verification_config.is_none()
+        && !current["verification_configured"]
+            .as_bool()
+            .unwrap_or(false)
+    {
+        return Err(invalid_input("自动模式必须填写完整飞书配置"));
+    }
+    if (current["adapter"].as_str() != Some(normalized.adapter.as_str())
+        || current["verification_type"].as_str() != Some(normalized.verification_type.as_str()))
+        && current["active_run_count"].as_i64().unwrap_or(0) > 0
+    {
+        return Err(invalid_input("请等待当前任务结束后再切换网站或验证码模式"));
+    }
     let key = credential_key()?;
     let schedule_time = parse_schedule_time(&normalized.schedule_time)?;
     let verification_json = normalized
@@ -280,7 +297,7 @@ pub async fn update_config(
     let affected = sqlx::query(
         r#"
         UPDATE report_forward_configs
-        SET name = $2,
+        SET adapter = $22, name = $2,
             source_base_url = $3,
             source_username = $4,
             source_password_cipher = CASE WHEN $5::text IS NULL OR BTRIM($5) = ''
@@ -328,6 +345,7 @@ pub async fn update_config(
     .bind(normalized.remark.as_deref())
     .bind(key)
     .bind(auth_user.user_id)
+    .bind(&normalized.adapter)
     .execute(state.db.pool())
     .await
     .map_err(db_error)?
@@ -381,7 +399,8 @@ pub async fn create_run(
     }
     let config = fetch_config(state.db.pool(), config_id).await?;
     if input.run_mode == "production"
-        && (!config["is_enabled"].as_bool().unwrap_or(false)
+        && ((config["verification_type"].as_str() != Some("manual")
+            && !config["is_enabled"].as_bool().unwrap_or(false))
             || config["lifecycle_status"].as_str() != Some("production"))
     {
         return Err(invalid_input("正式运行前必须将配置切换为正式启用"));
@@ -557,6 +576,52 @@ pub async fn cancel_run(
     Ok(ApiSuccess::default().with_data(fetch_run(state.db.pool(), run_id).await?))
 }
 
+#[derive(Deserialize)]
+pub struct VerificationInput {
+    pub request_id: Uuid,
+    pub code: String,
+}
+
+pub async fn submit_verification(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Path(run_id): Path<Uuid>,
+    Json(input): Json<VerificationInput>,
+) -> ApiResult<()> {
+    let code = input.code.trim();
+    if !(4..=6).contains(&code.len()) || !code.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(invalid_input("请输入 4 到 6 位数字验证码"));
+    }
+    let key = credential_key()?;
+    let updated = sqlx::query(
+        r#"UPDATE report_forward_verifications v
+           SET code_cipher=pgp_sym_encrypt($3,$4,'cipher-algo=aes256')
+           FROM report_forward_runs r, report_forward_configs c
+           WHERE v.run_id=$1 AND v.id=$2 AND r.id=v.run_id AND c.id=r.config_id
+             AND c.verification_type='manual' AND r.status='running'
+             AND NOT r.cancel_requested AND r.current_stage='waiting_verification'
+             AND v.expires_at>NOW() AND v.code_cipher IS NULL
+             AND (r.requested_by_user_id=$5 OR EXISTS (
+                 SELECT 1 FROM users u WHERE u.id=$5 AND u.username='admin'
+             ))"#,
+    )
+    .bind(run_id)
+    .bind(input.request_id)
+    .bind(code)
+    .bind(key)
+    .bind(auth_user.user_id)
+    .execute(state.db.pool())
+    .await
+    .map_err(db_error)?
+    .rows_affected();
+    if updated == 0 {
+        return Err(invalid_input(
+            "验证码请求已失效、已提交或无权操作，请刷新任务",
+        ));
+    }
+    Ok(ApiSuccess::default())
+}
+
 pub async fn retry_run(
     State(state): State<AppState>,
     Extension(auth_user): Extension<AuthUser>,
@@ -583,7 +648,8 @@ pub async fn retry_run(
     let options: Value = parent.try_get("options").map_err(db_error)?;
     let options = options_for_current_worker(options);
     if run_mode == "production"
-        && (!config["is_enabled"].as_bool().unwrap_or(false)
+        && ((config["verification_type"].as_str() != Some("manual")
+            && !config["is_enabled"].as_bool().unwrap_or(false))
             || config["lifecycle_status"].as_str() != Some("production"))
     {
         return Err(invalid_input("正式任务重试前必须保持配置为正式启用"));
@@ -975,7 +1041,8 @@ async fn fetch_config(pool: &sqlx::PgPool, id: Uuid) -> Result<Value, ApiError> 
                    || jsonb_build_object(
                        'source_password_configured', octet_length(c.source_password_cipher)>0,
                        'target_password_configured', octet_length(c.target_password_cipher)>0,
-                       'verification_configured', c.verification_config_cipher IS NOT NULL)
+                       'verification_configured', c.verification_config_cipher IS NOT NULL,
+                       'active_run_count', (SELECT COUNT(*) FROM report_forward_runs r WHERE r.config_id=c.id AND r.status IN ('pending','running','cancelling')))
             FROM report_forward_configs c WHERE c.id=$1 AND c.is_deleted=FALSE"#,
     )
     .bind(id).fetch_optional(pool).await.map_err(db_error)?
@@ -1045,6 +1112,7 @@ async fn fetch_run(pool: &sqlx::PgPool, id: Uuid) -> Result<Value, ApiError> {
                     r.failure_count - result_counts.already_reported_count - result_counts.record_time_count,
                     0
                 ),
+                'verification_request', (SELECT jsonb_build_object('id', v.id, 'expires_at', v.expires_at, 'submitted', v.code_cipher IS NOT NULL) FROM report_forward_verifications v WHERE v.run_id=r.id AND v.expires_at>NOW() AND r.status='running'),
                 'projects', COALESCE((SELECT jsonb_agg(to_jsonb(p) ORDER BY p.created_at) FROM report_forward_run_projects p WHERE p.run_id=r.id), '[]'::jsonb),
                 'artifacts', COALESCE((SELECT jsonb_agg(to_jsonb(a) ORDER BY a.created_at) FROM report_forward_artifacts a WHERE a.run_id=r.id), '[]'::jsonb),
                 'events', COALESCE((SELECT jsonb_agg(to_jsonb(e) ORDER BY e.id) FROM (SELECT * FROM report_forward_events WHERE run_id=r.id ORDER BY id DESC LIMIT 300) e), '[]'::jsonb)
@@ -1202,10 +1270,14 @@ fn validate_config(mut input: ConfigInput, create: bool) -> Result<ConfigInput, 
     if input.is_enabled && input.lifecycle_status != "production" {
         return Err(invalid_input("只有正式配置可以启用每日运行"));
     }
-    if input.verification_type != "feishu" {
-        return Err(invalid_input("无人值守任务当前仅支持飞书获取短信验证码"));
+    if !matches!(input.verification_type.as_str(), "feishu" | "manual") {
+        return Err(invalid_input("验证码模式只能是自动或手动"));
     }
-    if create && input.verification_config.is_none() {
+    if input.verification_type == "manual" {
+        input.is_enabled = false;
+        input.verification_config = None;
+    }
+    if create && input.verification_type == "feishu" && input.verification_config.is_none() {
         return Err(invalid_input("飞书验证码模式必须填写飞书配置"));
     }
     if input
@@ -1274,8 +1346,15 @@ fn validate_config(mut input: ConfigInput, create: bool) -> Result<ConfigInput, 
             return Err(invalid_input("最新进场天数必须在 1 到 3650 天之间"));
         }
     }
-    input.source_base_url =
-        validate_official_url(&input.source_base_url, "tg.91jtg.com", DEFAULT_SOURCE_URL)?;
+    input.source_base_url = match input.adapter.as_str() {
+        "xzy_zjzwfw" => {
+            validate_official_url(&input.source_base_url, "tg.91jtg.com", DEFAULT_SOURCE_URL)?
+        }
+        "huaxing_zjzwfw" => {
+            validate_official_url(&input.source_base_url, "hx99.xin", "https://hx99.xin")?
+        }
+        _ => return Err(invalid_input("不支持的源网站类型")),
+    };
     input.target_base_url = validate_official_url(
         &input.target_base_url,
         "www.zjzwfw.gov.cn",
@@ -1384,6 +1463,10 @@ fn default_target_url() -> String {
 fn default_project_mode() -> String {
     "all".to_owned()
 }
+fn default_adapter() -> String {
+    "xzy_zjzwfw".to_owned()
+}
+
 fn default_verification_type() -> String {
     "feishu".to_owned()
 }
@@ -1433,6 +1516,7 @@ mod tests {
             target_base_url: DEFAULT_TARGET_URL.to_owned(),
             target_username: "13800000000".to_owned(),
             target_password: Some("password".to_owned()),
+            adapter: default_adapter(),
             verification_type: "feishu".to_owned(),
             verification_config: Some(json!({
                 "app_id": "cli_test", "app_secret": "secret", "chat_id": "oc_test"

@@ -965,13 +965,13 @@ async fn admin_can_configure_generate_and_list_managed_attendance() {
     let generated_jobs: i64 = sqlx::query_scalar(
         r#"
         SELECT COUNT(*)
-        FROM device_dispatch_jobs
+        FROM device_dispatch_jobs j
         JOIN construction_managed_attendance_records r
-          ON r.id = device_dispatch_jobs.managed_attendance_record_id
-        WHERE job_type = 'supplemental_attendance'
-          AND adapter_code = 'vendor_b'
-          AND transport = 'http_push'
-          AND attendance_device_id = $1
+          ON r.id = j.managed_attendance_record_id
+        WHERE j.job_type = 'supplemental_attendance'
+          AND j.adapter_code = 'vendor_b'
+          AND j.transport = 'http_push'
+          AND j.attendance_device_id = $1
           AND r.attendance_date >= DATE '2026-07-01'
           AND r.attendance_date < DATE '2026-08-01'
         "#,

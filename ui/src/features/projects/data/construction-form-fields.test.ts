@@ -73,6 +73,7 @@ test("unit registration area uses a required district cascading selector", () =>
 test("unit registration area payload accepts only a six digit district code", () => {
   const state = buildDefaultFormState(unitFormFields, {
     company_name: "测试单位",
+    company_credit_code: "91330106MA00000001",
     company_type: "1",
     register_date: "2026-08-11",
     register_area: "330106",

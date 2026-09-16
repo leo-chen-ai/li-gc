@@ -31,6 +31,7 @@ const ALLOWED_MENU_KEYS: &[&str] = &[
     "attendance_devices",
     "attendance_device_issue_reports",
     "face_recognition_logs",
+    "face_library_sync",
     "attendance_alerts",
     "managed_attendance",
     "supplemental_attendance",

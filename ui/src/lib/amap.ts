@@ -22,12 +22,18 @@ export type AMapPoi = {
 export type AMapMarker = {
   setPosition(position: [number, number]): void;
   getPosition(): AMapLngLat | null;
-  on(event: string, handler: () => void): void;
+  on(event: string, handler: (event?: { lnglat?: AMapLngLat }) => void): void;
+};
+
+export type AMapPolygon = {
+  setPath(path: [number, number][]): void;
 };
 
 export type AMapMap = {
   on(event: string, handler: (event: { lnglat: AMapLngLat }) => void): void;
-  add(...overlays: AMapMarker[]): void;
+  add(...overlays: Array<AMapMarker | AMapPolygon>): void;
+  remove(overlays: Array<AMapMarker | AMapPolygon>): void;
+  setFitView(overlays?: Array<AMapMarker | AMapPolygon>): void;
   setZoom(zoom: number): void;
   setCenter(center: [number, number]): void;
   panTo(center: [number, number]): void;
@@ -62,6 +68,7 @@ type AMapPlaceSearch = {
 export type AMapConstructor = {
   Map: new (container: HTMLElement, options: Record<string, unknown>) => AMapMap;
   Marker: new (options: Record<string, unknown>) => AMapMarker;
+  Polygon: new (options: Record<string, unknown>) => AMapPolygon;
   Geocoder: new (options?: Record<string, unknown>) => AMapGeocoder;
   PlaceSearch: new (options?: Record<string, unknown>) => AMapPlaceSearch;
   // 2.0 下插件可能延迟就绪，缺失时用它按需补加载

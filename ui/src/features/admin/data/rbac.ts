@@ -16,6 +16,7 @@ export type MenuPermissionKey =
   | "attendance_devices"
   | "attendance_device_issue_reports"
   | "face_recognition_logs"
+  | "face_library_sync"
   | "attendance_alerts"
   | "managed_attendance"
   | "supplemental_attendance"
@@ -298,6 +299,13 @@ export const menuPermissions: MenuPermission[] = [
     description: "查看登录页提交的注册姓名和手机号",
   },
   {
+    key: "face_library_sync",
+    name: "人脸库同步",
+    group: "系统",
+    path: "/app/admin/face-library-sync",
+    description: "查看各项目人脸库启用来源、同步状态和失败原因，并执行重试",
+  },
+  {
     key: "users",
     name: "用户管理",
     group: "系统",
@@ -342,6 +350,7 @@ export function getMenuKeysForUserRole(
     "attendance_devices",
     "attendance_device_issue_reports",
     "face_recognition_logs",
+    "face_library_sync",
     "attendance_alerts",
     "managed_attendance",
     "supplemental_attendance",

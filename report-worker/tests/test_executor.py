@@ -816,6 +816,7 @@ def test_executor_requeues_mid_run_exception(monkeypatch):
     executor = RunExecutor.__new__(RunExecutor)
     executor.repo = FakeRepository()
     executor.run_id = "run-id"
+    executor.config_row = {"verification_type": "feishu"}
     executor.mode = "production"
     executor.context = {"stage": "download", "project_id": None}
     executor.temp = FakeTemp()
@@ -843,6 +844,7 @@ def test_executor_marks_completed_business_rejections_as_success():
     executor = RunExecutor.__new__(RunExecutor)
     executor.repo = FakeRepository()
     executor.run_id = "run-id"
+    executor.config_row = {"verification_type": "feishu"}
     executor.mode = "production"
     executor.context = {"stage": "starting", "project_id": None}
     executor.temp = FakeTemp()
@@ -878,6 +880,7 @@ def test_executor_finishes_failed_after_retry_limit(monkeypatch):
     executor = RunExecutor.__new__(RunExecutor)
     executor.repo = FakeRepository()
     executor.run_id = "run-id"
+    executor.config_row = {"verification_type": "feishu"}
     executor.mode = "production"
     executor.context = {"stage": "download", "project_id": None}
     executor.temp = FakeTemp()

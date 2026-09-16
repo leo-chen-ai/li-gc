@@ -37,6 +37,16 @@ export type ManagedAttendancePhotoGroupPayload = {
   remark?: string | null;
 };
 
+export type ManagedAttendancePhotoPair = {
+  attendance_date: string;
+  in_photo: string;
+  out_photo: string;
+  in_time: string;
+  out_time: string;
+  in_count: number;
+  out_count: number;
+};
+
 export type ManagedAttendanceConfig = ManagedAttendanceConfigLike & {
   id: string;
   project_id: string;

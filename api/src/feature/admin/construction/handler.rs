@@ -1,6 +1,6 @@
 use axum::{
     Extension, Json,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{StatusCode, Uri, header},
     response::{IntoResponse, Response},
 };
@@ -4253,6 +4253,16 @@ fn ensure_attendance_device_admin(auth_user: &AuthUser) -> Result<(), ApiError> 
     }
 }
 
+fn ensure_project_attendance_config_admin(auth_user: &AuthUser) -> Result<(), ApiError> {
+    if auth_user.roles.contains(&Role::Admin) {
+        Ok(())
+    } else {
+        Err(ApiError::default()
+            .with_code(StatusCode::FORBIDDEN)
+            .with_message("仅系统管理员可查看和管理移动人脸机及电子围栏配置"))
+    }
+}
+
 pub async fn preview_yongxin_attendance_reporting(
     State(state): State<AppState>,
     Extension(auth_user): Extension<AuthUser>,
@@ -8474,6 +8484,7 @@ pub async fn list_attendance_points(
     Path(project_id): Path<Uuid>,
     uri: Uri,
 ) -> ApiResult<Value> {
+    ensure_project_attendance_config_admin(&auth_user)?;
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     let params = resource_list_params(&uri)?;
     list_rows_page(
@@ -8491,6 +8502,7 @@ pub async fn attendance_face_summary(
     Extension(auth_user): Extension<AuthUser>,
     Path(project_id): Path<Uuid>,
 ) -> ApiResult<Value> {
+    ensure_project_attendance_config_admin(&auth_user)?;
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     let summary = crate::feature::face::sync_summary(&state, project_id)
         .await
@@ -8503,8 +8515,9 @@ pub async fn retry_attendance_faces(
     Extension(auth_user): Extension<AuthUser>,
     Path(project_id): Path<Uuid>,
 ) -> ApiResult<Value> {
+    ensure_project_attendance_config_admin(&auth_user)?;
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
-    if !crate::feature::face::project_machine_mode_enabled_checked(state.db.pool(), project_id)
+    if !crate::feature::face::project_face_library_enabled_checked(state.db.pool(), project_id)
         .await
         .map_err(db_error)?
     {
@@ -8525,6 +8538,7 @@ pub async fn get_attendance_point(
     Extension(auth_user): Extension<AuthUser>,
     Path((project_id, point_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<Value> {
+    ensure_project_attendance_config_admin(&auth_user)?;
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     get_row(
         state.db.pool(),
@@ -8540,7 +8554,7 @@ pub async fn create_attendance_point(
     Path(project_id): Path<Uuid>,
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
-    ensure_attendance_device_admin(&auth_user)?;
+    ensure_project_attendance_config_admin(&auth_user)?;
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     let _face_lock = crate::feature::face::lock_project(state.db.pool(), project_id)
         .await
@@ -8572,7 +8586,7 @@ pub async fn update_attendance_point(
     Path((project_id, point_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<Value>,
 ) -> ApiResult<Value> {
-    ensure_attendance_device_admin(&auth_user)?;
+    ensure_project_attendance_config_admin(&auth_user)?;
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     let _face_lock = crate::feature::face::lock_project(state.db.pool(), project_id)
         .await
@@ -8613,7 +8627,7 @@ pub async fn delete_attendance_point(
     Extension(auth_user): Extension<AuthUser>,
     Path((project_id, point_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<()> {
-    ensure_attendance_device_admin(&auth_user)?;
+    ensure_project_attendance_config_admin(&auth_user)?;
     ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
     let _face_lock = crate::feature::face::lock_project(state.db.pool(), project_id)
         .await
@@ -8636,6 +8650,217 @@ async fn enqueue_project_face_enrollments_logged(pool: &sqlx::PgPool, project_id
             tracing::error!(%project_id, error = %error, "failed to enqueue project face enrollments")
         }
     }
+}
+
+#[derive(Deserialize)]
+pub struct AttendanceSettingsBody {
+    worker_attendance_enabled: bool,
+    require_location: bool,
+    require_face: bool,
+}
+
+#[derive(Deserialize)]
+pub struct AttendanceGeofenceBody {
+    name: String,
+    polygon: Value,
+    #[serde(default = "default_true")]
+    is_enabled: bool,
+    remark: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn validate_geofence_polygon(polygon: &Value) -> Result<(), ApiError> {
+    let points = polygon
+        .as_array()
+        .ok_or_else(|| invalid_input("围栏顶点格式无效"))?;
+    if points.len() < 3 || points.len() > 100 {
+        return Err(invalid_input("电子围栏需要选择 3 至 100 个顶点"));
+    }
+    let mut coordinates = Vec::with_capacity(points.len());
+    for point in points {
+        let longitude = point.get("longitude").and_then(Value::as_f64);
+        let latitude = point.get("latitude").and_then(Value::as_f64);
+        if !matches!(longitude, Some(value) if value.is_finite() && value.abs() <= 180.0)
+            || !matches!(latitude, Some(value) if value.is_finite() && value.abs() <= 90.0)
+        {
+            return Err(invalid_input("电子围栏包含无效经纬度"));
+        }
+        coordinates.push((longitude.unwrap_or_default(), latitude.unwrap_or_default()));
+    }
+    let unique_count = coordinates
+        .iter()
+        .enumerate()
+        .filter(|(index, point)| {
+            coordinates[..*index]
+                .iter()
+                .all(|previous| previous != *point)
+        })
+        .count();
+    let twice_area: f64 = coordinates
+        .iter()
+        .zip(coordinates.iter().cycle().skip(1))
+        .take(coordinates.len())
+        .map(|(left, right)| left.0 * right.1 - right.0 * left.1)
+        .sum();
+    if unique_count < 3 || twice_area.abs() < 1e-12 {
+        return Err(invalid_input("电子围栏顶点不能重复或位于同一直线上"));
+    }
+    Ok(())
+}
+
+pub async fn get_attendance_geofence_config(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Path(project_id): Path<Uuid>,
+) -> ApiResult<Value> {
+    ensure_project_attendance_config_admin(&auth_user)?;
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+    let settings = sqlx::query_scalar::<_, Value>(
+        r#"SELECT jsonb_build_object(
+            'worker_attendance_enabled', COALESCE(s.worker_attendance_enabled, FALSE),
+            'require_location', COALESCE(s.require_location, TRUE),
+            'require_face', COALESCE(s.require_face, TRUE)
+        ) FROM construction_projects p
+        LEFT JOIN construction_project_attendance_settings s ON s.project_id = p.id
+        WHERE p.id = $1 AND p.is_deleted = FALSE"#,
+    )
+    .bind(project_id)
+    .fetch_optional(state.db.pool())
+    .await
+    .map_err(db_error)?
+    .ok_or_else(not_found)?;
+    let areas = sqlx::query_scalar::<_, Value>(
+        r#"SELECT COALESCE(jsonb_agg(to_jsonb(g) ORDER BY g.created_at), '[]'::jsonb)
+        FROM construction_attendance_geofences g
+        WHERE g.project_id = $1 AND g.is_deleted = FALSE"#,
+    )
+    .bind(project_id)
+    .fetch_one(state.db.pool())
+    .await
+    .map_err(db_error)?;
+    Ok(ApiSuccess::default().with_data(serde_json::json!({"settings": settings, "areas": areas})))
+}
+
+pub async fn update_attendance_geofence_settings(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Path(project_id): Path<Uuid>,
+    Json(body): Json<AttendanceSettingsBody>,
+) -> ApiResult<Value> {
+    ensure_project_attendance_config_admin(&auth_user)?;
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+    let was_enabled =
+        crate::feature::face::project_face_library_enabled_checked(state.db.pool(), project_id)
+            .await
+            .map_err(db_error)?;
+    let _face_lock = crate::feature::face::lock_project(state.db.pool(), project_id)
+        .await
+        .map_err(db_error)?;
+    let data = sqlx::query_scalar::<_, Value>(
+        r#"INSERT INTO construction_project_attendance_settings
+        (project_id, worker_attendance_enabled, require_location, require_face)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (project_id) DO UPDATE SET
+          worker_attendance_enabled = EXCLUDED.worker_attendance_enabled,
+          require_location = EXCLUDED.require_location,
+          require_face = EXCLUDED.require_face,
+          updated_at = NOW()
+        RETURNING to_jsonb(construction_project_attendance_settings)"#,
+    )
+    .bind(project_id)
+    .bind(body.worker_attendance_enabled)
+    .bind(body.require_location)
+    .bind(body.require_face)
+    .fetch_one(state.db.pool())
+    .await
+    .map_err(db_error)?;
+    let now_enabled =
+        crate::feature::face::project_face_library_enabled_checked(state.db.pool(), project_id)
+            .await
+            .map_err(db_error)?;
+    if now_enabled && !was_enabled {
+        enqueue_project_face_enrollments_logged(state.db.pool(), project_id).await;
+    }
+    Ok(ApiSuccess::default().with_data(data))
+}
+
+pub async fn create_attendance_geofence(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Path(project_id): Path<Uuid>,
+    Json(body): Json<AttendanceGeofenceBody>,
+) -> ApiResult<Value> {
+    ensure_project_attendance_config_admin(&auth_user)?;
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+    validate_geofence_polygon(&body.polygon)?;
+    if body.name.trim().is_empty() {
+        return Err(invalid_input("请填写考勤区域名称"));
+    }
+    let data = sqlx::query_scalar::<_, Value>(
+        r#"INSERT INTO construction_attendance_geofences
+        (project_id, name, polygon, is_enabled, remark)
+        VALUES ($1, $2, $3, $4, NULLIF($5, '')) RETURNING to_jsonb(construction_attendance_geofences)"#,
+    )
+    .bind(project_id)
+    .bind(body.name.trim())
+    .bind(body.polygon)
+    .bind(body.is_enabled)
+    .bind(body.remark.unwrap_or_default().trim().to_string())
+    .fetch_one(state.db.pool())
+    .await
+    .map_err(db_error)?;
+    Ok(ApiSuccess::default()
+        .with_code(StatusCode::CREATED)
+        .with_data(data))
+}
+
+pub async fn update_attendance_geofence(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Path((project_id, area_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<AttendanceGeofenceBody>,
+) -> ApiResult<Value> {
+    ensure_project_attendance_config_admin(&auth_user)?;
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+    validate_geofence_polygon(&body.polygon)?;
+    if body.name.trim().is_empty() {
+        return Err(invalid_input("请填写考勤区域名称"));
+    }
+    let data = sqlx::query_scalar::<_, Value>(
+        r#"UPDATE construction_attendance_geofences SET
+          name = $3, polygon = $4, is_enabled = $5, remark = NULLIF($6, ''), updated_at = NOW()
+        WHERE project_id = $1 AND id = $2 AND is_deleted = FALSE
+        RETURNING to_jsonb(construction_attendance_geofences)"#,
+    )
+    .bind(project_id)
+    .bind(area_id)
+    .bind(body.name.trim())
+    .bind(body.polygon)
+    .bind(body.is_enabled)
+    .bind(body.remark.unwrap_or_default().trim().to_string())
+    .fetch_optional(state.db.pool())
+    .await
+    .map_err(db_error)?
+    .ok_or_else(not_found)?;
+    Ok(ApiSuccess::default().with_data(data))
+}
+
+pub async fn delete_attendance_geofence(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Path((project_id, area_id)): Path<(Uuid, Uuid)>,
+) -> ApiResult<()> {
+    ensure_project_attendance_config_admin(&auth_user)?;
+    ensure_project_access(state.db.pool(), &auth_user, project_id).await?;
+    soft_delete_row(
+        state.db.pool(),
+        "construction_attendance_geofences",
+        &[("project_id", project_id), ("id", area_id)],
+    )
+    .await
 }
 
 /// 小程序考勤机模式可用的考勤点列表（仅返回已开启考勤机模式的点位）。
@@ -9190,6 +9415,99 @@ pub async fn delete_managed_attendance_photo_group(
         &[("id", photo_group_id)],
     )
     .await
+}
+
+#[derive(Deserialize)]
+pub struct ManagedAttendancePhotoPairParams {
+    project_id: Uuid,
+    worker_id: Uuid,
+}
+
+pub async fn list_managed_attendance_photo_pairs(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Query(params): Query<ManagedAttendancePhotoPairParams>,
+) -> ApiResult<Value> {
+    ensure_project_access(state.db.pool(), &auth_user, params.project_id).await?;
+    ensure_worker_in_project(state.db.pool(), params.project_id, params.worker_id).await?;
+    let items = sqlx::query_scalar::<_, Value>(
+        r#"
+        WITH photographed AS (
+            SELECT
+                r.id,
+                r.direction,
+                r.trigger_time,
+                (r.trigger_time AT TIME ZONE 'Asia/Shanghai')::date AS attendance_date,
+                COALESCE(NULLIF(photo.photo_data, ''), NULLIF(r.photo_path, '')) AS photo_url
+            FROM construction_attendance_records r
+            LEFT JOIN LATERAL (
+                SELECT p.photo_data
+                FROM construction_attendance_record_photos p
+                WHERE p.attendance_record_id = r.id
+                  AND p.photo_kind IN ('closeup', 'snapshot')
+                  AND NULLIF(BTRIM(p.photo_data), '') IS NOT NULL
+                ORDER BY (p.photo_kind = 'closeup') DESC,
+                         (p.source = 'admin_upload') ASC,
+                         p.created_at DESC,
+                         p.id DESC
+                LIMIT 1
+            ) photo ON TRUE
+            WHERE r.project_id = $1
+              AND r.worker_id = $2
+              AND r.is_deleted = FALSE
+              AND r.is_generated = FALSE
+              AND r.is_managed_generated = FALSE
+              AND COALESCE(r.record_type, 'device') = 'device'
+              AND NULLIF(BTRIM(COALESCE(r.serial_number, r.equipment_id)), '') IS NOT NULL
+              AND COALESCE(NULLIF(photo.photo_data, ''), NULLIF(r.photo_path, '')) IS NOT NULL
+        ), complete_days AS (
+            SELECT attendance_date
+            FROM photographed
+            GROUP BY attendance_date
+            HAVING COUNT(*) FILTER (WHERE direction = 0) > 0
+               AND COUNT(*) FILTER (WHERE direction = 1) > 0
+        ), picked AS (
+            SELECT photographed.*,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY attendance_date, direction
+                       ORDER BY trigger_time, id
+                   ) AS direction_rank,
+                   COUNT(*) OVER (
+                       PARTITION BY attendance_date, direction
+                   ) AS direction_count
+            FROM photographed
+            JOIN complete_days USING (attendance_date)
+        )
+        SELECT COALESCE(jsonb_agg(jsonb_build_object(
+            'attendance_date', attendance_date,
+            'in_photo', in_photo,
+            'out_photo', out_photo,
+            'in_time', in_time,
+            'out_time', out_time,
+            'in_count', in_count,
+            'out_count', out_count
+        ) ORDER BY attendance_date DESC), '[]'::jsonb)
+        FROM (
+            SELECT attendance_date,
+                   MAX(photo_url) FILTER (WHERE direction = 0 AND direction_rank = 1) AS in_photo,
+                   MAX(photo_url) FILTER (WHERE direction = 1 AND direction_rank = 1) AS out_photo,
+                   MAX(trigger_time) FILTER (WHERE direction = 0 AND direction_rank = 1) AS in_time,
+                   MAX(trigger_time) FILTER (WHERE direction = 1 AND direction_rank = 1) AS out_time,
+                   MAX(direction_count) FILTER (WHERE direction = 0) AS in_count,
+                   MAX(direction_count) FILTER (WHERE direction = 1) AS out_count
+            FROM picked
+            GROUP BY attendance_date
+            ORDER BY attendance_date DESC
+            LIMIT 100
+        ) pairs
+        "#,
+    )
+    .bind(params.project_id)
+    .bind(params.worker_id)
+    .fetch_one(state.db.pool())
+    .await
+    .map_err(db_error)?;
+    Ok(ApiSuccess::default().with_data(serde_json::json!({ "items": items })))
 }
 
 pub async fn create_managed_attendance_config(
@@ -15882,6 +16200,22 @@ mod tests {
                 out_photo.trim_start_matches("out-")
             );
         }
+    }
+
+    #[test]
+    fn managed_month_days_can_be_limited_to_today_and_later() {
+        let config_id = Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
+        let month = chrono::NaiveDate::from_ymd_opt(2026, 9, 1).unwrap();
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 9, 15).unwrap();
+
+        let days = selected_month_days_from(month, 26, config_id, today).unwrap();
+
+        assert_eq!(days.len(), 16);
+        assert!(days.iter().all(|day| *day >= today));
+        assert_eq!(
+            days.last().copied(),
+            chrono::NaiveDate::from_ymd_opt(2026, 9, 30)
+        );
     }
 
     #[test]

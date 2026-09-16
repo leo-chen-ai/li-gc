@@ -1,0 +1,2 @@
+ALTER TABLE report_forward_configs DROP CONSTRAINT report_manual_no_schedule;
+DROP TABLE report_forward_verifications;

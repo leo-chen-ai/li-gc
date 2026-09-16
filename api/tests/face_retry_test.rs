@@ -71,8 +71,25 @@ async fn face_retry_and_avatar_revision_are_transactional() {
         .execute(&pool)
         .await
         .unwrap();
+    let list_request = Request::builder()
+        .uri(format!(
+            "/api/v1/management/projects/{project}/attendance-points"
+        ))
+        .header("Authorization", format!("Bearer {user}"))
+        .body(Body::empty())
+        .unwrap();
+    let (status, _, _) = common::raw_request(app.clone(), list_request).await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "普通项目管理员不能查看移动人脸机"
+    );
     let (status, _, _) = common::raw_request(app.clone(), request(&user)).await;
-    assert_eq!(status, StatusCode::OK, "授权项目允许异步重试");
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "普通项目管理员不能管理移动人脸机"
+    );
 
     let (task, revision): (Uuid, i64) = sqlx::query_as("UPDATE construction_face_enrollments SET status='processing' WHERE worker_id=$1 RETURNING id,revision")
         .bind(worker).fetch_one(&pool).await.unwrap();

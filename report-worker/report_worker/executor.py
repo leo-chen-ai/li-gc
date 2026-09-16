@@ -6,6 +6,7 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -13,6 +14,7 @@ import openpyxl
 import yaml
 
 from .storage import ArtifactStorage
+from .huaxing import HuaxingDownloader
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -134,7 +136,7 @@ class RunExecutor:
             "email": {"enabled": False},
             "runtime": {
                 "validate_only": self.mode == "test_upload_validate",
-                "max_execution_retries": max_execution_retries(),
+                "max_execution_retries": 0 if self.config_row.get("verification_type") == "manual" else max_execution_retries(),
             },
         }
         config_path = self.work_dir / "runtime-config.yaml"
@@ -142,7 +144,37 @@ class RunExecutor:
         os.environ["REPORT_FORWARD_CONFIG_PATH"] = str(config_path)
         os.environ["REPORT_FORWARD_CODES_CSV"] = str(self.work_dir / "verification_codes.csv")
         os.environ["REPORT_FORWARD_PROCESSED_IDS"] = str(self.work_dir / "processed_ids.txt")
+        config["source_label"] = "华瑆" if self.config_row.get("adapter") == "huaxing_zjzwfw" else "姜太公"
+        config["verification_type"] = self.config_row.get("verification_type", "feishu")
+        config["manual_code_provider"] = self._manual_code
+        config["check_cancelled"] = self.check_cancelled
         return config
+
+    def _downloader(self):
+        adapter = self.config_row.get("adapter", "xzy_zjzwfw")
+        if adapter == "huaxing_zjzwfw":
+            return HuaxingDownloader(self.config)
+        if adapter != "xzy_zjzwfw":
+            raise RuntimeError("不支持的源网站类型")
+        return Downloader(self.config)
+
+    def _manual_code(self, timeout=120, **kwargs):
+        previous_stage = self.context["stage"]
+        request_id = self.repo.request_verification(self.run_id, timeout)
+        try:
+            self.stage("waiting_verification", "等待手动输入手机短信验证码，请在任务弹窗中填写并确认")
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                self.check_cancelled()
+                code = self.repo.consume_verification(self.run_id, request_id)
+                if code:
+                    return code
+                time.sleep(1)
+            raise RuntimeError("手动输入短信验证码超时，请手动重新执行任务")
+        finally:
+            self.repo.clear_verification(self.run_id)
+            self.context["stage"] = previous_stage
+            self.repo.set_stage(self.run_id, previous_stage)
 
     def stage(self, value, message=None):
         self.context["stage"] = value
@@ -197,18 +229,20 @@ class RunExecutor:
         except Exception as error:
             logging.exception("任务执行失败")
             safe_error = redact(error)
-            if self.repo.schedule_retry(
+            if self.config_row.get("verification_type") != "manual" and self.repo.schedule_retry(
                 self.run_id, safe_error, max_execution_retries()
             ):
                 return "retrying"
             self.repo.complete(self.run_id, "failed", safe_error)
             return "failed"
         finally:
+            if self.config_row.get("verification_type") == "manual":
+                self.repo.clear_verification(self.run_id)
             self.temp.cleanup()
 
     def _test_source_login(self):
         self.stage("source_login", "测试源网站登录")
-        downloader = Downloader(self.config)
+        downloader = self._downloader()
         try:
             if not downloader.login():
                 raise RuntimeError("源网站登录测试失败")
@@ -218,7 +252,7 @@ class RunExecutor:
 
     def _test_project_list(self):
         self.stage("project_list", "测试读取源网站项目列表")
-        names = Downloader(self.config).discover_projects()
+        names = self._downloader().discover_projects()
         if not names:
             raise RuntimeError("未读取到任何项目")
         for name in names:
@@ -233,7 +267,7 @@ class RunExecutor:
 
     def _download(self):
         self.stage("download", "开始从源网站下载项目花名册")
-        files = Downloader(self.config).run()
+        files = self._downloader().run()
         if not files:
             raise RuntimeError("源网站没有下载到文件")
         for file_path in files:

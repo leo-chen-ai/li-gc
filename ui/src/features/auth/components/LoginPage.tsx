@@ -109,8 +109,16 @@ export function LoginPage() {
               <LoginForm />
             </section>
 
-            <footer className="text-center text-xs font-medium text-slate-500/82 dark:text-white/52">
-              2026 宁波山淮科技有限公司 技术支持
+            <footer className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-center text-xs font-medium text-slate-500/82 dark:text-white/52">
+              <span>2026 宁波山淮科技有限公司 技术支持</span>
+              <a
+                href="https://beian.miit.gov.cn/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="transition-colors hover:text-[#0f7d6f] hover:underline dark:hover:text-emerald-300"
+              >
+                浙ICP备2026048427号-2
+              </a>
             </footer>
           </div>
         </section>

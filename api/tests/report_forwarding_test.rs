@@ -416,3 +416,193 @@ async fn report_forward_config_secrets_and_run_guards_work() {
     assert_eq!(summary["data"]["enabled_config_count"], 1);
     assert_eq!(summary["data"]["queued_count"], 1);
 }
+
+#[tokio::test]
+async fn huaxing_manual_configuration_and_verification_lifecycle() {
+    let (app, pool, _container) = build_test_app_with_pool().await;
+    let owner = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO users(email,username,role,is_active) VALUES('manual@example.com','manual_owner','admin',TRUE) RETURNING id",
+    ).fetch_one(&pool).await.unwrap();
+    let token = admin_token(owner);
+    let mut payload = config_payload("production", true);
+    payload["adapter"] = json!("huaxing_zjzwfw");
+    payload["source_base_url"] = json!("https://hx99.xin/login?redirect=/");
+    payload["verification_type"] = json!("manual");
+    payload["verification_config"] = Value::Null;
+    let (status, created) = request_json(
+        app.clone(),
+        "POST",
+        "/api/v1/admin/report-forward/configs",
+        &token,
+        Some(payload.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    assert_eq!(created["data"]["adapter"], "huaxing_zjzwfw");
+    assert_eq!(created["data"]["is_enabled"], false);
+    assert!(created["data"]["next_run_at"].is_null());
+    let config_id = created["data"]["id"].as_str().unwrap();
+    let (status, run) = request_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/report-forward/configs/{config_id}/runs"),
+        &token,
+        Some(json!({"run_mode":"production"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{run}");
+    let run_id = Uuid::parse_str(run["data"]["id"].as_str().unwrap()).unwrap();
+    sqlx::query("UPDATE report_forward_runs SET status='running',current_stage='waiting_verification' WHERE id=$1")
+        .bind(run_id).execute(&pool).await.unwrap();
+    let request_id = sqlx::query_scalar::<_, Uuid>("INSERT INTO report_forward_verifications(run_id,expires_at) VALUES($1,NOW()+INTERVAL '2 minutes') RETURNING id")
+        .bind(run_id).fetch_one(&pool).await.unwrap();
+    let endpoint = format!("/api/v1/admin/report-forward/runs/{run_id}/verification");
+    for code in ["123", "12a456", "1234567"] {
+        let (status, _) = request_json(
+            app.clone(),
+            "POST",
+            &endpoint,
+            &token,
+            Some(json!({"request_id":request_id,"code":code})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+    let (status, _) = request_json(
+        app.clone(),
+        "POST",
+        &endpoint,
+        &token,
+        Some(json!({"request_id":Uuid::new_v4(),"code":"123456"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = request_json(
+        app.clone(),
+        "POST",
+        &endpoint,
+        &token,
+        Some(json!({"request_id":request_id,"code":"123456"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = request_json(
+        app.clone(),
+        "POST",
+        &endpoint,
+        &token,
+        Some(json!({"request_id":request_id,"code":"654321"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (_, detail) = request_json(
+        app.clone(),
+        "GET",
+        &format!("/api/v1/admin/report-forward/runs/{run_id}"),
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(detail["data"]["verification_request"]["submitted"], true);
+    assert!(!detail.to_string().contains("123456"));
+    assert!(!detail.to_string().contains("code_cipher"));
+    // Another permitted account cannot submit a code for this user's task.
+    let other = sqlx::query_scalar::<_, Uuid>("INSERT INTO users(email,username,role,is_active) VALUES('other-manual@example.com','other_manual','admin',TRUE) RETURNING id")
+        .fetch_one(&pool).await.unwrap();
+    sqlx::query("UPDATE report_forward_verifications SET code_cipher=NULL WHERE run_id=$1")
+        .bind(run_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, _) = request_json(
+        app.clone(),
+        "POST",
+        &endpoint,
+        &admin_token(other),
+        Some(json!({"request_id":request_id,"code":"123456"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    sqlx::query("UPDATE report_forward_verifications SET expires_at=NOW()-INTERVAL '1 second' WHERE run_id=$1").bind(run_id).execute(&pool).await.unwrap();
+    let (status, _) = request_json(
+        app.clone(),
+        "POST",
+        &endpoint,
+        &token,
+        Some(json!({"request_id":request_id,"code":"123456"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    sqlx::query("UPDATE report_forward_verifications SET expires_at=NOW()+INTERVAL '2 minutes' WHERE run_id=$1").bind(run_id).execute(&pool).await.unwrap();
+    sqlx::query("UPDATE report_forward_runs SET cancel_requested=TRUE WHERE id=$1")
+        .bind(run_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, _) = request_json(
+        app.clone(),
+        "POST",
+        &endpoint,
+        &token,
+        Some(json!({"request_id":request_id,"code":"123456"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    sqlx::query("UPDATE report_forward_runs SET cancel_requested=FALSE WHERE id=$1")
+        .bind(run_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, _) = request_json(
+        app.clone(),
+        "POST",
+        &endpoint,
+        &token,
+        Some(json!({"request_id":request_id,"code":"123456"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let stored: String = sqlx::query_scalar(
+        "SELECT pgp_sym_decrypt(code_cipher,$2) FROM report_forward_verifications WHERE run_id=$1",
+    )
+    .bind(run_id)
+    .bind(std::env::var("REPORT_FORWARD_CREDENTIAL_KEY").unwrap())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(stored, "123456");
+    let missing_comments: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM pg_attribute WHERE attrelid='report_forward_verifications'::regclass AND attnum>0 AND NOT attisdropped AND col_description(attrelid,attnum) IS NULL")
+        .fetch_one(&pool).await.unwrap();
+    assert_eq!(missing_comments, 0);
+    let comment: Option<String> =
+        sqlx::query_scalar("SELECT obj_description('report_forward_verifications'::regclass)")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(comment.is_some());
+    sqlx::raw_sql(include_str!(
+        "../migrations/065_report_manual_verification.down.sql"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::raw_sql(include_str!(
+        "../migrations/065_report_manual_verification.up.sql"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // The source URL cannot be pointed at arbitrary hosts.
+    payload["name"] = json!("invalid-source");
+    payload["source_base_url"] = json!("http://127.0.0.1");
+    let (status, _) = request_json(
+        app,
+        "POST",
+        "/api/v1/admin/report-forward/configs",
+        &token,
+        Some(payload),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}

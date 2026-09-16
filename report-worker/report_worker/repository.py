@@ -24,13 +24,15 @@ class Repository:
             yield conn
 
     def schedule_due(self):
+        if self.worker_target != "k3s":
+            return
         with self.connection() as conn, conn.transaction():
             configs = conn.execute(
                 """
                 SELECT id, name
                 FROM report_forward_configs
                 WHERE is_deleted=FALSE AND is_enabled=TRUE
-                  AND lifecycle_status='production' AND next_run_at <= NOW()
+                  AND lifecycle_status='production' AND verification_type='feishu' AND next_run_at <= NOW()
                 ORDER BY next_run_at
                 LIMIT 20 FOR UPDATE SKIP LOCKED
                 """
@@ -56,6 +58,19 @@ class Repository:
 
     def claim_run(self, worker_id):
         with self.connection() as conn, conn.transaction():
+            # A manual run cannot resume itself after the browser/worker has died.
+            conn.execute(
+                """UPDATE report_forward_runs r SET status='failed',current_stage='interrupted',
+                   error_summary='手动任务执行中断，请手动重新执行',completed_at=NOW(),lease_expires_at=NULL
+                   FROM report_forward_configs c WHERE c.id=r.config_id AND c.verification_type='manual'
+                     AND r.status IN ('running','cancelling') AND r.lease_expires_at<NOW()
+                     AND COALESCE(r.options->>'worker_target','k3s')=%s""",
+                (self.worker_target,),
+            )
+            conn.execute(
+                """DELETE FROM report_forward_verifications v USING report_forward_runs r
+                   WHERE v.run_id=r.id AND (v.expires_at<=NOW() OR r.status IN ('success','failed','cancelled'))"""
+            )
             # Serialize claims so the global single-browser cap cannot race even if
             # somebody accidentally scales the Deployment above one replica.
             conn.execute("SELECT pg_advisory_xact_lock(731047002)")
@@ -69,8 +84,10 @@ class Repository:
                     CROSS JOIN cooldown cd
                     WHERE (
                         r.status='pending'
-                        OR (r.status IN ('running','cancelling') AND r.lease_expires_at < NOW())
+                        OR (r.status IN ('running','cancelling') AND r.lease_expires_at < NOW()
+                            AND NOT EXISTS (SELECT 1 FROM report_forward_configs c WHERE c.id=r.config_id AND c.verification_type='manual'))
                     )
+                    AND NOT (r.trigger_type='scheduled' AND EXISTS (SELECT 1 FROM report_forward_configs c WHERE c.id=r.config_id AND c.verification_type='manual'))
                     AND NOT r.cancel_requested
                     AND COALESCE(r.options->>'worker_target', 'k3s') = %s
                     AND (
@@ -119,6 +136,30 @@ class Repository:
                 """,
                 (self.production_cooldown_seconds, self.worker_target, worker_id),
             ).fetchone()
+
+    def request_verification(self, run_id, timeout):
+        with self.connection() as conn:
+            return conn.execute(
+                """INSERT INTO report_forward_verifications(run_id,expires_at)
+                   VALUES (%s,NOW()+make_interval(secs => %s))
+                   ON CONFLICT(run_id) DO UPDATE SET id=gen_random_uuid(),
+                   expires_at=EXCLUDED.expires_at,code_cipher=NULL RETURNING id""",
+                (run_id, timeout),
+            ).fetchone()["id"]
+
+    def consume_verification(self, run_id, request_id):
+        with self.connection() as conn:
+            row = conn.execute(
+                """DELETE FROM report_forward_verifications
+                   WHERE run_id=%s AND id=%s AND expires_at>NOW() AND code_cipher IS NOT NULL
+                   RETURNING pgp_sym_decrypt(code_cipher,%s) AS code""",
+                (run_id, request_id, self.credential_key),
+            ).fetchone()
+            return row["code"] if row else None
+
+    def clear_verification(self, run_id):
+        with self.connection() as conn:
+            conn.execute("DELETE FROM report_forward_verifications WHERE run_id=%s", (run_id,))
 
     def runtime_config(self, config_id):
         with self.connection() as conn:

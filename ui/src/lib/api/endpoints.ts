@@ -211,6 +211,7 @@ export const API_ENDPOINTS = {
     MANAGED_ATTENDANCE_PHOTO_GROUPS: "/admin/managed-attendance/photo-groups",
     MANAGED_ATTENDANCE_PHOTO_GROUP: (photoGroupId: string) =>
       `/admin/managed-attendance/photo-groups/${photoGroupId}`,
+    MANAGED_ATTENDANCE_PHOTO_PAIRS: "/admin/managed-attendance/attendance-photo-pairs",
     MANAGED_ATTENDANCE_CONFIGS: "/admin/managed-attendance/configs",
     MANAGED_ATTENDANCE_CONFIG: (configId: string) =>
       `/admin/managed-attendance/configs/${configId}`,

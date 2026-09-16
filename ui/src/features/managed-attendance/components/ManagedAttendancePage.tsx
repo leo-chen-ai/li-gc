@@ -73,6 +73,7 @@ import { managedAttendanceService } from "../services";
 import type {
   ManagedAttendanceConfig,
   ManagedAttendanceConfigPayload,
+  ManagedAttendancePhotoPair,
   ManagedAttendanceRecord,
 } from "../types";
 
@@ -119,6 +120,10 @@ export function ManagedAttendancePage(_props: { embedded?: boolean }) {
   const [editingConfig, setEditingConfig] =
     useState<ManagedAttendanceConfig | null>(null);
   const [configForm, setConfigForm] = useState<ConfigForm>(defaultConfigForm);
+  const [syncDialogOpen, setSyncDialogOpen] = useState(false);
+  const [syncingPhotos, setSyncingPhotos] = useState(false);
+  const [attendancePhotoPairs, setAttendancePhotoPairs] = useState<ManagedAttendancePhotoPair[]>([]);
+  const [selectedSyncedPairs, setSelectedSyncedPairs] = useState<Set<number>>(new Set());
 
   const commonFilters = useMemo(
     () => ({
@@ -344,6 +349,39 @@ export function ManagedAttendancePage(_props: { embedded?: boolean }) {
     }
   };
 
+  const openAttendancePhotoSync = async () => {
+    if (!selectedProjectId || !configForm.workerId) {
+      toast.error("请先选择托管人员");
+      return;
+    }
+    setSyncingPhotos(true);
+    try {
+      const pairs = await managedAttendanceService.listAttendancePhotoPairs(
+        selectedProjectId,
+        configForm.workerId,
+      );
+      setAttendancePhotoPairs(pairs);
+      setSelectedSyncedPairs(new Set(pairs.slice(0, 30).map((_, index) => index)));
+      setSyncDialogOpen(true);
+      if (!pairs.length) toast.info("该人员暂无可匹配的进出场考勤照片");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "同步人员考勤照片失败");
+    } finally {
+      setSyncingPhotos(false);
+    }
+  };
+
+  const applyAttendancePhotoSync = () => {
+    const synced = attendancePhotoPairs
+      .filter((_, index) => selectedSyncedPairs.has(index))
+      .map((pair) => ({ inPhoto: pair.in_photo, outPhoto: pair.out_photo }));
+    const existing = configForm.photoPairs.filter((pair) => pair.inPhoto || pair.outPhoto);
+    const merged = [...existing, ...synced].slice(0, 30);
+    setConfigForm({ ...configForm, photoPairs: merged.length ? merged : [{ inPhoto: "", outPhoto: "" }] });
+    setSyncDialogOpen(false);
+    toast.success(`已同步 ${Math.min(synced.length, 30 - existing.length)} 组考勤照片`);
+  };
+
   return (
     <div className="space-y-4 text-slate-950 dark:text-foreground">
       <section className="overflow-hidden rounded-xl border bg-white shadow-sm dark:border-border dark:bg-card">
@@ -447,7 +485,17 @@ export function ManagedAttendancePage(_props: { embedded?: boolean }) {
           if (!open) setEditingConfig(null);
         }}
         onFormChange={setConfigForm}
+        syncingPhotos={syncingPhotos}
+        onSyncAttendancePhotos={() => void openAttendancePhotoSync()}
         onSubmit={handleConfigSubmit}
+      />
+      <AttendancePhotoSyncDialog
+        open={syncDialogOpen}
+        pairs={attendancePhotoPairs}
+        selected={selectedSyncedPairs}
+        onOpenChange={setSyncDialogOpen}
+        onSelectedChange={setSelectedSyncedPairs}
+        onApply={applyAttendancePhotoSync}
       />
     </div>
   );
@@ -1037,8 +1085,10 @@ function ConfigDialog({
   workers,
   saving,
   editing,
+  syncingPhotos,
   onOpenChange,
   onFormChange,
+  onSyncAttendancePhotos,
   onSubmit,
 }: {
   open: boolean;
@@ -1046,10 +1096,22 @@ function ConfigDialog({
   workers: StructuredWorkerOption[];
   saving: boolean;
   editing: boolean;
+  syncingPhotos: boolean;
   onOpenChange: (open: boolean) => void;
   onFormChange: (form: ConfigForm) => void;
+  onSyncAttendancePhotos: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
+  const [draggedPhoto, setDraggedPhoto] = useState<{ index: number; direction: "in" | "out" } | null>(null);
+  const movePhoto = (targetIndex: number, targetDirection: "in" | "out") => {
+    if (!draggedPhoto || (draggedPhoto.index === targetIndex && draggedPhoto.direction === targetDirection)) return;
+    const pairs = form.photoPairs.map((pair) => ({ ...pair }));
+    const sourceKey = draggedPhoto.direction === "in" ? "inPhoto" : "outPhoto";
+    const targetKey = targetDirection === "in" ? "inPhoto" : "outPhoto";
+    [pairs[draggedPhoto.index][sourceKey], pairs[targetIndex][targetKey]] = [pairs[targetIndex][targetKey], pairs[draggedPhoto.index][sourceKey]];
+    onFormChange({ ...form, photoPairs: pairs });
+    setDraggedPhoto(null);
+  };
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex h-[92svh] w-[96vw] max-w-[1440px] flex-col overflow-hidden p-0 sm:max-w-[1440px]">
@@ -1076,7 +1138,13 @@ function ConfigDialog({
                 placeholder="搜索姓名、单位或班组选择人员"
               />
             </Field>
-            <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2 text-xs leading-5 text-emerald-800 lg:col-span-2">
+            <div className="flex items-end">
+              <Button type="button" variant="outline" className="w-full gap-2 border-sky-200 text-sky-700" disabled={!form.workerId || saving || syncingPhotos} onClick={onSyncAttendancePhotos}>
+                {syncingPhotos ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+                一键同步考勤照片
+              </Button>
+            </div>
+            <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2 text-xs leading-5 text-emerald-800">
               系统按项目自动匹配考勤机：进场记录优先发进场机，出场记录优先发出场机；没有专用方向设备时使用自动/通用设备。同方向有多台时全部下发。
             </div>
             <Field label="每月随机考勤天数">
@@ -1142,6 +1210,8 @@ function ConfigDialog({
                     removable={form.photoPairs.length > 1}
                     onChange={(nextPair) => onFormChange({ ...form, photoPairs: form.photoPairs.map((item, itemIndex) => itemIndex === index ? nextPair : item) })}
                     onRemove={() => onFormChange({ ...form, photoPairs: form.photoPairs.filter((_, itemIndex) => itemIndex !== index) })}
+                    onDragStart={(direction) => setDraggedPhoto({ index, direction })}
+                    onDrop={(direction) => movePhoto(index, direction)}
                   />
                 ))}
               </div>
@@ -1181,13 +1251,73 @@ function ConfigDialog({
   );
 }
 
-function PhotoPairRow({ index, pair, disabled, removable, onChange, onRemove }: {
+function AttendancePhotoSyncDialog({ open, pairs, selected, onOpenChange, onSelectedChange, onApply }: {
+  open: boolean;
+  pairs: ManagedAttendancePhotoPair[];
+  selected: Set<number>;
+  onOpenChange: (open: boolean) => void;
+  onSelectedChange: (selected: Set<number>) => void;
+  onApply: () => void;
+}) {
+  const toggle = (index: number) => {
+    const next = new Set(selected);
+    if (next.has(index)) next.delete(index);
+    else if (next.size < 30) next.add(index);
+    else return toast.error("一次最多同步 30 组照片");
+    onSelectedChange(next);
+  };
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex max-h-[90svh] w-[96vw] max-w-5xl flex-col overflow-hidden sm:max-w-5xl">
+        <DialogHeader>
+          <DialogTitle>匹配人员考勤照片</DialogTitle>
+          <DialogDescription>已按同一天的一条进场和一条出场自动配对，不限制考勤日期。勾选后加入照片组，加入后仍可跨组拖拽调整。</DialogDescription>
+        </DialogHeader>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {!pairs.length ? <div className="py-12 text-center text-sm text-muted-foreground">暂无同日同时包含进场、出场照片的真实设备考勤</div> : null}
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {pairs.map((pair, index) => (
+              <button key={`${pair.attendance_date}-${index}`} type="button" onClick={() => toggle(index)} className={cn("rounded-lg border p-2 text-left transition", selected.has(index) ? "border-sky-500 bg-sky-50 ring-1 ring-sky-500 dark:bg-sky-950/20" : "hover:border-slate-400")}>
+                <div className="mb-2 flex items-center justify-between text-xs">
+                  <span className="font-semibold">{pair.attendance_date}</span>
+                  <span className={cn("rounded px-1.5 py-0.5", selected.has(index) ? "bg-sky-600 text-white" : "bg-slate-100 text-muted-foreground")}>{selected.has(index) ? "已选择" : "选择"}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {([['进', pair.in_photo, pair.in_time, pair.in_count], ['出', pair.out_photo, pair.out_time, pair.out_count]] as const).map(([label, photo, time, count]) => (
+                    <div key={label}>
+                      <div className="relative aspect-[4/3] overflow-hidden rounded-md bg-slate-100"><img src={photo} alt={`${pair.attendance_date}${label}场照片`} className="size-full object-contain" /><span className="absolute left-1 top-1 rounded bg-slate-950/70 px-1.5 py-0.5 text-[10px] text-white">{label}</span></div>
+                      <div className="mt-1 truncate text-[11px] text-muted-foreground">{formatAttendancePhotoTime(time)}{count > 1 ? ` · 当日${count}条取首条` : ""}</div>
+                    </div>
+                  ))}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+        <DialogFooter>
+          <span className="mr-auto text-xs text-muted-foreground">已选 {selected.size} 组</span>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
+          <Button type="button" className="bg-[#0f6b5d] text-white" disabled={!selected.size} onClick={onApply}>加入照片组</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function formatAttendancePhotoTime(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+}
+
+function PhotoPairRow({ index, pair, disabled, removable, onChange, onRemove, onDragStart, onDrop }: {
   index: number;
   pair: PhotoPair;
   disabled: boolean;
   removable: boolean;
   onChange: (pair: PhotoPair) => void;
   onRemove: () => void;
+  onDragStart: (direction: "in" | "out") => void;
+  onDrop: (direction: "in" | "out") => void;
 }) {
   const [uploading, setUploading] = useState<"in" | "out" | null>(null);
   const upload = async (direction: "in" | "out", file?: File) => {
@@ -1213,8 +1343,8 @@ function PhotoPairRow({ index, pair, disabled, removable, onChange, onRemove }: 
         {(["in", "out"] as const).map((direction) => {
           const url = direction === "in" ? pair.inPhoto : pair.outPhoto;
           return (
-            <label key={direction} className="relative flex aspect-[4/3] min-h-20 cursor-pointer flex-col items-center justify-center overflow-hidden rounded-md border border-dashed bg-slate-100 text-[11px] dark:bg-muted">
-              {url ? <img src={url} alt={`${direction === "in" ? "进场" : "出场"}照片`} className="absolute inset-0 size-full object-contain" /> : null}
+            <label key={direction} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); onDrop(direction); }} className="relative flex aspect-[4/3] min-h-20 cursor-pointer flex-col items-center justify-center overflow-hidden rounded-md border border-dashed bg-slate-100 text-[11px] dark:bg-muted">
+              {url ? <img src={url} draggable={!disabled} onDragStart={() => onDragStart(direction)} alt={`${direction === "in" ? "进场" : "出场"}照片`} className="absolute inset-0 size-full cursor-grab object-contain active:cursor-grabbing" /> : null}
               <span className="absolute left-1 top-1 z-10 rounded bg-slate-950/65 px-1.5 py-0.5 text-white">
                 {direction === "in" ? "进" : "出"}
               </span>

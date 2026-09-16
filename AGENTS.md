@@ -118,6 +118,7 @@ http://36.151.143.235:30081
 
 ### 注意事项
 
+- Rust 后端发布必须默认在本机使用 Docker/Buildx 完成构建，再通过 SSH 将镜像导入宿迁 K3s 并滚动更新；不要在生产服务器上现场编译 Rust。若只上线单个修复，应在独立 worktree 基于线上当前 API 提交 cherry-pick 该修复后，本地构建并上传，避免夹带工作区其他未完成需求。
 - 镜像不推送到远程 registry；脚本会 `docker buildx build --load` 后通过 SSH `docker save | gzip | k3s ctr images import -` 导入宿迁 K3s。
 - 镜像 tag 使用 `local-<git-sha>`；如果工作区有未提交的 API/UI/deploy 改动，脚本会追加 `dirty-<timestamp>`。
 - 如果只是把已验证镜像重新打到当前提交 tag，可用 `--tag "$(git rev-parse --short=12 HEAD)"`，必要时加 `--skip-migrate`。

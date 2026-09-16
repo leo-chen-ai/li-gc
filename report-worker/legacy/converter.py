@@ -94,7 +94,7 @@ def batch_convert(config):
         src_path = os.path.join(download_dir, filename)
         try:
             latest_entry_days = int(config.get('download', {}).get('latest_entry_days', 30))
-            out_path = convert_file(src_path, template_file, output_dir, latest_entry_days)
+            out_path = convert_file(src_path, template_file, output_dir, latest_entry_days, config.get("source_label", "姜太公"))
             if out_path:
                 results.append(out_path)
                 logger.info(f"转换成功: {filename} -> {os.path.basename(out_path)}")
@@ -105,7 +105,7 @@ def batch_convert(config):
     return results
 
 
-def convert_file(src_path, template_path, output_dir, latest_entry_days=30):
+def convert_file(src_path, template_path, output_dir, latest_entry_days=30, source_label="姜太公"):
     filename = os.path.basename(src_path)
     date_str = datetime.now().strftime('%Y%m%d')
 
@@ -113,7 +113,7 @@ def convert_file(src_path, template_path, output_dir, latest_entry_days=30):
     if not project_name:
         project_name = os.path.splitext(filename)[0]
 
-    out_filename = f"{date_str}_{project_name}_姜太公导出.xlsx"
+    out_filename = f"{date_str}_{project_name}_{source_label}导出.xlsx"
     out_path = os.path.join(output_dir, out_filename)
 
     shutil.copy2(template_path, out_path)

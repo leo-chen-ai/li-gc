@@ -49,6 +49,10 @@ fn report_forward_routes() -> Router<AppState> {
             "/report-forward/runs/{run_id}/retry",
             post(report_forwarding::retry_run),
         )
+        .route(
+            "/report-forward/runs/{run_id}/verification",
+            post(report_forwarding::submit_verification),
+        )
         .route("/report-forward/items", get(report_forwarding::list_items))
         .route(
             "/report-forward/runs/{run_id}/items/export",
@@ -69,6 +73,14 @@ pub fn admin_routes() -> Router<AppState> {
         .route(
             "/face-recognition-logs/{id}/photos",
             get(crate::feature::face::logs::photos),
+        )
+        .route(
+            "/face-library-sync",
+            get(crate::feature::face::library::list),
+        )
+        .route(
+            "/face-library-sync/{project_id}/retry",
+            post(crate::feature::face::library::retry),
         )
         .merge(report_forward_routes())
         .route("/log/level", post(log::handler::set_log_level))
@@ -95,6 +107,10 @@ pub fn admin_routes() -> Router<AppState> {
                 .put(construction::handler::update_managed_attendance_photo_group)
                 .patch(construction::handler::update_managed_attendance_photo_group)
                 .delete(construction::handler::delete_managed_attendance_photo_group),
+        )
+        .route(
+            "/managed-attendance/attendance-photo-pairs",
+            get(construction::handler::list_managed_attendance_photo_pairs),
         )
         .route(
             "/managed-attendance/configs",
@@ -250,6 +266,21 @@ pub fn admin_routes() -> Router<AppState> {
                 .put(construction::handler::update_attendance_point)
                 .patch(construction::handler::update_attendance_point)
                 .delete(construction::handler::delete_attendance_point),
+        )
+        .route(
+            "/projects/{project_id}/attendance-geofence-config",
+            get(construction::handler::get_attendance_geofence_config)
+                .put(construction::handler::update_attendance_geofence_settings),
+        )
+        .route(
+            "/projects/{project_id}/attendance-geofences",
+            post(construction::handler::create_attendance_geofence),
+        )
+        .route(
+            "/projects/{project_id}/attendance-geofences/{area_id}",
+            put(construction::handler::update_attendance_geofence)
+                .patch(construction::handler::update_attendance_geofence)
+                .delete(construction::handler::delete_attendance_geofence),
         )
         .route(
             "/attendance-device-issue-reports",
@@ -504,6 +535,14 @@ pub fn management_routes(state: AppState) -> Router<AppState> {
             get(crate::feature::face::logs::photos),
         )
         .route(
+            "/face-library-sync",
+            get(crate::feature::face::library::list),
+        )
+        .route(
+            "/face-library-sync/{project_id}/retry",
+            post(crate::feature::face::library::retry),
+        )
+        .route(
             "/role-permissions",
             get(role::handler::current_role_permissions),
         )
@@ -661,6 +700,21 @@ pub fn management_routes(state: AppState) -> Router<AppState> {
                 .delete(construction::handler::delete_attendance_point),
         )
         .route(
+            "/projects/{project_id}/attendance-geofence-config",
+            get(construction::handler::get_attendance_geofence_config)
+                .put(construction::handler::update_attendance_geofence_settings),
+        )
+        .route(
+            "/projects/{project_id}/attendance-geofences",
+            post(construction::handler::create_attendance_geofence),
+        )
+        .route(
+            "/projects/{project_id}/attendance-geofences/{area_id}",
+            put(construction::handler::update_attendance_geofence)
+                .patch(construction::handler::update_attendance_geofence)
+                .delete(construction::handler::delete_attendance_geofence),
+        )
+        .route(
             "/attendance-device-issue-reports",
             get(construction::handler::list_attendance_device_issue_reports)
                 .post(construction::handler::create_attendance_device_issue_report),
@@ -767,6 +821,11 @@ fn allowed_menu_keys_for_management_path(path: &str) -> Option<&'static [&'stati
         return Some(&["face_recognition_logs"]);
     }
 
+    if management_path == "/face-library-sync" || management_path.starts_with("/face-library-sync/")
+    {
+        return Some(&["face_library_sync"]);
+    }
+
     if management_path == "/projects" || management_path == "/projects/options" {
         return Some(&[
             "projects",
@@ -815,6 +874,16 @@ mod management_permission_tests {
             assert_eq!(
                 allowed_menu_keys_for_management_path(path),
                 Some(&["face_recognition_logs"][..])
+            );
+        }
+        for path in [
+            "/face-library-sync",
+            "/face-library-sync/00000000-0000-0000-0000-000000000000/retry",
+            "/api/v1/management/face-library-sync",
+        ] {
+            assert_eq!(
+                allowed_menu_keys_for_management_path(path),
+                Some(&["face_library_sync"][..])
             );
         }
         assert_eq!(

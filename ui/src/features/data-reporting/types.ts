@@ -35,6 +35,7 @@ export interface ReportConfig {
 }
 
 export interface ReportConfigPayload {
+  adapter: "xzy_zjzwfw" | "huaxing_zjzwfw";
   name: string;
   source_base_url: string;
   source_username: string;
@@ -45,7 +46,7 @@ export interface ReportConfigPayload {
   target_base_url: string;
   target_username: string;
   target_password?: string;
-  verification_type: "feishu";
+  verification_type: "feishu" | "manual";
   verification_config?: { app_id: string; app_secret: string; chat_id: string; poll_interval: number };
   schedule_time: string;
   schedule_timezone: "Asia/Shanghai";
@@ -110,6 +111,7 @@ export interface RunArtifact {
 }
 
 export interface ReportRun {
+  verification_request?: { id: string; expires_at: string; submitted: boolean } | null;
   id: string;
   config_id: string | null;
   config_name: string;
