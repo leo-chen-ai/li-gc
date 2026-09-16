@@ -25,10 +25,11 @@ export const managedAttendanceService = {
   listAttendancePhotoPairs: async (
     projectId: string,
     workerId: string,
+    month: string,
   ): Promise<ManagedAttendancePhotoPair[]> => {
     const response = await apiClient.get<ApiResponse<{ items: ManagedAttendancePhotoPair[] }>>(
       API_ENDPOINTS.ADMIN.MANAGED_ATTENDANCE_PHOTO_PAIRS,
-      { params: { project_id: projectId, worker_id: workerId } },
+      { params: { project_id: projectId, worker_id: workerId, month } },
     );
     return unwrapData(response.data, "同步人员考勤照片失败").items;
   },

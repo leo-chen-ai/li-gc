@@ -122,6 +122,7 @@ export function ManagedAttendancePage(_props: { embedded?: boolean }) {
   const [configForm, setConfigForm] = useState<ConfigForm>(defaultConfigForm);
   const [syncDialogOpen, setSyncDialogOpen] = useState(false);
   const [syncingPhotos, setSyncingPhotos] = useState(false);
+  const [syncMonth, setSyncMonth] = useState(currentMonth());
   const [attendancePhotoPairs, setAttendancePhotoPairs] = useState<ManagedAttendancePhotoPair[]>([]);
   const [selectedSyncedPairs, setSelectedSyncedPairs] = useState<Set<number>>(new Set());
 
@@ -347,26 +348,38 @@ export function ManagedAttendancePage(_props: { embedded?: boolean }) {
     }
   };
 
-  const openAttendancePhotoSync = async () => {
+  const loadAttendancePhotoPairs = async (targetMonth: string) => {
     if (!selectedProjectId || !configForm.workerId) {
       toast.error("请先选择托管人员");
-      return;
+      return false;
     }
     setSyncingPhotos(true);
     try {
       const pairs = await managedAttendanceService.listAttendancePhotoPairs(
         selectedProjectId,
         configForm.workerId,
+        targetMonth,
       );
       setAttendancePhotoPairs(pairs);
       setSelectedSyncedPairs(new Set(pairs.map((_, index) => index)));
-      setSyncDialogOpen(true);
       if (!pairs.length) toast.info("该人员暂无可匹配的进出场考勤照片");
+      return true;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "同步人员考勤照片失败");
+      return false;
     } finally {
       setSyncingPhotos(false);
     }
+  };
+
+  const openAttendancePhotoSync = async () => {
+    if (await loadAttendancePhotoPairs(syncMonth)) setSyncDialogOpen(true);
+  };
+
+  const changeAttendancePhotoSyncMonth = async (targetMonth: string) => {
+    if (!targetMonth) return;
+    setSyncMonth(targetMonth);
+    await loadAttendancePhotoPairs(targetMonth);
   };
 
   const applyAttendancePhotoSync = () => {
@@ -491,7 +504,11 @@ export function ManagedAttendancePage(_props: { embedded?: boolean }) {
         open={syncDialogOpen}
         pairs={attendancePhotoPairs}
         selected={selectedSyncedPairs}
+        month={syncMonth}
+        loading={syncingPhotos}
         onOpenChange={setSyncDialogOpen}
+        onMonthChange={(value) => void changeAttendancePhotoSyncMonth(value)}
+        onPairsChange={setAttendancePhotoPairs}
         onSelectedChange={setSelectedSyncedPairs}
         onApply={applyAttendancePhotoSync}
       />
@@ -1249,40 +1266,78 @@ function ConfigDialog({
   );
 }
 
-function AttendancePhotoSyncDialog({ open, pairs, selected, onOpenChange, onSelectedChange, onApply }: {
+function AttendancePhotoSyncDialog({ open, pairs, selected, month, loading, onOpenChange, onMonthChange, onPairsChange, onSelectedChange, onApply }: {
   open: boolean;
   pairs: ManagedAttendancePhotoPair[];
   selected: Set<number>;
+  month: string;
+  loading: boolean;
   onOpenChange: (open: boolean) => void;
+  onMonthChange: (month: string) => void;
+  onPairsChange: (pairs: ManagedAttendancePhotoPair[]) => void;
   onSelectedChange: (selected: Set<number>) => void;
   onApply: () => void;
 }) {
+  const [draggedPhoto, setDraggedPhoto] = useState<{ index: number; direction: "in" | "out" } | null>(null);
   const toggle = (index: number) => {
     const next = new Set(selected);
     if (next.has(index)) next.delete(index);
     else next.add(index);
     onSelectedChange(next);
   };
+  const swapPhoto = (targetIndex: number, targetDirection: "in" | "out") => {
+    if (!draggedPhoto || (draggedPhoto.index === targetIndex && draggedPhoto.direction === targetDirection)) return;
+    const next = pairs.map((pair) => ({ ...pair }));
+    const sourcePhotoKey = `${draggedPhoto.direction}_photo` as "in_photo" | "out_photo";
+    const sourceTimeKey = `${draggedPhoto.direction}_time` as "in_time" | "out_time";
+    const targetPhotoKey = `${targetDirection}_photo` as "in_photo" | "out_photo";
+    const targetTimeKey = `${targetDirection}_time` as "in_time" | "out_time";
+    [next[draggedPhoto.index][sourcePhotoKey], next[targetIndex][targetPhotoKey]] = [next[targetIndex][targetPhotoKey], next[draggedPhoto.index][sourcePhotoKey]];
+    [next[draggedPhoto.index][sourceTimeKey], next[targetIndex][targetTimeKey]] = [next[targetIndex][targetTimeKey], next[draggedPhoto.index][sourceTimeKey]];
+    onPairsChange(next);
+    setDraggedPhoto(null);
+  };
+  const movePair = (sourceIndex: number, offset: -1 | 1) => {
+    const targetIndex = sourceIndex + offset;
+    if (targetIndex < 0 || targetIndex >= pairs.length) return;
+    const ordered = pairs.map((pair, index) => ({ pair, selected: selected.has(index) }));
+    const [moved] = ordered.splice(sourceIndex, 1);
+    ordered.splice(targetIndex, 0, moved);
+    onPairsChange(ordered.map((item) => item.pair));
+    onSelectedChange(new Set(ordered.flatMap((item, index) => item.selected ? [index] : [])));
+  };
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[90svh] w-[96vw] max-w-5xl flex-col overflow-hidden sm:max-w-5xl">
         <DialogHeader>
           <DialogTitle>匹配人员考勤照片</DialogTitle>
-          <DialogDescription>已将同一天的进、出场记录按时间顺序逐条配对，不限制考勤日期；同日有多组记录时会显示多对。勾选后加入照片组，加入后仍可跨组拖拽调整。</DialogDescription>
+          <DialogDescription>选择月份后，同一天的进、出场记录会按时间顺序逐条配对；可先拖拽照片跨组交换，确认后再加入照片组。</DialogDescription>
         </DialogHeader>
+        <div className="flex items-end gap-3 rounded-lg border bg-slate-50 p-3 dark:bg-muted/30">
+          <div className="space-y-1">
+            <Label htmlFor="attendance-photo-sync-month">考勤月份</Label>
+            <Input id="attendance-photo-sync-month" type="month" value={month} disabled={loading} onChange={(event) => onMonthChange(event.target.value)} className="w-44 bg-background" />
+          </div>
+          <span className="pb-2 text-xs text-muted-foreground">共匹配 {pairs.length} 对；拖动任意照片到其他进/出场位置即可交换。</span>
+          {loading ? <Loader2 className="mb-2 size-4 animate-spin text-sky-600" /> : null}
+        </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
-          {!pairs.length ? <div className="py-12 text-center text-sm text-muted-foreground">暂无同日同时包含进场、出场照片的真实设备考勤</div> : null}
+          {!loading && !pairs.length ? <div className="py-12 text-center text-sm text-muted-foreground">该月份暂无同日同时包含进场、出场照片的真实设备考勤</div> : null}
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {pairs.map((pair, index) => (
               <button key={`${pair.attendance_date}-${index}`} type="button" onClick={() => toggle(index)} className={cn("rounded-lg border p-2 text-left transition", selected.has(index) ? "border-sky-500 bg-sky-50 ring-1 ring-sky-500 dark:bg-sky-950/20" : "hover:border-slate-400")}>
                 <div className="mb-2 flex items-center justify-between text-xs">
                   <span className="font-semibold">{pair.attendance_date} · 第 {pair.pair_index} 对</span>
-                  <span className={cn("rounded px-1.5 py-0.5", selected.has(index) ? "bg-sky-600 text-white" : "bg-slate-100 text-muted-foreground")}>{selected.has(index) ? "已选择" : "选择"}</span>
+                  <div className="flex items-center gap-1">
+                    <span role="button" tabIndex={0} aria-disabled={index === 0} onClick={(event) => { event.stopPropagation(); movePair(index, -1); }} className={cn("rounded border bg-background px-1.5 py-0.5", index === 0 ? "pointer-events-none opacity-40" : "hover:bg-slate-100")}>前移</span>
+                    <span role="button" tabIndex={0} aria-disabled={index === pairs.length - 1} onClick={(event) => { event.stopPropagation(); movePair(index, 1); }} className={cn("rounded border bg-background px-1.5 py-0.5", index === pairs.length - 1 ? "pointer-events-none opacity-40" : "hover:bg-slate-100")}>后移</span>
+                    <span className={cn("rounded px-1.5 py-0.5", selected.has(index) ? "bg-sky-600 text-white" : "bg-slate-100 text-muted-foreground")}>{selected.has(index) ? "已选择" : "选择"}</span>
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  {([['进', pair.in_photo, pair.in_time, pair.in_count], ['出', pair.out_photo, pair.out_time, pair.out_count]] as const).map(([label, photo, time, count]) => (
-                    <div key={label}>
-                      <div className="relative aspect-[4/3] overflow-hidden rounded-md bg-slate-100"><img src={photo} alt={`${pair.attendance_date}${label}场照片`} className="size-full object-contain" /><span className="absolute left-1 top-1 rounded bg-slate-950/70 px-1.5 py-0.5 text-[10px] text-white">{label}</span></div>
+                  {([['in', '进', pair.in_photo, pair.in_time, pair.in_count], ['out', '出', pair.out_photo, pair.out_time, pair.out_count]] as const).map(([direction, label, photo, time, count]) => (
+                    <div key={direction} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); swapPhoto(index, direction); }}>
+                      <div className="relative aspect-[4/3] overflow-hidden rounded-md bg-slate-100"><img src={photo} draggable onDragStart={(event) => { event.stopPropagation(); setDraggedPhoto({ index, direction }); }} onClick={(event) => event.stopPropagation()} alt={`${pair.attendance_date}${label}场照片`} className="size-full cursor-grab object-contain active:cursor-grabbing" /><span className="pointer-events-none absolute left-1 top-1 rounded bg-slate-950/70 px-1.5 py-0.5 text-[10px] text-white">{label}</span></div>
                       <div className="mt-1 truncate text-[11px] text-muted-foreground">{formatAttendancePhotoTime(time)}{count > 1 ? ` · 当日${count}条` : ""}</div>
                     </div>
                   ))}

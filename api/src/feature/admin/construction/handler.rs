@@ -9421,6 +9421,7 @@ pub async fn delete_managed_attendance_photo_group(
 pub struct ManagedAttendancePhotoPairParams {
     project_id: Uuid,
     worker_id: Uuid,
+    month: String,
 }
 
 pub async fn list_managed_attendance_photo_pairs(
@@ -9430,6 +9431,9 @@ pub async fn list_managed_attendance_photo_pairs(
 ) -> ApiResult<Value> {
     ensure_project_access(state.db.pool(), &auth_user, params.project_id).await?;
     ensure_worker_in_project(state.db.pool(), params.project_id, params.worker_id).await?;
+    let month = parse_payroll_month(params.month.trim())?;
+    let next_month =
+        next_month_start(month).ok_or_else(|| invalid_column_value("month", "YYYY-MM"))?;
     let items = sqlx::query_scalar::<_, Value>(
         r#"
         WITH photographed AS (
@@ -9458,6 +9462,8 @@ pub async fn list_managed_attendance_photo_pairs(
               AND r.is_generated = FALSE
               AND r.is_managed_generated = FALSE
               AND COALESCE(r.record_type, 'device') = 'device'
+              AND r.trigger_time >= ($3::date::timestamp AT TIME ZONE 'Asia/Shanghai')
+              AND r.trigger_time < ($4::date::timestamp AT TIME ZONE 'Asia/Shanghai')
               AND NULLIF(BTRIM(COALESCE(r.serial_number, r.equipment_id)), '') IS NOT NULL
               AND COALESCE(NULLIF(photo.photo_data, ''), NULLIF(r.photo_path, '')) IS NOT NULL
         ), ranked AS (
@@ -9497,6 +9503,8 @@ pub async fn list_managed_attendance_photo_pairs(
     )
     .bind(params.project_id)
     .bind(params.worker_id)
+    .bind(month)
+    .bind(next_month)
     .fetch_one(state.db.pool())
     .await
     .map_err(db_error)?;
