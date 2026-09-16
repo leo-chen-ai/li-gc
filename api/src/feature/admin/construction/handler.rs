@@ -9460,13 +9460,7 @@ pub async fn list_managed_attendance_photo_pairs(
               AND COALESCE(r.record_type, 'device') = 'device'
               AND NULLIF(BTRIM(COALESCE(r.serial_number, r.equipment_id)), '') IS NOT NULL
               AND COALESCE(NULLIF(photo.photo_data, ''), NULLIF(r.photo_path, '')) IS NOT NULL
-        ), complete_days AS (
-            SELECT attendance_date
-            FROM photographed
-            GROUP BY attendance_date
-            HAVING COUNT(*) FILTER (WHERE direction = 0) > 0
-               AND COUNT(*) FILTER (WHERE direction = 1) > 0
-        ), picked AS (
+        ), ranked AS (
             SELECT photographed.*,
                    ROW_NUMBER() OVER (
                        PARTITION BY attendance_date, direction
@@ -9476,30 +9470,29 @@ pub async fn list_managed_attendance_photo_pairs(
                        PARTITION BY attendance_date, direction
                    ) AS direction_count
             FROM photographed
-            JOIN complete_days USING (attendance_date)
         )
         SELECT COALESCE(jsonb_agg(jsonb_build_object(
-            'attendance_date', attendance_date,
-            'in_photo', in_photo,
-            'out_photo', out_photo,
-            'in_time', in_time,
-            'out_time', out_time,
-            'in_count', in_count,
-            'out_count', out_count
-        ) ORDER BY attendance_date DESC), '[]'::jsonb)
+            'attendance_date', incoming.attendance_date,
+            'pair_index', incoming.direction_rank,
+            'in_photo', incoming.photo_url,
+            'out_photo', outgoing.photo_url,
+            'in_time', incoming.trigger_time,
+            'out_time', outgoing.trigger_time,
+            'in_count', incoming.direction_count,
+            'out_count', outgoing.direction_count
+        ) ORDER BY incoming.attendance_date DESC, incoming.direction_rank ASC), '[]'::jsonb)
         FROM (
-            SELECT attendance_date,
-                   MAX(photo_url) FILTER (WHERE direction = 0 AND direction_rank = 1) AS in_photo,
-                   MAX(photo_url) FILTER (WHERE direction = 1 AND direction_rank = 1) AS out_photo,
-                   MAX(trigger_time) FILTER (WHERE direction = 0 AND direction_rank = 1) AS in_time,
-                   MAX(trigger_time) FILTER (WHERE direction = 1 AND direction_rank = 1) AS out_time,
-                   MAX(direction_count) FILTER (WHERE direction = 0) AS in_count,
-                   MAX(direction_count) FILTER (WHERE direction = 1) AS out_count
-            FROM picked
-            GROUP BY attendance_date
-            ORDER BY attendance_date DESC
-            LIMIT 100
-        ) pairs
+            SELECT *
+            FROM ranked
+            WHERE direction = 0
+        ) incoming
+        JOIN (
+            SELECT *
+            FROM ranked
+            WHERE direction = 1
+        ) outgoing
+          ON outgoing.attendance_date = incoming.attendance_date
+         AND outgoing.direction_rank = incoming.direction_rank
         "#,
     )
     .bind(params.project_id)
@@ -11645,9 +11638,6 @@ fn validate_managed_photo_pairs(body: &Value) -> Result<(), ApiError> {
         return Err(invalid_input(
             "每个照片组必须同时包含 1 张进场和 1 张出场照片",
         ));
-    }
-    if in_photos.len() > 30 {
-        return Err(invalid_input("托管照片最多支持 30 组"));
     }
     if in_photos
         .iter()
@@ -16219,7 +16209,7 @@ mod tests {
     }
 
     #[test]
-    fn managed_photo_pair_payload_requires_complete_pairs_and_caps_at_thirty() {
+    fn managed_photo_pair_payload_requires_complete_pairs_without_count_limit() {
         assert!(
             validate_managed_photo_pairs(&serde_json::json!({
                 "in_photos": ["in-1"], "out_photos": ["out-1"]
@@ -16232,14 +16222,14 @@ mod tests {
             }))
             .is_err()
         );
-        let photos = (0..31)
+        let photos = (0..100)
             .map(|index| format!("photo-{index}"))
             .collect::<Vec<_>>();
         assert!(
             validate_managed_photo_pairs(&serde_json::json!({
                 "in_photos": photos, "out_photos": photos
             }))
-            .is_err()
+            .is_ok()
         );
     }
 

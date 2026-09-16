@@ -294,8 +294,6 @@ export function ManagedAttendancePage(_props: { embedded?: boolean }) {
     if (configForm.checkOutEndTime < configForm.checkOutTime)
       return toast.error("出场结束时间不能早于开始时间");
     const completePhotoPairs = configForm.photoPairs.filter((pair) => pair.inPhoto || pair.outPhoto);
-    if (completePhotoPairs.length > 30)
-      return toast.error("照片组数量最多 30 组");
     if (completePhotoPairs.some((pair) => !pair.inPhoto || !pair.outPhoto))
       return toast.error("每个照片组都需要上传 1 张进场和 1 张出场照片");
     if (!completePhotoPairs.length && !configForm.useAttendanceRecordPhotos)
@@ -361,7 +359,7 @@ export function ManagedAttendancePage(_props: { embedded?: boolean }) {
         configForm.workerId,
       );
       setAttendancePhotoPairs(pairs);
-      setSelectedSyncedPairs(new Set(pairs.slice(0, 30).map((_, index) => index)));
+      setSelectedSyncedPairs(new Set(pairs.map((_, index) => index)));
       setSyncDialogOpen(true);
       if (!pairs.length) toast.info("该人员暂无可匹配的进出场考勤照片");
     } catch (error) {
@@ -376,10 +374,10 @@ export function ManagedAttendancePage(_props: { embedded?: boolean }) {
       .filter((_, index) => selectedSyncedPairs.has(index))
       .map((pair) => ({ inPhoto: pair.in_photo, outPhoto: pair.out_photo }));
     const existing = configForm.photoPairs.filter((pair) => pair.inPhoto || pair.outPhoto);
-    const merged = [...existing, ...synced].slice(0, 30);
+    const merged = [...existing, ...synced];
     setConfigForm({ ...configForm, photoPairs: merged.length ? merged : [{ inPhoto: "", outPhoto: "" }] });
     setSyncDialogOpen(false);
-    toast.success(`已同步 ${Math.min(synced.length, 30 - existing.length)} 组考勤照片`);
+    toast.success(`已同步 ${synced.length} 组考勤照片`);
   };
 
   return (
@@ -1194,9 +1192,9 @@ function ConfigDialog({
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <Label>进出场照片组</Label>
-                  <p className="mt-1 text-xs text-muted-foreground">每组各 1 张进场、出场照片；可与考勤机历史照片一起随机使用。启用上方开关后允许不上传照片组（最多 30 组）。</p>
+                  <p className="mt-1 text-xs text-muted-foreground">每组各 1 张进场、出场照片；可与考勤机历史照片一起随机使用。启用上方开关后允许不上传照片组。</p>
                 </div>
-                <Button type="button" variant="outline" size="sm" disabled={form.photoPairs.length >= 30 || saving} onClick={() => onFormChange({ ...form, photoPairs: [...form.photoPairs, { inPhoto: "", outPhoto: "" }] })}>
+                <Button type="button" variant="outline" size="sm" disabled={saving} onClick={() => onFormChange({ ...form, photoPairs: [...form.photoPairs, { inPhoto: "", outPhoto: "" }] })}>
                   <Plus className="mr-1 size-4" />添加一组
                 </Button>
               </div>
@@ -1262,8 +1260,7 @@ function AttendancePhotoSyncDialog({ open, pairs, selected, onOpenChange, onSele
   const toggle = (index: number) => {
     const next = new Set(selected);
     if (next.has(index)) next.delete(index);
-    else if (next.size < 30) next.add(index);
-    else return toast.error("一次最多同步 30 组照片");
+    else next.add(index);
     onSelectedChange(next);
   };
   return (
@@ -1271,7 +1268,7 @@ function AttendancePhotoSyncDialog({ open, pairs, selected, onOpenChange, onSele
       <DialogContent className="flex max-h-[90svh] w-[96vw] max-w-5xl flex-col overflow-hidden sm:max-w-5xl">
         <DialogHeader>
           <DialogTitle>匹配人员考勤照片</DialogTitle>
-          <DialogDescription>已按同一天的一条进场和一条出场自动配对，不限制考勤日期。勾选后加入照片组，加入后仍可跨组拖拽调整。</DialogDescription>
+          <DialogDescription>已将同一天的进、出场记录按时间顺序逐条配对，不限制考勤日期；同日有多组记录时会显示多对。勾选后加入照片组，加入后仍可跨组拖拽调整。</DialogDescription>
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto">
           {!pairs.length ? <div className="py-12 text-center text-sm text-muted-foreground">暂无同日同时包含进场、出场照片的真实设备考勤</div> : null}
@@ -1279,14 +1276,14 @@ function AttendancePhotoSyncDialog({ open, pairs, selected, onOpenChange, onSele
             {pairs.map((pair, index) => (
               <button key={`${pair.attendance_date}-${index}`} type="button" onClick={() => toggle(index)} className={cn("rounded-lg border p-2 text-left transition", selected.has(index) ? "border-sky-500 bg-sky-50 ring-1 ring-sky-500 dark:bg-sky-950/20" : "hover:border-slate-400")}>
                 <div className="mb-2 flex items-center justify-between text-xs">
-                  <span className="font-semibold">{pair.attendance_date}</span>
+                  <span className="font-semibold">{pair.attendance_date} · 第 {pair.pair_index} 对</span>
                   <span className={cn("rounded px-1.5 py-0.5", selected.has(index) ? "bg-sky-600 text-white" : "bg-slate-100 text-muted-foreground")}>{selected.has(index) ? "已选择" : "选择"}</span>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   {([['进', pair.in_photo, pair.in_time, pair.in_count], ['出', pair.out_photo, pair.out_time, pair.out_count]] as const).map(([label, photo, time, count]) => (
                     <div key={label}>
                       <div className="relative aspect-[4/3] overflow-hidden rounded-md bg-slate-100"><img src={photo} alt={`${pair.attendance_date}${label}场照片`} className="size-full object-contain" /><span className="absolute left-1 top-1 rounded bg-slate-950/70 px-1.5 py-0.5 text-[10px] text-white">{label}</span></div>
-                      <div className="mt-1 truncate text-[11px] text-muted-foreground">{formatAttendancePhotoTime(time)}{count > 1 ? ` · 当日${count}条取首条` : ""}</div>
+                      <div className="mt-1 truncate text-[11px] text-muted-foreground">{formatAttendancePhotoTime(time)}{count > 1 ? ` · 当日${count}条` : ""}</div>
                     </div>
                   ))}
                 </div>

@@ -39,6 +39,7 @@ export type ManagedAttendancePhotoGroupPayload = {
 
 export type ManagedAttendancePhotoPair = {
   attendance_date: string;
+  pair_index: number;
   in_photo: string;
   out_photo: string;
   in_time: string;
