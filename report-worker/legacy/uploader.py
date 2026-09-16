@@ -532,95 +532,31 @@ class Uploader:
             self._wait_for_search_result_navigation(original_handles, original_url)
             return
 
-        logger.info("首页未找到直接链接，通过搜索框搜索...")
-        search_input = _find_first(self.driver, [
-            (By.XPATH, "//form//input[@type='text']"),
-            (By.XPATH, "//input[contains(@placeholder,'搜索')]"),
-            (By.XPATH, "//input[@type='text' or @type='search']"),
-            (By.XPATH, "//form//input"),
-        ])
-        if not search_input:
-            raise RuntimeError("未找到搜索框")
+        # The portal's generic header search can silently submit its rotating
+        # hot-word (for example “政府工作报告”) instead of the value entered by
+        # Selenium.  The service has a stable localInnerCode, so bypass that
+        # unrelated search page whenever the personalized home shortcut is
+        # missing.  The following online-handle step still detects an expired
+        # cross-domain session and forces a clean login before retrying.
+        logger.info("首页未找到直接入口，改用明确办事指南地址")
+        self._open_workguide_directly()
 
-        search_input.clear()
-        search_input.send_keys('建筑项目人员工伤参保登记')
-        time.sleep(0.5)
-
-        search_btn = _find_first(self.driver, [
-            (By.XPATH, "//input[@type='submit']"),
-            (By.XPATH, "//input[@value='搜索']"),
-            (By.XPATH, "//input[contains(@value,'搜索')]"),
-            (By.XPATH, "//form//input[@type='submit']"),
-            (By.XPATH, "//form//*[@type='submit']"),
-            (By.XPATH, "//button[@type='submit']"),
-            (By.XPATH, "//span[contains(text(),'搜索')]/parent::*"),
-        ])
-        if search_btn:
-            self._click(search_btn)
-            logger.info("已点击搜索按钮")
-        else:
-            logger.info("未找到搜索按钮，尝试 Enter 提交")
-            search_input.send_keys('\n')
-
-        logger.info("等待搜索页跳转...")
-        for _ in range(15):
-            time.sleep(1)
-            if len(self.driver.window_handles) > 1:
-                original = self.driver.current_window_handle
-                for handle in self.driver.window_handles:
-                    if handle != original:
-                        self.driver.switch_to.window(handle)
-                        logger.info(f"切换到新窗口: {self.driver.current_url}")
-                        break
-                break
-            if 'search.zj.gov.cn' in self.driver.current_url:
-                logger.info(f"搜索页 URL 已变化: {self.driver.current_url}")
-                break
-
-        logger.info(f"搜索后 URL: {self.driver.current_url}")
-        logger.info(f"搜索后标题: {self.driver.title}")
-
+    def _open_workguide_directly(self):
+        try:
+            self.driver.get(WORKGUIDE_URL)
+        except TimeoutException:
+            logger.warning("直接打开办事指南超时，继续检查已渲染页面")
+            try:
+                self.driver.execute_script('window.stop();')
+            except Exception:
+                pass
         try:
             self.long_wait.until(
                 lambda d: d.execute_script('return document.readyState') in ('complete', 'interactive')
             )
         except TimeoutException:
-            logger.warning("搜索页加载超时")
-        time.sleep(2)
-
-        self._switch_to_main_iframe()
-
-        logger.info("查找搜索结果 (使用绝对 XPath)...")
-        xpaths = [
-            "/html/body/div[1]/form//a[contains(.,'建筑项目人员工伤参保登记')]",
-            "/html/body/div[1]/form/div[7]/div/div[1]/div/div[1]/div/a",
-            "/html/body/div[1]//a[contains(.,'建筑项目')]",
-            "//a[contains(.,'建筑项目人员工伤参保登记')]",
-            "//a[contains(.,'建筑项目')]",
-            "//*[contains(text(),'建筑项目人员工伤参保登记')]/ancestor::a",
-        ]
-
-        for xpath in xpaths:
-            try:
-                el = self.long_wait.until(EC.element_to_be_clickable((By.XPATH, xpath)))
-                original_handles = set(self.driver.window_handles)
-                original_url = self.driver.current_url
-                self._click(el)
-                logger.info(f"已点击搜索结果 ({xpath})")
-                self._wait_for_search_result_navigation(original_handles, original_url, strict=True)
-                return
-            except TimeoutException:
-                continue
-
-        logger.info("JS 查找兜底...")
-        original_handles = set(self.driver.window_handles)
-        original_url = self.driver.current_url
-        found = self._find_and_click_result_js('建筑项目人员工伤参保登记')
-        if found:
-            self._wait_for_search_result_navigation(original_handles, original_url, strict=True)
-            return
-
-        raise RuntimeError("未找到搜索结果")
+            pass
+        logger.info("已切换到明确办事指南地址: %s", self.driver.current_url)
 
     def _wait_for_search_result_navigation(self, original_handles, original_url, strict=False):
         logger.info("等待办事页面打开...")
@@ -667,21 +603,7 @@ class Uploader:
         if 'zjucenter' not in current_url or '#/mymessage' not in current_url:
             return False
         logger.warning("办事入口错误跳转到用户消息中心，改用明确办事指南地址")
-        try:
-            self.driver.get(WORKGUIDE_URL)
-        except TimeoutException:
-            logger.warning("直接打开办事指南超时，继续检查已渲染页面")
-            try:
-                self.driver.execute_script('window.stop();')
-            except Exception:
-                pass
-        try:
-            self.long_wait.until(
-                lambda d: d.execute_script('return document.readyState') in ('complete', 'interactive')
-            )
-        except TimeoutException:
-            pass
-        logger.info("已切换到明确办事指南地址: %s", self.driver.current_url)
+        self._open_workguide_directly()
         return True
 
     def _handle_site_selection(self):

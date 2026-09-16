@@ -1156,6 +1156,32 @@ def test_message_center_navigation_recovers_to_direct_workguide():
     assert driver.current_url == uploader.WORKGUIDE_URL
 
 
+def test_missing_home_shortcut_opens_direct_workguide(monkeypatch):
+    class FakeWait:
+        def until(self, condition):
+            return condition(driver)
+
+    class FakeDriver:
+        current_url = uploader.HOME_URL
+
+        def get(self, url):
+            self.current_url = url
+
+        def execute_script(self, _script):
+            return "complete"
+
+    driver = FakeDriver()
+    instance = uploader.Uploader.__new__(uploader.Uploader)
+    instance.driver = driver
+    instance.long_wait = FakeWait()
+    monkeypatch.setattr(uploader.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(uploader, "_find_first", lambda *_args, **_kwargs: None)
+
+    instance._navigate_to_service()
+
+    assert driver.current_url == uploader.WORKGUIDE_URL
+
+
 def test_confirmation_is_skipped_when_form_is_already_visible():
     instance = uploader.Uploader.__new__(uploader.Uploader)
     instance._is_upload_form_visible = lambda: True
