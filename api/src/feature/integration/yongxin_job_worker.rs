@@ -664,7 +664,7 @@ async fn execute_attendance_sync(
         ));
     }
 
-    let photo_data = required_text(&attendance, "photo_data", "设备考勤照片")?;
+    let photo_data = attendance_photo_source(&attendance, worker)?;
     let image_path = upload_media_from_source(
         state,
         job,
@@ -1572,6 +1572,12 @@ fn required_text(value: &Value, key: &str, label: &str) -> Result<String, JobIss
     optional_text(value, key).ok_or_else(|| JobIssue::WaitingData(format!("缺少{label}")))
 }
 
+fn attendance_photo_source(attendance: &Value, worker: &Value) -> Result<String, JobIssue> {
+    optional_text(attendance, "photo_data")
+        .or_else(|| optional_text(worker, "avatar"))
+        .ok_or_else(|| JobIssue::WaitingData("缺少考勤照片或人员头像".to_owned()))
+}
+
 fn optional_text(value: &Value, key: &str) -> Option<String> {
     value
         .get(key)
@@ -1938,5 +1944,20 @@ mod tests {
             entry_exit_datetime(&worker, &event, false, false).unwrap(),
             "2026-08-31 00:00:00"
         );
+    }
+
+    #[test]
+    fn attendance_photo_prefers_record_photo_and_falls_back_to_worker_avatar() {
+        let worker = json!({"avatar": "worker-avatar"});
+
+        assert_eq!(
+            attendance_photo_source(&json!({"photo_data": "attendance-photo"}), &worker).unwrap(),
+            "attendance-photo"
+        );
+        assert_eq!(
+            attendance_photo_source(&json!({"photo_data": null}), &worker).unwrap(),
+            "worker-avatar"
+        );
+        assert!(attendance_photo_source(&json!({}), &json!({"avatar": " "})).is_err());
     }
 }

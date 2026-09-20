@@ -832,22 +832,26 @@ async fn seed_complete_project(
         .fetch_one(&mut *tx)
         .await
         .unwrap();
-        sqlx::query(
-            r#"
-            INSERT INTO construction_attendance_record_photos (
-                attendance_record_id, project_id, worker_id, photo_kind,
-                photo_data, content_type, source
+        // Keep one record without a device photo. Yongxin attendance requires
+        // imgUrl, so the worker avatar must be used as the fallback.
+        if entity_index == 1 {
+            sqlx::query(
+                r#"
+                INSERT INTO construction_attendance_record_photos (
+                    attendance_record_id, project_id, worker_id, photo_kind,
+                    photo_data, content_type, source
+                )
+                VALUES ($1, $2, $3, 'closeup', $4, 'image/png', 'mqtt_rec_push')
+                "#,
             )
-            VALUES ($1, $2, $3, 'closeup', $4, 'image/png', 'mqtt_rec_push')
-            "#,
-        )
-        .bind(attendance_id)
-        .bind(project_id)
-        .bind(worker_id)
-        .bind(image_base64)
-        .execute(&mut *tx)
-        .await
-        .unwrap();
+            .bind(attendance_id)
+            .bind(project_id)
+            .bind(worker_id)
+            .bind(image_base64)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        }
         outbox_worker::enqueue_domain_event_tx(
             &mut tx,
             project_id,
@@ -857,7 +861,7 @@ async fn seed_complete_project(
             json!({
                 "operation": "insert",
                 "source": "mqtt_rec_push",
-                "has_photo": true
+                "has_photo": entity_index == 1
             }),
             &format!("test:mqtt:{attendance_id}"),
         )
