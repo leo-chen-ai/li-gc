@@ -342,6 +342,18 @@ async fn three_project_platform_matrix_pushes_every_supported_entity_without_cro
     assert_path_count(&yongxin_requests, "/worker/v2/add", 5);
     assert_path_count(&yongxin_requests, "/entryExit/v2/add", 4);
     assert_path_count(&yongxin_requests, "/attend/v2/add", 4);
+    let attendance_device_keys = yongxin_requests
+        .iter()
+        .filter(|request| request.path == "/attend/v2/add")
+        .filter_map(|request| request.body.get("deviceKey").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    assert_eq!(attendance_device_keys.len(), 4);
+    assert!(
+        attendance_device_keys
+            .iter()
+            .any(|value| value.starts_with("MOCK-AUTO-DEVICE-")),
+        "attendance without its own serial number should use the project's automatic device"
+    );
     // All seeded photos intentionally share the same bytes. The media cache is
     // scoped per platform binding, so each Yongxin project uploads it once.
     assert_path_count(&yongxin_requests, "/sysFile/v1/uploadImg", 2);
@@ -743,6 +755,23 @@ async fn seed_complete_project(
     let mut attendance_ids = Vec::new();
     let mut identity_cards = Vec::new();
 
+    sqlx::query(
+        r#"
+        INSERT INTO construction_attendance_devices (
+            project_id, device_type, serial_number, device_name, direction
+        )
+        VALUES
+            ($1, 'A厂家', $2, '模拟进场机', 0),
+            ($1, 'A厂家', $3, '模拟自动机', 2)
+        "#,
+    )
+    .bind(project_id)
+    .bind(format!("MOCK-IN-DEVICE-{project_index}"))
+    .bind(format!("MOCK-AUTO-DEVICE-{project_index}"))
+    .execute(pool)
+    .await
+    .unwrap();
+
     for entity_index in 1..=2 {
         let credit_code = format!("91330200MA2CLPX{project_index}{entity_index}N");
         let unit_id = sqlx::query_scalar::<_, Uuid>(
@@ -828,7 +857,7 @@ async fn seed_complete_project(
         .bind(worker_id)
         .bind(project_id)
         .bind((entity_index - 1) as i16)
-        .bind(format!("MOCK-DEVICE-{project_index}-{entity_index}"))
+        .bind((entity_index == 1).then(|| format!("MOCK-DEVICE-{project_index}-{entity_index}")))
         .fetch_one(&mut *tx)
         .await
         .unwrap();

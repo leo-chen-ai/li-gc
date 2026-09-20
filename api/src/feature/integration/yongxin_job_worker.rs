@@ -613,6 +613,10 @@ async fn execute_attendance_sync(
         SELECT to_jsonb(record)
                || jsonb_build_object('worker', to_jsonb(worker))
                || jsonb_build_object('photo_data', photo.photo_data)
+               || jsonb_build_object(
+                    'device_key',
+                    COALESCE(NULLIF(BTRIM(record.serial_number), ''), fallback_device.serial_number)
+                  )
         FROM construction_attendance_records record
         JOIN construction_workers worker ON worker.id = record.worker_id AND worker.is_deleted = FALSE
         LEFT JOIN LATERAL (
@@ -624,6 +628,26 @@ async fn execute_attendance_sync(
             ORDER BY CASE p.photo_kind WHEN 'closeup' THEN 0 ELSE 1 END, p.created_at
             LIMIT 1
         ) photo ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT BTRIM(device.serial_number) AS serial_number
+            FROM construction_attendance_devices device
+            WHERE device.project_id = record.project_id
+              AND device.is_deleted = FALSE
+              AND NULLIF(BTRIM(device.serial_number), '') IS NOT NULL
+              AND device.direction = CASE
+                  WHEN EXISTS (
+                      SELECT 1
+                      FROM construction_attendance_devices exact
+                      WHERE exact.project_id = record.project_id
+                        AND exact.is_deleted = FALSE
+                        AND NULLIF(BTRIM(exact.serial_number), '') IS NOT NULL
+                        AND exact.direction = record.direction
+                  ) THEN record.direction
+                  ELSE 2
+              END
+            ORDER BY device.device_name NULLS LAST, device.created_at, device.id
+            LIMIT 1
+        ) fallback_device ON TRUE
         WHERE record.id = $1 AND record.is_deleted = FALSE
         "#,
         attendance_id,
@@ -691,7 +715,7 @@ async fn execute_attendance_sync(
         "date": format_platform_datetime(required_text(&attendance, "trigger_time", "考勤时间")?)?,
         "imgUrl": image_path,
         "attendType": 0,
-        "deviceKey": required_text(&attendance, "serial_number", "考勤机序列号")?,
+        "deviceKey": required_text(&attendance, "device_key", "项目同方向或自动考勤机序列号")?,
     });
     let response = call_json(
         state,
