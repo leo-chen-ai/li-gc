@@ -88,6 +88,24 @@ async fn main() -> eyre::Result<()> {
         }
     }
 
+    // 照片处理 AI 合成队列与生产队列无关，本地联调时可单独开启：
+    // PHOTO_COMPOSITE_WORKER_ENABLED=true
+    let photo_composite_worker_enabled = if background_workers_enabled {
+        true
+    } else {
+        std::env::var("PHOTO_COMPOSITE_WORKER_ENABLED")
+            .map(|value| {
+                matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "on"
+                )
+            })
+            .unwrap_or(false)
+    };
+    if photo_composite_worker_enabled {
+        quax::feature::admin::photo::composite_worker::spawn_photo_composite_worker(state.clone());
+    }
+
     // 8. Start server (dual-stack, graceful shutdown)
     server::serve(state).await
 }

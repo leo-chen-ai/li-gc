@@ -35,6 +35,7 @@ import { Route as AppAdminRegistrationLeadsRouteImport } from './routes/app/admi
 import { Route as AppAdminQualitySafetyRouteImport } from './routes/app/admin/quality-safety'
 import { Route as AppAdminProjectsRouteImport } from './routes/app/admin/projects'
 import { Route as AppAdminPlatformIntegrationsRouteImport } from './routes/app/admin/platform-integrations'
+import { Route as AppAdminPhotoProcessingRouteImport } from './routes/app/admin/photo-processing'
 import { Route as AppAdminPersonnelWorkersRouteImport } from './routes/app/admin/personnel-workers'
 import { Route as AppAdminPersonnelRegistrationsRouteImport } from './routes/app/admin/personnel-registrations'
 import { Route as AppAdminPersonnelQualificationsRouteImport } from './routes/app/admin/personnel-qualifications'
@@ -201,6 +202,11 @@ const AppAdminPlatformIntegrationsRoute =
     path: '/platform-integrations',
     getParentRoute: () => AppAdminRoute,
   } as any)
+const AppAdminPhotoProcessingRoute = AppAdminPhotoProcessingRouteImport.update({
+  id: '/photo-processing',
+  path: '/photo-processing',
+  getParentRoute: () => AppAdminRoute,
+} as any)
 const AppAdminPersonnelWorkersRoute =
   AppAdminPersonnelWorkersRouteImport.update({
     id: '/personnel-workers',
@@ -420,6 +426,7 @@ export interface FileRoutesByFullPath {
   '/app/admin/personnel-qualifications': typeof AppAdminPersonnelQualificationsRoute
   '/app/admin/personnel-registrations': typeof AppAdminPersonnelRegistrationsRoute
   '/app/admin/personnel-workers': typeof AppAdminPersonnelWorkersRoute
+  '/app/admin/photo-processing': typeof AppAdminPhotoProcessingRoute
   '/app/admin/platform-integrations': typeof AppAdminPlatformIntegrationsRoute
   '/app/admin/projects': typeof AppAdminProjectsRouteWithChildren
   '/app/admin/quality-safety': typeof AppAdminQualitySafetyRoute
@@ -475,6 +482,7 @@ export interface FileRoutesByTo {
   '/app/admin/personnel-qualifications': typeof AppAdminPersonnelQualificationsRoute
   '/app/admin/personnel-registrations': typeof AppAdminPersonnelRegistrationsRoute
   '/app/admin/personnel-workers': typeof AppAdminPersonnelWorkersRoute
+  '/app/admin/photo-processing': typeof AppAdminPhotoProcessingRoute
   '/app/admin/platform-integrations': typeof AppAdminPlatformIntegrationsRoute
   '/app/admin/projects': typeof AppAdminProjectsRouteWithChildren
   '/app/admin/quality-safety': typeof AppAdminQualitySafetyRoute
@@ -535,6 +543,7 @@ export interface FileRoutesById {
   '/app/admin/personnel-qualifications': typeof AppAdminPersonnelQualificationsRoute
   '/app/admin/personnel-registrations': typeof AppAdminPersonnelRegistrationsRoute
   '/app/admin/personnel-workers': typeof AppAdminPersonnelWorkersRoute
+  '/app/admin/photo-processing': typeof AppAdminPhotoProcessingRoute
   '/app/admin/platform-integrations': typeof AppAdminPlatformIntegrationsRoute
   '/app/admin/projects': typeof AppAdminProjectsRouteWithChildren
   '/app/admin/quality-safety': typeof AppAdminQualitySafetyRoute
@@ -596,6 +605,7 @@ export interface FileRouteTypes {
     | '/app/admin/personnel-qualifications'
     | '/app/admin/personnel-registrations'
     | '/app/admin/personnel-workers'
+    | '/app/admin/photo-processing'
     | '/app/admin/platform-integrations'
     | '/app/admin/projects'
     | '/app/admin/quality-safety'
@@ -651,6 +661,7 @@ export interface FileRouteTypes {
     | '/app/admin/personnel-qualifications'
     | '/app/admin/personnel-registrations'
     | '/app/admin/personnel-workers'
+    | '/app/admin/photo-processing'
     | '/app/admin/platform-integrations'
     | '/app/admin/projects'
     | '/app/admin/quality-safety'
@@ -710,6 +721,7 @@ export interface FileRouteTypes {
     | '/app/admin/personnel-qualifications'
     | '/app/admin/personnel-registrations'
     | '/app/admin/personnel-workers'
+    | '/app/admin/photo-processing'
     | '/app/admin/platform-integrations'
     | '/app/admin/projects'
     | '/app/admin/quality-safety'
@@ -921,6 +933,13 @@ declare module '@tanstack/react-router' {
       path: '/platform-integrations'
       fullPath: '/app/admin/platform-integrations'
       preLoaderRoute: typeof AppAdminPlatformIntegrationsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/photo-processing': {
+      id: '/app/admin/photo-processing'
+      path: '/photo-processing'
+      fullPath: '/app/admin/photo-processing'
+      preLoaderRoute: typeof AppAdminPhotoProcessingRouteImport
       parentRoute: typeof AppAdminRoute
     }
     '/app/admin/personnel-workers': {
@@ -1212,6 +1231,7 @@ interface AppAdminRouteChildren {
   AppAdminPersonnelQualificationsRoute: typeof AppAdminPersonnelQualificationsRoute
   AppAdminPersonnelRegistrationsRoute: typeof AppAdminPersonnelRegistrationsRoute
   AppAdminPersonnelWorkersRoute: typeof AppAdminPersonnelWorkersRoute
+  AppAdminPhotoProcessingRoute: typeof AppAdminPhotoProcessingRoute
   AppAdminPlatformIntegrationsRoute: typeof AppAdminPlatformIntegrationsRoute
   AppAdminProjectsRoute: typeof AppAdminProjectsRouteWithChildren
   AppAdminQualitySafetyRoute: typeof AppAdminQualitySafetyRoute
@@ -1258,6 +1278,7 @@ const AppAdminRouteChildren: AppAdminRouteChildren = {
   AppAdminPersonnelQualificationsRoute: AppAdminPersonnelQualificationsRoute,
   AppAdminPersonnelRegistrationsRoute: AppAdminPersonnelRegistrationsRoute,
   AppAdminPersonnelWorkersRoute: AppAdminPersonnelWorkersRoute,
+  AppAdminPhotoProcessingRoute: AppAdminPhotoProcessingRoute,
   AppAdminPlatformIntegrationsRoute: AppAdminPlatformIntegrationsRoute,
   AppAdminProjectsRoute: AppAdminProjectsRouteWithChildren,
   AppAdminQualitySafetyRoute: AppAdminQualitySafetyRoute,

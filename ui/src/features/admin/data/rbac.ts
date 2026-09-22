@@ -20,6 +20,7 @@ export type MenuPermissionKey =
   | "attendance_alerts"
   | "managed_attendance"
   | "supplemental_attendance"
+  | "photo_processing"
   | "environment_monitoring"
   | "video_monitoring"
   | "quality_safety"
@@ -42,7 +43,15 @@ export type MenuPermissionKey =
 export interface MenuPermission {
   key: MenuPermissionKey;
   name: string;
-  group: "工作台" | "数据报送" | "劳务管理" | "施工管理" | "人员管理" | "企业经营管理" | "系统";
+  group:
+    | "工作台"
+    | "数据报送"
+    | "劳务管理"
+    | "照片处理"
+    | "施工管理"
+    | "人员管理"
+    | "企业经营管理"
+    | "系统";
   path: string;
   description: string;
 }
@@ -192,6 +201,13 @@ export const menuPermissions: MenuPermission[] = [
     group: "劳务管理",
     path: "/app/admin/supplemental-attendance",
     description: "查看托管考勤从生成、发送到考勤机回执的全链路状态",
+  },
+  {
+    key: "photo_processing",
+    name: "照片处理",
+    group: "照片处理",
+    path: "/app/admin/photo-processing",
+    description: "建组、拉取考勤人像、上传进/出背景并AI合成托管照片",
   },
   {
     key: "environment_monitoring",
@@ -354,6 +370,7 @@ export function getMenuKeysForUserRole(
     "attendance_alerts",
     "managed_attendance",
     "supplemental_attendance",
+    "photo_processing",
     "environment_monitoring",
     "video_monitoring",
     "quality_safety",

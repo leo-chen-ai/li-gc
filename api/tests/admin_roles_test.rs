@@ -94,6 +94,7 @@ async fn test_admin_can_list_seeded_roles_with_menu_permissions() {
             "attendance_alerts",
             "managed_attendance",
             "supplemental_attendance",
+            "photo_processing",
             "environment_monitoring",
             "video_monitoring",
             "quality_safety",
@@ -109,7 +110,9 @@ async fn test_admin_can_list_seeded_roles_with_menu_permissions() {
             "personnel_bad_records",
             "personnel_approvers",
             "registration_leads",
-            "uploads"
+            "uploads",
+            "face_library_sync",
+            "face_recognition_logs"
         ])
     );
     assert!(admin["user_count"].as_i64().expect("user_count") >= 0);

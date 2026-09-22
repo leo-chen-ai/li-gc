@@ -220,6 +220,24 @@ export const API_ENDPOINTS = {
     MANAGED_ATTENDANCE_RESEND_DAY: (configId: string) =>
       `/admin/managed-attendance/configs/${configId}/resend-day`,
     MANAGED_ATTENDANCE_RECORDS: "/admin/managed-attendance/records",
+    PHOTO_PROCESSING_GROUPS: "/admin/photo-processing/groups",
+    PHOTO_PROCESSING_GROUP: (groupId: string) =>
+      `/admin/photo-processing/groups/${groupId}`,
+    PHOTO_PROCESSING_GROUP_PHOTOS: (groupId: string) =>
+      `/admin/photo-processing/groups/${groupId}/photos`,
+    PHOTO_PROCESSING_GROUP_PHOTO: (groupId: string, photoId: string) =>
+      `/admin/photo-processing/groups/${groupId}/photos/${photoId}`,
+    PHOTO_PROCESSING_GROUP_BACKGROUND: (groupId: string, direction: number) =>
+      `/admin/photo-processing/groups/${groupId}/backgrounds/${direction}`,
+    PHOTO_PROCESSING_GROUP_COMPOSITE: (groupId: string) =>
+      `/admin/photo-processing/groups/${groupId}/composite`,
+    PHOTO_PROCESSING_GROUP_COMPOSITED_PAIRS: (groupId: string) =>
+      `/admin/photo-processing/groups/${groupId}/composited-pairs`,
+    PHOTO_PROCESSING_COMPOSITE_TASK: (taskId: string) =>
+      `/admin/photo-processing/composite-tasks/${taskId}`,
+    PHOTO_PROCESSING_COMPOSITE_TASK_CANCEL: (taskId: string) =>
+      `/admin/photo-processing/composite-tasks/${taskId}/cancel`,
+    PHOTO_PROCESSING_ATTENDANCE_PHOTOS: "/admin/photo-processing/attendance-photos",
   },
   DASHBOARD: {
     OVERVIEW: "/dashboard/overview",

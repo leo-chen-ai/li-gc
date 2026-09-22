@@ -33,6 +33,7 @@ const staticTitles: Record<string, string> = {
   "/app/admin/attendance-device-issue-reports": "考勤机下发报告",
   "/app/admin/managed-attendance": "考勤托管",
   "/app/admin/supplemental-attendance": "考勤托管",
+  "/app/admin/photo-processing": "照片处理",
   "/app/admin/environment-monitoring": "环境检测",
   "/app/admin/video-monitoring": "视频监控",
   "/app/admin/quality-safety": "质安管理",

@@ -14,8 +14,8 @@ use crate::{
 };
 
 use super::{
-    attendance_alert, construction, enterprise, log, registration_lead, report_forwarding, role,
-    stats, supplemental_attendance, system_warning, upload, user,
+    attendance_alert, construction, enterprise, log, photo, registration_lead, report_forwarding,
+    role, stats, supplemental_attendance, system_warning, upload, user,
 };
 
 fn report_forward_routes() -> Router<AppState> {
@@ -515,6 +515,7 @@ pub fn admin_routes() -> Router<AppState> {
             "/projects/{project_id}/attendance-generator/commit",
             post(construction::handler::commit_generated_attendance),
         )
+        .nest("/photo-processing", photo::photo_routes())
         .route_layer(middleware::from_fn(admin_middleware))
         .route_layer(middleware::from_fn(auth_middleware))
 }

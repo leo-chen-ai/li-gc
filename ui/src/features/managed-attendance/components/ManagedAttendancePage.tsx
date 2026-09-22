@@ -55,6 +55,12 @@ import {
 } from "@/features/projects/hooks/use-construction-projects";
 import { cn } from "@/lib/utils";
 import {
+  useCompositedPairsQuery,
+  usePhotoGroupListQuery,
+} from "@/features/photo-processing/hooks";
+import { mergeCompositedPairs } from "@/features/photo-processing/lib";
+import type { CompositedPairResponse } from "@/features/photo-processing/types";
+import {
   useCreateManagedAttendanceConfigMutation,
   useCreateManagedAttendancePhotoGroupMutation,
   useDeleteManagedAttendanceConfigMutation,
@@ -125,6 +131,9 @@ export function ManagedAttendancePage(_props: { embedded?: boolean }) {
   const [syncMonth, setSyncMonth] = useState(currentMonth());
   const [attendancePhotoPairs, setAttendancePhotoPairs] = useState<ManagedAttendancePhotoPair[]>([]);
   const [selectedSyncedPairs, setSelectedSyncedPairs] = useState<Set<number>>(new Set());
+  const [photoProcessingDialogOpen, setPhotoProcessingDialogOpen] = useState(false);
+  const [photoProcessingGroupId, setPhotoProcessingGroupId] = useState("");
+  const [selectedProcessedPairs, setSelectedProcessedPairs] = useState<Set<number>>(new Set());
 
   const commonFilters = useMemo(
     () => ({
@@ -159,6 +168,14 @@ export function ManagedAttendancePage(_props: { embedded?: boolean }) {
   const updatePhotoGroup = useUpdateManagedAttendancePhotoGroupMutation();
   const generateRecords = useGenerateManagedAttendanceMutation();
   const resendDay = useResendManagedAttendanceDayMutation();
+  // 从照片处理同步：组列表 + 当前托管人员的成对合成照片。
+  const photoProcessingGroupsQuery = usePhotoGroupListQuery({ page: 1, page_size: 100 });
+  const photoProcessingGroups = photoProcessingGroupsQuery.data?.items ?? [];
+  const compositedPairsQuery = useCompositedPairsQuery(
+    photoProcessingGroupId || undefined,
+    photoProcessingDialogOpen ? configForm.workerId || undefined : undefined
+  );
+  const compositedPairIsFetching = compositedPairsQuery.isFetching;
 
   const configs = configsQuery.data?.items ?? [];
   const records = recordsQuery.data?.items ?? [];
@@ -393,6 +410,35 @@ export function ManagedAttendancePage(_props: { embedded?: boolean }) {
     toast.success(`已同步 ${synced.length} 组考勤照片`);
   };
 
+  const openPhotoProcessingSync = () => {
+    if (!configForm.workerId) {
+      toast.error("请先选择托管人员，再同步照片处理结果");
+      return;
+    }
+    setPhotoProcessingGroupId("");
+    setSelectedProcessedPairs(new Set());
+    setPhotoProcessingDialogOpen(true);
+  };
+
+  /**
+   * 把照片处理组的合成结果并进照片组。
+   * 进/出两张照片在托管侧是按数组下标配对的，所以必须按 URL 分别去重后
+   * 重新对齐下标，不能简单 append，否则 in/out 会错位。
+   */
+  const applyPhotoProcessingSync = (pairs: CompositedPairResponse) => {
+    const picked = pairs.items.filter((_, index) => selectedProcessedPairs.has(index));
+    if (!picked.length) {
+      toast.info("请先勾选要同步的成对照片");
+      return;
+    }
+    setConfigForm({
+      ...configForm,
+      photoPairs: mergeCompositedPairs(configForm.photoPairs, picked),
+    });
+    setPhotoProcessingDialogOpen(false);
+    toast.success(`已同步 ${picked.length} 组成对合成照片`);
+  };
+
   return (
     <div className="space-y-4 text-slate-950 dark:text-foreground">
       <section className="overflow-hidden rounded-xl border bg-white shadow-sm dark:border-border dark:bg-card">
@@ -498,6 +544,7 @@ export function ManagedAttendancePage(_props: { embedded?: boolean }) {
         onFormChange={setConfigForm}
         syncingPhotos={syncingPhotos}
         onSyncAttendancePhotos={() => void openAttendancePhotoSync()}
+        onSyncFromPhotoProcessing={openPhotoProcessingSync}
         onSubmit={handleConfigSubmit}
       />
       <AttendancePhotoSyncDialog
@@ -511,6 +558,24 @@ export function ManagedAttendancePage(_props: { embedded?: boolean }) {
         onPairsChange={setAttendancePhotoPairs}
         onSelectedChange={setSelectedSyncedPairs}
         onApply={applyAttendancePhotoSync}
+      />
+      <PhotoProcessingSyncDialog
+        open={photoProcessingDialogOpen}
+        groups={photoProcessingGroups}
+        groupId={photoProcessingGroupId}
+        workerName={
+          workerOptions.find((worker) => worker.id === configForm.workerId)?.name ?? ""
+        }
+        pairs={compositedPairsQuery.data?.items ?? []}
+        unpairedCount={compositedPairsQuery.data?.unpaired_count ?? 0}
+        loading={compositedPairsQuery.isPending || compositedPairIsFetching}
+        selected={selectedProcessedPairs}
+        onOpenChange={setPhotoProcessingDialogOpen}
+        onGroupChange={setPhotoProcessingGroupId}
+        onSelectedChange={setSelectedProcessedPairs}
+        onApply={() => {
+          if (compositedPairsQuery.data) applyPhotoProcessingSync(compositedPairsQuery.data);
+        }}
       />
     </div>
   );
@@ -1104,6 +1169,7 @@ function ConfigDialog({
   onOpenChange,
   onFormChange,
   onSyncAttendancePhotos,
+  onSyncFromPhotoProcessing,
   onSubmit,
 }: {
   open: boolean;
@@ -1115,6 +1181,7 @@ function ConfigDialog({
   onOpenChange: (open: boolean) => void;
   onFormChange: (form: ConfigForm) => void;
   onSyncAttendancePhotos: () => void;
+  onSyncFromPhotoProcessing: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   const [draggedPhoto, setDraggedPhoto] = useState<{ index: number; direction: "in" | "out" } | null>(null);
@@ -1157,6 +1224,12 @@ function ConfigDialog({
               <Button type="button" variant="outline" className="w-full gap-2 border-sky-200 text-sky-700" disabled={!form.workerId || saving || syncingPhotos} onClick={onSyncAttendancePhotos}>
                 {syncingPhotos ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
                 一键同步考勤照片
+              </Button>
+            </div>
+            <div className="flex items-end">
+              <Button type="button" variant="outline" className="w-full gap-2 border-violet-200 text-violet-700" disabled={!form.workerId || saving} onClick={onSyncFromPhotoProcessing}>
+                <Sparkles className="size-4" />
+                从照片处理同步
               </Button>
             </div>
             <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2 text-xs leading-5 text-emerald-800">
@@ -1350,6 +1423,169 @@ function AttendancePhotoSyncDialog({ open, pairs, selected, month, loading, onOp
           <span className="mr-auto text-xs text-muted-foreground">已选 {selected.size} 组</span>
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
           <Button type="button" className="bg-[#0f6b5d] text-white" disabled={!selected.size} onClick={onApply}>加入照片组</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * 从照片处理组同步 AI 合成照片：选组 → 看该托管人员的成对合成结果 → 勾选并进照片组。
+ *
+ * 只有同一天同时有进场、出场且都合成成功的照片才会由后端配成对返回，
+ * 没凑齐的条数通过 `unpairedCount` 告诉用户，避免用户以为漏同步。
+ */
+function PhotoProcessingSyncDialog({
+  open,
+  groups,
+  groupId,
+  workerName,
+  pairs,
+  unpairedCount,
+  loading,
+  selected,
+  onOpenChange,
+  onGroupChange,
+  onSelectedChange,
+  onApply,
+}: {
+  open: boolean;
+  groups: { id: string; name: string }[];
+  groupId: string;
+  workerName: string;
+  pairs: ManagedAttendancePhotoPair[];
+  unpairedCount: number;
+  loading: boolean;
+  selected: Set<number>;
+  onOpenChange: (open: boolean) => void;
+  onGroupChange: (groupId: string) => void;
+  onSelectedChange: (selected: Set<number>) => void;
+  onApply: () => void;
+}) {
+  const toggle = (index: number) => {
+    const next = new Set(selected);
+    if (next.has(index)) next.delete(index);
+    else next.add(index);
+    onSelectedChange(next);
+  };
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex max-h-[90svh] w-[96vw] max-w-5xl flex-col overflow-hidden sm:max-w-5xl">
+        <DialogHeader>
+          <DialogTitle>从照片处理同步</DialogTitle>
+          <DialogDescription>
+            {workerName
+              ? `把照片处理组里 ${workerName} 的成对 AI 合成照片并进照片组；进/出会按 URL 自动去重和对齐。`
+              : "把照片处理组的成对 AI 合成照片并进照片组；进/出会按 URL 自动去重和对齐。"}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-slate-50 p-3 dark:bg-muted/30">
+          <div className="min-w-56 space-y-1">
+            <Label htmlFor="photo-processing-group">照片处理组</Label>
+            <select
+              id="photo-processing-group"
+              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm"
+              value={groupId}
+              disabled={loading && !groups.length}
+              onChange={(event) => {
+                onGroupChange(event.target.value);
+                onSelectedChange(new Set());
+              }}
+            >
+              <option value="">请选择照片处理组</option>
+              {groups.map((group) => (
+                <option key={group.id} value={group.id}>
+                  {group.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <span className="pb-2 text-xs text-muted-foreground">
+            共 {pairs.length} 对可同步
+            {unpairedCount > 0 ? `；另有 ${unpairedCount} 张未凑齐进/出一对` : ""}
+          </span>
+          {loading ? <Loader2 className="mb-2 size-4 animate-spin text-sky-600" /> : null}
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {!groupId ? (
+            <div className="py-12 text-center text-sm text-muted-foreground">
+              {groups.length ? "请先选择照片处理组" : "还没有照片处理组，请先到「照片处理」里创建"}
+            </div>
+          ) : !loading && !pairs.length ? (
+            <div className="py-12 text-center text-sm text-muted-foreground">
+              该组里没有这个人的成对合成照片（需要同一天进场、出场都已合成成功）
+            </div>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {pairs.map((pair, index) => (
+                <button
+                  key={`${pair.attendance_date}-${index}`}
+                  type="button"
+                  onClick={() => toggle(index)}
+                  className={cn(
+                    "rounded-lg border p-2 text-left transition",
+                    selected.has(index)
+                      ? "border-sky-500 bg-sky-50 ring-1 ring-sky-500 dark:bg-sky-950/20"
+                      : "hover:border-slate-400"
+                  )}
+                >
+                  <div className="mb-2 flex items-center justify-between text-xs">
+                    <span className="font-semibold">
+                      {pair.attendance_date} · 第 {pair.pair_index} 对
+                    </span>
+                    <span
+                      className={cn(
+                        "rounded px-1.5 py-0.5",
+                        selected.has(index)
+                          ? "bg-sky-600 text-white"
+                          : "bg-slate-100 text-muted-foreground"
+                      )}
+                    >
+                      {selected.has(index) ? "已选择" : "选择"}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(
+                      [
+                        ["in", "进", pair.in_photo, pair.in_time],
+                        ["out", "出", pair.out_photo, pair.out_time],
+                      ] as const
+                    ).map(([direction, label, photo, time]) => (
+                      <div key={direction}>
+                        <div className="relative aspect-[4/3] overflow-hidden rounded-md bg-slate-100 dark:bg-muted">
+                          <img
+                            src={photo}
+                            alt={`${pair.attendance_date}${label}场照片`}
+                            className="size-full object-contain"
+                          />
+                          <span className="pointer-events-none absolute left-1 top-1 rounded bg-slate-950/70 px-1.5 py-0.5 text-[10px] text-white">
+                            {label}
+                          </span>
+                        </div>
+                        <div className="mt-1 truncate text-[11px] text-muted-foreground">
+                          {formatAttendancePhotoTime(time)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <span className="mr-auto text-xs text-muted-foreground">已选 {selected.size} 组</span>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            取消
+          </Button>
+          <Button
+            type="button"
+            className="bg-[#0f6b5d] text-white"
+            disabled={!selected.size}
+            onClick={onApply}
+          >
+            加入照片组
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

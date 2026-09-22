@@ -15,6 +15,7 @@ import {
   FileText,
   Fingerprint,
   HardHat,
+  Image,
   Landmark,
   Leaf,
   Link2,
@@ -196,6 +197,17 @@ export function AppSidebar() {
           title: "视频监控",
           href: "/app/admin/video-monitoring",
           icon: Camera,
+        },
+      ],
+    },
+    {
+      title: "照片处理",
+      items: [
+        {
+          key: "photo_processing",
+          title: "照片处理",
+          href: "/app/admin/photo-processing",
+          icon: Image,
         },
       ],
     },

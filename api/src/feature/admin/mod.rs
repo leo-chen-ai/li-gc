@@ -6,6 +6,7 @@ pub mod enterprise;
 pub mod log;
 pub mod managed_attendance_dispatcher;
 pub mod managed_attendance_scheduler;
+pub mod photo;
 pub mod registration_lead;
 pub mod report_forwarding;
 pub mod role;

@@ -35,6 +35,7 @@ const ALLOWED_MENU_KEYS: &[&str] = &[
     "attendance_alerts",
     "managed_attendance",
     "supplemental_attendance",
+    "photo_processing",
     "environment_monitoring",
     "video_monitoring",
     "quality_safety",

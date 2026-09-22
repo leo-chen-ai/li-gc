@@ -226,6 +226,67 @@ impl FaceConfig {
 }
 
 #[derive(Debug, Clone)]
+pub struct PhotoCompositeConfig {
+    /// ePhone AI gateway bearer token. Absent means compositing stays disabled
+    /// and the worker refuses to start tasks instead of failing per photo.
+    pub ephone_ai_api_key: Option<String>,
+    /// OpenAI-compatible base URL (env: EPHONE_AI_BASE_URL).
+    pub ephone_ai_base_url: String,
+    /// Image edit model id (env: EPHONE_AI_IMAGE_MODEL).
+    pub ephone_ai_image_model: String,
+    /// Output size, both sides must be divisible by 16 (env: EPHONE_AI_IMAGE_SIZE).
+    pub ephone_ai_image_size: String,
+    /// Per-request timeout for a single upstream composite call, in seconds
+    /// (env: EPHONE_AI_TIMEOUT_SECS, default: 180 — upstream takes ~14s at 1024x1536).
+    pub ephone_ai_timeout_secs: u64,
+    /// In-task concurrency (env: PHOTO_COMPOSITE_CONCURRENCY, default: 3).
+    pub concurrency: usize,
+    /// Queue poll interval in seconds (env: PHOTO_COMPOSITE_POLL_SECONDS, default: 5).
+    pub poll_seconds: u64,
+    /// Lease TTL in seconds (env: PHOTO_COMPOSITE_LEASE_SECS, default: 180).
+    pub lease_secs: u64,
+}
+
+impl PhotoCompositeConfig {
+    fn from_env() -> Self {
+        Self {
+            ephone_ai_api_key: env::var("EPHONE_AI_API_KEY")
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
+            ephone_ai_base_url: env::var("EPHONE_AI_BASE_URL")
+                .unwrap_or_else(|_| "https://api.ephone.ai/v1".to_string()),
+            ephone_ai_image_model: env::var("EPHONE_AI_IMAGE_MODEL")
+                .unwrap_or_else(|_| "gpt-image-2".to_string()),
+            ephone_ai_image_size: env::var("EPHONE_AI_IMAGE_SIZE")
+                .unwrap_or_else(|_| "1024x1536".to_string()),
+            ephone_ai_timeout_secs: env::var("EPHONE_AI_TIMEOUT_SECS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(180),
+            concurrency: env::var("PHOTO_COMPOSITE_CONCURRENCY")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(3),
+            poll_seconds: env::var("PHOTO_COMPOSITE_POLL_SECONDS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(5),
+            lease_secs: env::var("PHOTO_COMPOSITE_LEASE_SECS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(180),
+        }
+    }
+
+    /// Compositing needs an upstream credential; without one the worker marks
+    /// tasks failed immediately rather than burning a timeout per photo.
+    pub fn is_enabled(&self) -> bool {
+        self.ephone_ai_api_key.is_some()
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Config {
     pub rust_env: String,
     pub is_production: bool,
@@ -238,6 +299,7 @@ pub struct Config {
     pub upload: UploadConfig,
     pub ocr: OcrConfig,
     pub face: FaceConfig,
+    pub photo_composite: PhotoCompositeConfig,
 }
 
 impl Config {
@@ -266,6 +328,7 @@ impl Config {
             upload: UploadConfig::from_env(),
             ocr: OcrConfig::from_env(),
             face: FaceConfig::from_env(),
+            photo_composite: PhotoCompositeConfig::from_env(),
         })
     }
 }
