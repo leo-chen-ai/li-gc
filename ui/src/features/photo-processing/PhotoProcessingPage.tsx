@@ -1,507 +1,434 @@
-import { useMemo, useState } from "react";
-import { FolderOpen, ImagePlus, Loader2, Plus, Trash2 } from "lucide-react";
+import { useRef, useState } from "react";
+import { Download, ImagePlus, Loader2, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
-
 import { Button } from "@/components/ui/button";
-import { Dialog } from "@/components/ui/dialog";
-import {
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { cn } from "@/lib/utils";
+import { apiClient } from "@/lib/api";
+import type { ApiResponse } from "@/lib/api/types";
+import { constructionProjectService } from "@/features/projects/services/construction-project-service";
+import { imageZip, saveBlob } from "./download";
 
-import { AttendancePhotoPickerDialog } from "./components/AttendancePhotoPickerDialog";
-import { BackgroundUploader } from "./components/BackgroundUploader";
-import { CompositePanel } from "./components/CompositePanel";
-import {
-  useAddPhotoGroupPhotosMutation,
-  useCreatePhotoGroupMutation,
-  useDeleteBackgroundMutation,
-  useDeletePhotoGroupMutation,
-  useDeletePhotoGroupPhotoMutation,
-  usePhotoGroupDetailQuery,
-  usePhotoGroupListQuery,
-  useSetBackgroundMutation,
-  useUpdatePhotoGroupMutation,
-} from "./hooks";
-import { compositeStatusLabel, directionLabel, photoDedupeKey } from "./lib";
-import type {
-  AttendancePhotoItem,
-  PhotoGroupDetail,
-  PhotoGroupPhotoPayload,
-} from "./types";
+type ImageSlot = "person" | "foreground" | "background";
+type Uploaded = { id: string; url: string };
+type Payload = {
+  person_id: string;
+  foreground_id?: string;
+  background_id?: string;
+  season: string;
+  count: number;
+  change_clothes: boolean;
+  change_pose: boolean;
+};
+type Result = {
+  index: number;
+  status: "running" | "success" | "failed";
+  image?: string;
+  error?: string;
+};
+const slots: { key: ImageSlot; label: string; hint: string }[] = [
+  { key: "person", label: "人像照片", hint: "必填 · 上传清晰的人像照片" },
+  { key: "foreground", label: "前景图", hint: "选填 · 放在人物前方的物体" },
+  { key: "background", label: "背景图", hint: "选填 · 人物身后的环境" },
+];
 
-type PageTab = "photos" | "backgrounds" | "composite";
+function errorMessage(error: unknown, fallback: string): string {
+  return error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof error.message === "string"
+    ? error.message
+    : fallback;
+}
 
 export function PhotoProcessingPage() {
-  const [keyword, setKeyword] = useState("");
-  const [selectedGroupId, setSelectedGroupId] = useState("");
-  const [tab, setTab] = useState<PageTab>("photos");
-  const [creating, setCreating] = useState(false);
-  const [newGroupName, setNewGroupName] = useState("");
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [renameOpen, setRenameOpen] = useState(false);
-  const [renameName, setRenameName] = useState("");
-  const [renameRemark, setRenameRemark] = useState("");
-
-  const groupsQuery = usePhotoGroupListQuery({
-    page: 1,
-    page_size: 50,
-    keyword: keyword.trim() || undefined,
-  });
-  const groups = groupsQuery.data?.items ?? [];
-  const groupDetailQuery = usePhotoGroupDetailQuery(selectedGroupId || undefined);
-  const group = groupDetailQuery.data;
-  const createGroup = useCreatePhotoGroupMutation();
-  const deleteGroup = useDeletePhotoGroupMutation();
-  const addPhotos = useAddPhotoGroupPhotosMutation(selectedGroupId);
-  const deletePhoto = useDeletePhotoGroupPhotoMutation(selectedGroupId);
-  const setBackground = useSetBackgroundMutation(selectedGroupId);
-  const deleteBackground = useDeleteBackgroundMutation(selectedGroupId);
-
-  const existingKeys = useMemo(
-    () =>
-      (group?.photos ?? []).map((photo) =>
-        photoDedupeKey({
-          attendance_record_id: photo.attendance_record_id,
-          project_id: photo.project_id,
-          worker_id: photo.worker_id,
-          attendance_date: photo.attendance_date,
-          direction: photo.direction,
-        })
-      ),
-    [group?.photos]
+  const [images, setImages] = useState<Partial<Record<ImageSlot, Uploaded>>>(
+    {},
   );
+  const [uploading, setUploading] = useState<
+    Partial<Record<ImageSlot, boolean>>
+  >({});
+  const [count, setCount] = useState(6);
+  const [season, setSeason] = useState("spring");
+  const [changeClothes, setChangeClothes] = useState(true);
+  const [changePose, setChangePose] = useState(true);
+  const [results, setResults] = useState<Result[]>([]);
+  const inputs = useRef<Partial<Record<ImageSlot, HTMLInputElement | null>>>(
+    {},
+  );
+  const batch = useRef<Payload | null>(null);
+  const inFlight = useRef(false);
+  const busy = results.some((item) => item.status === "running");
+  const hasUpload = Object.values(uploading).some(Boolean);
+  const successful = results.filter((item) => item.status === "success");
 
-  const handleCreateGroup = async () => {
-    const name = newGroupName.trim();
-    if (!name) {
-      toast.info("请先填写组名称");
+  const upload = async (key: ImageSlot, file?: File) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("请选择图片文件");
       return;
     }
+    if (file.size > 15 * 1024 * 1024) {
+      toast.error("图片不能超过15MB");
+      return;
+    }
+    setUploading((current) => ({ ...current, [key]: true }));
     try {
-      const created = await createGroup.mutateAsync({ name });
-      setNewGroupName("");
-      setCreating(false);
-      setSelectedGroupId(created.id);
-      setTab("photos");
-      toast.success("已创建照片处理组");
+      const record = await constructionProjectService.uploadFile(file, {
+        bizType: "photo_processing",
+        fieldKey: key,
+      });
+      setImages((current) => ({
+        ...current,
+        [key]: { id: record.id, url: record.public_url },
+      }));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "创建照片处理组失败");
+      toast.error(errorMessage(error, "上传失败"));
+    } finally {
+      setUploading((current) => ({ ...current, [key]: false }));
     }
   };
 
-  const handleDeleteGroup = async (groupId: string, name: string) => {
-    if (!window.confirm(`确认删除照片处理组「${name}」？组内照片会一起删除。`)) return;
+  const generate = async (index: number, payload: Payload) => {
     try {
-      await deleteGroup.mutateAsync(groupId);
-      if (groupId === selectedGroupId) setSelectedGroupId("");
-      toast.success("已删除照片处理组");
+      const response = await apiClient.post<ApiResponse<{ image: string }>>(
+        "/admin/photo-processing/generate",
+        { ...payload, variant: index },
+      );
+      const image = response.data.data?.image;
+      if (!image) throw new Error("未返回生成图片");
+      setResults((current) =>
+        current.map((item) =>
+          item.index === index ? { index, status: "success", image } : item,
+        ),
+      );
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "删除照片处理组失败");
+      setResults((current) =>
+        current.map((item) =>
+          item.index === index
+            ? {
+                index,
+                status: "failed",
+                error: errorMessage(error, "生成失败"),
+              }
+            : item,
+        ),
+      );
     }
   };
 
-  const handleConfirmPicker = async (photos: AttendancePhotoItem[]) => {
-    const payload: PhotoGroupPhotoPayload[] = photos.map((photo) => ({
-      attendance_record_id: photo.attendance_record_id,
-      project_id: photo.project_id,
-      worker_id: photo.worker_id,
-      worker_name: photo.worker_name,
-      attendance_date: photo.attendance_date,
-      direction: photo.direction,
-      photo_url: photo.photo_url,
-    }));
-    try {
-      const result = await addPhotos.mutateAsync(payload);
-      setPickerOpen(false);
-      const parts = [`已加入 ${result.added} 张照片`];
-      if (result.skipped > 0) parts.push(`${result.skipped} 张已在组内`);
-      if (result.failed.length) {
-        toast.warning(
-          `${parts.join("，")}，${result.failed.length} 张失败：${result.failed[0]}`
-        );
-        return;
-      }
-      toast.success(result.skipped > 0 ? parts.join("，") : `已加入 ${result.added} 张照片`);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "加入照片处理组失败");
-    }
-  };
-
-  return (
-    <div className="space-y-4 text-slate-950 dark:text-foreground">
-      <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
-        <aside className="space-y-3">
-          <div className="rounded-xl border bg-white p-3 shadow-sm dark:border-border dark:bg-card">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold">照片处理组</h2>
-              <Button
-                size="sm"
-                className="h-7 gap-1 bg-[#0f6b5d] text-white hover:bg-[#0b5148]"
-                onClick={() => setCreating((current) => !current)}
-              >
-                <Plus className="size-3.5" />
-                新建
-              </Button>
-            </div>
-            {creating ? (
-              <div className="mt-3 space-y-2">
-                <Input
-                  placeholder="组名称，例如：张三 9 月考勤"
-                  value={newGroupName}
-                  onChange={(event) => setNewGroupName(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") void handleCreateGroup();
-                  }}
-                />
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    className="flex-1"
-                    disabled={createGroup.isPending}
-                    onClick={handleCreateGroup}
-                  >
-                    {createGroup.isPending ? (
-                      <Loader2 className="mr-1 size-3.5 animate-spin" />
-                    ) : null}
-                    创建
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      setCreating(false);
-                      setNewGroupName("");
-                    }}
-                  >
-                    取消
-                  </Button>
-                </div>
-              </div>
-            ) : null}
-            <Input
-              className="mt-3"
-              placeholder="搜索组名称"
-              value={keyword}
-              onChange={(event) => setKeyword(event.target.value)}
-            />
-            <div className="mt-3 max-h-[60svh] space-y-1 overflow-y-auto">
-              {groupsQuery.isPending ? (
-                <div className="flex items-center justify-center gap-2 py-6 text-xs text-muted-foreground">
-                  <Loader2 className="size-3.5 animate-spin" />
-                  正在加载
-                </div>
-              ) : !groups.length ? (
-                <p className="py-6 text-center text-xs text-muted-foreground">
-                  还没有照片处理组
-                </p>
-              ) : (
-                groups.map((item) => (
-                  <div
-                    key={item.id}
-                    className={cn(
-                      "group flex items-center gap-2 rounded-lg border px-2 py-2 text-left transition",
-                      item.id === selectedGroupId
-                        ? "border-sky-500 bg-sky-50 dark:bg-sky-950/20"
-                        : "hover:border-slate-400"
-                    )}
-                  >
-                    <button
-                      type="button"
-                      className="min-w-0 flex-1 text-left"
-                      onClick={() => setSelectedGroupId(item.id)}
-                    >
-                      <span className="block truncate text-sm font-medium">
-                        {item.name}
-                      </span>
-                      <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
-                        {item.photo_count} 张 · 已合成 {item.success_count} ·{" "}
-                        {item.has_in_background && item.has_out_background
-                          ? "进/出背景齐"
-                          : "背景图缺失"}
-                      </span>
-                    </button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="size-7 shrink-0 text-red-600"
-                      onClick={() => void handleDeleteGroup(item.id, item.name)}
-                    >
-                      <Trash2 className="size-3.5" />
-                    </Button>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </aside>
-
-        <section className="min-w-0">
-          {!selectedGroupId || !group ? (
-            <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed py-20 text-sm text-muted-foreground">
-              <FolderOpen className="size-6" />
-              {selectedGroupId ? "正在加载组详情" : "请从左侧选择一个照片处理组"}
-            </div>
-          ) : (
-            <div className="space-y-4 rounded-xl border bg-white p-4 shadow-sm dark:border-border dark:bg-card">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <h2 className="truncate text-base font-semibold">{group.name}</h2>
-                  <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-                    {group.remark || "暂无备注"}
-                  </p>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setRenameName(group.name);
-                      setRenameRemark(group.remark ?? "");
-                      setRenameOpen(true);
-                    }}
-                  >
-                    重命名
-                  </Button>
-                  <Button
-                    size="sm"
-                    className="gap-2 bg-[#0f6b5d] text-white hover:bg-[#0b5148]"
-                    onClick={() => setPickerOpen(true)}
-                  >
-                    <ImagePlus className="size-4" />
-                    拉取照片
-                  </Button>
-                </div>
-              </div>
-
-              <div className="flex rounded-lg bg-slate-100 p-1 dark:bg-muted">
-                {(
-                  [
-                    ["photos", `组内照片 (${group.photos.length})`],
-                    ["backgrounds", "背景图"],
-                    ["composite", "AI 合成"],
-                  ] as const
-                ).map(([value, label]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => setTab(value)}
-                    className={cn(
-                      "flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition",
-                      tab === value
-                        ? "bg-white text-slate-950 shadow-sm dark:bg-card dark:text-foreground"
-                        : "text-muted-foreground"
-                    )}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-
-              {tab === "photos" ? (
-                <PhotoList
-                  photos={group.photos}
-                  onRemove={(photoId) => void deletePhoto.mutateAsync(photoId)}
-                />
-              ) : null}
-
-              {tab === "backgrounds" ? (
-                <BackgroundUploader
-                  groupId={group.id}
-                  backgrounds={group.backgrounds}
-                  onSave={(direction, payload) => {
-                    setBackground.mutate(
-                      { direction, payload },
-                      {
-                        onSuccess: () => toast.success(`已保存${directionLabel(direction)}背景图`),
-                        onError: (error) =>
-                          toast.error(
-                            error instanceof Error ? error.message : "保存背景图失败"
-                          ),
-                      }
-                    );
-                  }}
-                  onRemove={(direction) => {
-                    deleteBackground.mutate(direction, {
-                      onSuccess: () => toast.success(`已移除${directionLabel(direction)}背景图`),
-                      onError: (error) =>
-                        toast.error(
-                          error instanceof Error ? error.message : "移除背景图失败"
-                        ),
-                    });
-                  }}
-                />
-              ) : null}
-
-              {tab === "composite" ? <CompositePanel group={group} /> : null}
-            </div>
-          )}
-        </section>
-      </div>
-
-      <AttendancePhotoPickerDialog
-        open={pickerOpen && Boolean(selectedGroupId)}
-        onOpenChange={setPickerOpen}
-        existingKeys={existingKeys}
-        onConfirm={(photos) => void handleConfirmPicker(photos)}
-      />
-
-      {renameOpen && group ? (
-        <RenameGroupDialog
-          groupId={group.id}
-          name={renameName}
-          remark={renameRemark}
-          onNameChange={setRenameName}
-          onRemarkChange={setRenameRemark}
-          onClose={() => setRenameOpen(false)}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-function PhotoList({
-  photos,
-  onRemove,
-}: {
-  photos: PhotoGroupDetail["photos"];
-  onRemove: (photoId: string) => void;
-}) {
-  if (!photos.length) {
-    return (
-      <p className="rounded-lg border border-dashed py-10 text-center text-sm text-muted-foreground">
-        组内还没有照片，点右上角「拉取照片」从考勤记录里挑
-      </p>
+  const start = async () => {
+    if (!images.person || hasUpload || inFlight.current) return;
+    const payload: Payload = {
+      person_id: images.person.id,
+      foreground_id: images.foreground?.id,
+      background_id: images.background?.id,
+      season,
+      count,
+      change_clothes: changeClothes,
+      change_pose: changePose,
+    };
+    batch.current = payload;
+    inFlight.current = true;
+    setResults(
+      Array.from({ length: count }, (_, index) => ({
+        index,
+        status: "running",
+      })),
     );
-  }
+    try {
+      await Promise.allSettled(
+        Array.from({ length: count }, (_, index) => generate(index, payload)),
+      );
+    } finally {
+      inFlight.current = false;
+    }
+  };
+
+  const retry = async (index: number) => {
+    if (!batch.current || inFlight.current) return;
+    inFlight.current = true;
+    setResults((current) =>
+      current.map((item) =>
+        item.index === index ? { index, status: "running" } : item,
+      ),
+    );
+    try {
+      await generate(index, batch.current);
+    } finally {
+      inFlight.current = false;
+    }
+  };
+
   return (
-    <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
-      {photos.map((photo) => (
-        <div key={photo.id} className="overflow-hidden rounded-lg border">
-          <div className="relative aspect-[2/3] bg-slate-100 dark:bg-muted">
-            <img
-              src={photo.composite_photo_url ?? photo.photo_url}
-              alt={`${photo.worker_name} ${photo.attendance_date} 照片`}
-              className="size-full object-contain"
-            />
-            <span className="pointer-events-none absolute left-1 top-1 rounded bg-slate-950/70 px-1.5 py-0.5 text-[10px] text-white">
-              {directionLabel(photo.direction)}
-            </span>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="absolute right-1 top-1 size-7 bg-white/80 text-red-600 hover:bg-white"
-              onClick={() => onRemove(photo.id)}
+    <div className="mx-auto max-w-6xl space-y-6 text-foreground">
+      <div>
+        <h1 className="text-xl font-semibold">AI 照片合成</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          上传照片，选择变化，一次生成多套照片。
+        </p>
+      </div>
+      <section className="space-y-6 rounded-xl border bg-card p-5">
+        <div className="grid gap-4 sm:grid-cols-3">
+          {slots.map(({ key, label, hint }) => (
+            <div key={key} className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label
+                  htmlFor={`upload-${key}`}
+                  className="text-sm font-medium"
+                >
+                  {label}
+                  {key === "person" && (
+                    <span className="ml-1 text-red-500">*</span>
+                  )}
+                </label>
+                {images[key] && (
+                  <Button
+                    aria-label={`移除${label}`}
+                    variant="ghost"
+                    size="icon"
+                    className="size-6"
+                    disabled={busy || uploading[key]}
+                    onClick={() =>
+                      setImages((current) => ({ ...current, [key]: undefined }))
+                    }
+                  >
+                    <X className="size-4" />
+                  </Button>
+                )}
+              </div>
+              <input
+                id={`upload-${key}`}
+                ref={(el) => {
+                  inputs.current[key] = el;
+                }}
+                type="file"
+                accept="image/*"
+                className="sr-only"
+                disabled={busy || uploading[key]}
+                onChange={(event) => {
+                  void upload(key, event.target.files?.[0]);
+                  event.target.value = "";
+                }}
+              />
+              <button
+                type="button"
+                disabled={busy || uploading[key]}
+                onClick={() => inputs.current[key]?.click()}
+                className="flex aspect-[4/3] w-full items-center justify-center overflow-hidden rounded-lg border border-dashed bg-muted/30 transition hover:border-emerald-600 disabled:opacity-60"
+                aria-label={`上传${label}`}
+              >
+                {uploading[key] ? (
+                  <Loader2 className="size-6 animate-spin" />
+                ) : images[key] ? (
+                  <img
+                    src={images[key].url}
+                    alt={label}
+                    className="size-full object-contain"
+                  />
+                ) : (
+                  <span className="flex flex-col items-center gap-2 text-sm text-muted-foreground">
+                    <ImagePlus className="size-7" />
+                    点击上传
+                  </span>
+                )}
+              </button>
+              <p className="text-xs text-muted-foreground">{hint}</p>
+            </div>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          前景和背景都不上传时，直接根据人像原图变换。支持图片，单张不超过
+          15MB。
+        </p>
+        <div className="space-y-4 border-t pt-5">
+          <div className="flex flex-wrap gap-6">
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="size-4 accent-emerald-700"
+                checked={changeClothes}
+                disabled={busy}
+                onChange={(event) => setChangeClothes(event.target.checked)}
+              />
+              换不同衣服
+            </label>
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="size-4 accent-emerald-700"
+                checked={changePose}
+                disabled={busy}
+                onChange={(event) => setChangePose(event.target.checked)}
+              />
+              换不同动作
+            </label>
+          </div>
+          {changeClothes && (
+            <fieldset
+              disabled={busy}
+              className="flex flex-wrap items-center gap-2"
             >
-              <Trash2 className="size-3.5" />
+              <legend className="mb-2 text-sm font-medium">服装季节</legend>
+              {[
+                ["spring", "春"],
+                ["summer", "夏"],
+                ["autumn", "秋"],
+                ["winter", "冬"],
+              ].map(([value, label]) => (
+                <label
+                  key={value}
+                  className={`cursor-pointer rounded-md border px-5 py-2 text-sm focus-within:ring-2 focus-within:ring-emerald-700 ${season === value ? "border-emerald-700 bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200" : ""}`}
+                >
+                  <input
+                    type="radio"
+                    name="season"
+                    className="sr-only"
+                    value={value}
+                    checked={season === value}
+                    onChange={() => setSeason(value)}
+                  />
+                  {label}
+                </label>
+              ))}
+            </fieldset>
+          )}
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div className="space-y-2">
+              <label
+                htmlFor="generation-count"
+                className="block text-sm font-medium"
+              >
+                {changeClothes ? "生成几套衣服" : "生成照片数量"}
+              </label>
+              <div className="flex items-center gap-3">
+                <Input
+                  id="generation-count"
+                  type="number"
+                  min={1}
+                  max={30}
+                  value={count}
+                  disabled={busy}
+                  className="w-24"
+                  onChange={(event) =>
+                    setCount(
+                      Math.max(
+                        1,
+                        Math.min(
+                          30,
+                          Math.floor(Number(event.target.value) || 1),
+                        ),
+                      ),
+                    )
+                  }
+                />
+                <span className="text-xs text-muted-foreground">
+                  最多 30 套，全部并发生成
+                </span>
+              </div>
+            </div>
+            <Button
+              disabled={!images.person || hasUpload || busy}
+              className="gap-2 bg-[#0f6b5d] text-white hover:bg-[#0b5148]"
+              onClick={() => void start()}
+            >
+              {busy ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Sparkles className="size-4" />
+              )}
+              {busy
+                ? "正在生成"
+                : `开始生成 ${count} ${changeClothes ? "套" : "张"}`}
             </Button>
           </div>
-          <div className="space-y-1 p-2 text-[11px]">
-            <div className="flex items-center justify-between gap-1">
-              <span className="truncate font-medium">{photo.worker_name}</span>
-              <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-slate-600 dark:bg-muted dark:text-muted-foreground">
-                {compositeStatusLabel(photo.composite_status)}
-              </span>
+        </div>
+      </section>
+      {results.length > 0 && (
+        <section className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="font-semibold">生成结果</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                成功 {successful.length} / {results.length}
+                {busy
+                  ? " · 生成中的照片会逐张显示"
+                  : " · 结果仅在本页保留，请及时下载"}
+              </p>
             </div>
-            <p className="truncate text-muted-foreground">
-              {photo.attendance_date}
-              {photo.project_name ? ` · ${photo.project_name}` : ""}
-            </p>
+            <Button
+              variant="outline"
+              disabled={!successful.length}
+              className="gap-2"
+              onClick={() => {
+                saveBlob(
+                  imageZip(
+                    successful.map((item) => ({
+                      name: `photo-${String(item.index + 1).padStart(2, "0")}.png`,
+                      image: item.image!,
+                    })),
+                  ),
+                  "AI照片.zip",
+                );
+              }}
+            >
+              <Download className="size-4" />
+              一键下载{busy ? "已完成照片" : "全部照片"}
+            </Button>
           </div>
-        </div>
-      ))}
+          <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+            {results.map((item) => (
+              <div
+                key={item.index}
+                className="overflow-hidden rounded-xl border bg-card"
+              >
+                <div className="flex aspect-[2/3] items-center justify-center bg-muted/30">
+                  {item.image ? (
+                    <img
+                      src={item.image}
+                      alt={`第 ${item.index + 1} 套合成照片`}
+                      className="size-full object-contain"
+                    />
+                  ) : item.status === "running" ? (
+                    <div className="flex flex-col items-center gap-3 text-sm text-muted-foreground">
+                      <Loader2 className="size-6 animate-spin" />
+                      正在生成第 {item.index + 1} 套
+                    </div>
+                  ) : (
+                    <div className="space-y-3 px-4 text-center">
+                      <p className="break-words text-sm text-red-600">
+                        {item.error}
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => void retry(item.index)}
+                      >
+                        重新生成
+                      </Button>
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center justify-between px-3 py-2 text-sm">
+                  <span>
+                    第 {item.index + 1}{" "}
+                    {batch.current?.change_clothes ? "套" : "张"}
+                  </span>
+                  {item.image && (
+                    <a
+                      href={item.image}
+                      download={`photo-${item.index + 1}.png`}
+                      className="text-emerald-700"
+                    >
+                      下载
+                    </a>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
-  );
-}
-
-function RenameGroupDialog({
-  groupId,
-  name,
-  remark,
-  onNameChange,
-  onRemarkChange,
-  onClose,
-}: {
-  groupId: string;
-  name: string;
-  remark: string;
-  onNameChange: (value: string) => void;
-  onRemarkChange: (value: string) => void;
-  onClose: () => void;
-}) {
-  const updateGroup = useUpdatePhotoGroupMutation();
-  const save = async () => {
-    if (!name.trim()) {
-      toast.info("组名称不能为空");
-      return;
-    }
-    try {
-      await updateGroup.mutateAsync({
-        groupId,
-        payload: { name: name.trim(), remark: remark.trim() || "" },
-      });
-      toast.success("已保存");
-      onClose();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "保存失败");
-    }
-  };
-  return (
-    <Dialog
-      open
-      onOpenChange={(open) => {
-        if (!open) onClose();
-      }}
-    >
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>重命名照片处理组</DialogTitle>
-          <DialogDescription>组名称会显示在左侧列表和考勤托管同步弹窗里。</DialogDescription>
-        </DialogHeader>
-        <div className="space-y-3">
-          <div className="space-y-1">
-            <Label htmlFor="photo-group-name">组名称</Label>
-            <Input
-              id="photo-group-name"
-              value={name}
-              onChange={(event) => onNameChange(event.target.value)}
-            />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="photo-group-remark">备注</Label>
-            <textarea
-              id="photo-group-remark"
-              rows={3}
-              value={remark}
-              onChange={(event) => onRemarkChange(event.target.value)}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
-            取消
-          </Button>
-          <Button
-            className="bg-[#0f6b5d] text-white hover:bg-[#0b5148]"
-            disabled={updateGroup.isPending || !name.trim()}
-            onClick={() => void save()}
-          >
-            {updateGroup.isPending ? (
-              <Loader2 className="mr-1 size-3.5 animate-spin" />
-            ) : null}
-            保存
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }

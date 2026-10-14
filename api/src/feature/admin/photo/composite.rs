@@ -69,7 +69,9 @@ struct UpstreamError {
 impl CompositeClient {
     pub fn new(config: PhotoCompositeConfig) -> Self {
         let http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(config.ephone_ai_timeout_secs))
+            .timeout(std::time::Duration::from_secs(
+                config.ephone_ai_timeout_secs,
+            ))
             .connect_timeout(std::time::Duration::from_secs(10))
             .build()
             .unwrap_or_else(|error| {
@@ -94,38 +96,37 @@ impl CompositeClient {
         direction: i16,
         prompt_override: Option<&str>,
     ) -> CompositeResult<CompositeOutput> {
-        let Some(api_key) = self.config.ephone_ai_api_key.as_deref() else {
-            return Err(CompositeError::NotConfigured);
-        };
-        if person.is_empty() {
-            return Err(CompositeError::BadImage("人像照片为空".to_string()));
-        }
-        if background.is_empty() {
-            return Err(CompositeError::BadImage("背景图为空".to_string()));
-        }
         let prompt = prompt_override
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(str::to_string)
             .unwrap_or_else(|| default_prompt(direction));
+        self.compose_images(&[person, background], &prompt).await
+    }
 
-        // 两路输入都经过 compress_to_jpeg_below 归一化成 JPEG，
-        // MIME 必须按真实字节声明，别让 provider 按后缀猜错格式。
-        let person_part = reqwest::multipart::Part::bytes(person.to_vec())
-            .file_name("person.jpg")
-            .mime_str("image/jpeg")
-            .map_err(|error| CompositeError::Upstream(format!("人像MIME错误: {error}")))?;
-        let background_part = reqwest::multipart::Part::bytes(background.to_vec())
-            .file_name("background.jpg")
-            .mime_str("image/jpeg")
-            .map_err(|error| CompositeError::Upstream(format!("背景MIME错误: {error}")))?;
-
-        let form = reqwest::multipart::Form::new()
+    /// 第一张始终为人像；其余参考图由提示词明确标注用途。
+    pub async fn compose_images(
+        &self,
+        images: &[&[u8]],
+        prompt: &str,
+    ) -> CompositeResult<CompositeOutput> {
+        let Some(api_key) = self.config.ephone_ai_api_key.as_deref() else {
+            return Err(CompositeError::NotConfigured);
+        };
+        if images.is_empty() || images.iter().any(|image| image.is_empty()) {
+            return Err(CompositeError::BadImage("输入图片为空".to_string()));
+        }
+        let mut form = reqwest::multipart::Form::new()
             .text("model", self.config.ephone_ai_image_model.clone())
-            .text("prompt", prompt)
-            .text("size", self.config.ephone_ai_image_size.clone())
-            .part("image", person_part)
-            .part("image", background_part);
+            .text("prompt", prompt.to_string())
+            .text("size", self.config.ephone_ai_image_size.clone());
+        for (index, image) in images.iter().enumerate() {
+            let part = reqwest::multipart::Part::bytes(image.to_vec())
+                .file_name(format!("reference-{index}.jpg"))
+                .mime_str("image/jpeg")
+                .map_err(|error| CompositeError::BadImage(error.to_string()))?;
+            form = form.part("image", part);
+        }
 
         let url = format!(
             "{}/images/edits",
@@ -147,9 +148,7 @@ impl CompositeClient {
             .map_err(|error| CompositeError::Transport(format!("读取响应失败: {error}")))?;
         if !status.is_success() {
             let detail = extract_upstream_error(&body).unwrap_or_else(|| truncate(&body));
-            return Err(CompositeError::Upstream(format!(
-                "HTTP {status} {detail}"
-            )));
+            return Err(CompositeError::Upstream(format!("HTTP {status} {detail}")));
         }
 
         let parsed: ImagesResponse = serde_json::from_slice(&body).map_err(|error| {
@@ -247,6 +246,42 @@ pub fn describe_direction(direction: i16) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn edits_accept_one_two_or_three_reference_images() {
+        use axum::{Router, body::Bytes, extract::State, routing::post};
+        for count in 1..=3 {
+            let app = Router::new()
+                .route(
+                    "/images/edits",
+                    post(|State(count): State<usize>, body: Bytes| async move {
+                        let text = String::from_utf8_lossy(&body);
+                        assert_eq!(text.matches("name=\"image\"").count(), count);
+                        assert!(text.contains("reference-0.jpg"));
+                        assert!(text.contains("test prompt"));
+                        axum::Json(serde_json::json!({"data": [{"b64_json": "aW1hZ2U="}]}))
+                    }),
+                )
+                .with_state(count);
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            let client = CompositeClient::new(PhotoCompositeConfig {
+                ephone_ai_api_key: Some("test".into()),
+                ephone_ai_base_url: format!("http://{address}"),
+                ephone_ai_image_model: "test-model".into(),
+                ephone_ai_image_size: "1024x1536".into(),
+                ephone_ai_timeout_secs: 5,
+                concurrency: 30,
+                poll_seconds: 5,
+                lease_secs: 60,
+            });
+            let images: Vec<&[u8]> = vec![b"jpeg"; count];
+            let output = client.compose_images(&images, "test prompt").await.unwrap();
+            assert_eq!(output.bytes, b"image");
+            server.abort();
+        }
+    }
 
     #[test]
     fn default_prompt_mentions_person_and_background() {

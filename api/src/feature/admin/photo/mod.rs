@@ -4,6 +4,7 @@ pub mod dto;
 pub mod handler;
 pub mod repository;
 pub mod routes;
+pub mod studio;
 
 pub use routes::photo_routes;
 
