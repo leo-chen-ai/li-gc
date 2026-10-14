@@ -22,7 +22,8 @@ type Payload = {
 type Result = {
   index: number;
   status: "running" | "success" | "failed";
-  image?: string;
+  in_image?: string;
+  out_image?: string;
   error?: string;
 };
 const slots: { key: ImageSlot; label: string; hint: string }[] = [
@@ -60,6 +61,23 @@ export function PhotoProcessingPage() {
   const busy = results.some((item) => item.status === "running");
   const hasUpload = Object.values(uploading).some(Boolean);
   const successful = results.filter((item) => item.status === "success");
+  const generated = results.flatMap((item) =>
+    (
+      [
+        ["in_image", "进场"],
+        ["out_image", "出场"],
+      ] as const
+    ).flatMap(([key, label]) =>
+      item[key]
+        ? [
+            {
+              name: `第${String(item.index + 1).padStart(2, "0")}套-${label}.jpg`,
+              image: item[key]!,
+            },
+          ]
+        : [],
+    ),
+  );
 
   const upload = async (key: ImageSlot, file?: File) => {
     if (!file) return;
@@ -88,17 +106,38 @@ export function PhotoProcessingPage() {
     }
   };
 
-  const generate = async (index: number, payload: Payload) => {
+  const generate = async (
+    index: number,
+    payload: Payload,
+    entryImage?: string,
+  ) => {
     try {
-      const response = await apiClient.post<ApiResponse<{ image: string }>>(
-        "/admin/photo-processing/generate",
-        { ...payload, variant: index },
-      );
-      const image = response.data.data?.image;
-      if (!image) throw new Error("未返回生成图片");
+      const response = await apiClient.post<
+        ApiResponse<{
+          in_image: string;
+          out_image?: string;
+          out_error?: string;
+        }>
+      >("/admin/photo-processing/generate", {
+        ...payload,
+        variant: index,
+        entry_image: entryImage,
+      });
+      const pair = response.data.data;
+      if (!pair?.in_image) throw new Error("未返回进场图片");
       setResults((current) =>
         current.map((item) =>
-          item.index === index ? { index, status: "success", image } : item,
+          item.index === index
+            ? {
+                index,
+                status: pair.out_image ? "success" : "failed",
+                in_image: pair.in_image,
+                out_image: pair.out_image,
+                error:
+                  pair.out_error ||
+                  (pair.out_image ? undefined : "出场图片生成失败"),
+              }
+            : item,
         ),
       );
     } catch (error) {
@@ -106,7 +145,7 @@ export function PhotoProcessingPage() {
         current.map((item) =>
           item.index === index
             ? {
-                index,
+                ...item,
                 status: "failed",
                 error: errorMessage(error, "生成失败"),
               }
@@ -146,14 +185,17 @@ export function PhotoProcessingPage() {
 
   const retry = async (index: number) => {
     if (!batch.current || inFlight.current) return;
+    const entryImage = results.find((item) => item.index === index)?.in_image;
     inFlight.current = true;
     setResults((current) =>
       current.map((item) =>
-        item.index === index ? { index, status: "running" } : item,
+        item.index === index
+          ? { ...item, status: "running", error: undefined }
+          : item,
       ),
     );
     try {
-      await generate(index, batch.current);
+      await generate(index, batch.current, entryImage);
     } finally {
       inFlight.current = false;
     }
@@ -164,7 +206,7 @@ export function PhotoProcessingPage() {
       <div>
         <h1 className="text-xl font-semibold">AI 照片合成</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          上传照片，选择变化，一次生成多套照片。
+          每套包含进场和出场两张，同一套衣服保持一致。
         </p>
       </div>
       <section className="space-y-6 rounded-xl border bg-card p-5">
@@ -298,7 +340,7 @@ export function PhotoProcessingPage() {
                 htmlFor="generation-count"
                 className="block text-sm font-medium"
               >
-                {changeClothes ? "生成几套衣服" : "生成照片数量"}
+                生成套数
               </label>
               <div className="flex items-center gap-3">
                 <Input
@@ -322,7 +364,7 @@ export function PhotoProcessingPage() {
                   }
                 />
                 <span className="text-xs text-muted-foreground">
-                  最多 30 套，全部并发生成
+                  最多 30 套（60 张），套与套并发生成
                 </span>
               </div>
             </div>
@@ -336,9 +378,7 @@ export function PhotoProcessingPage() {
               ) : (
                 <Sparkles className="size-4" />
               )}
-              {busy
-                ? "正在生成"
-                : `开始生成 ${count} ${changeClothes ? "套" : "张"}`}
+              {busy ? "正在生成" : `开始生成 ${count} 套（${count * 2} 张）`}
             </Button>
           </div>
         </div>
@@ -349,81 +389,102 @@ export function PhotoProcessingPage() {
             <div>
               <h2 className="font-semibold">生成结果</h2>
               <p className="mt-1 text-xs text-muted-foreground">
-                成功 {successful.length} / {results.length}
+                完成 {successful.length} / {results.length} 套 · 已生成{" "}
+                {generated.length} 张
                 {busy
-                  ? " · 生成中的照片会逐张显示"
+                  ? " · 各套并发，套内先生成进场，再由进场图生成出场"
                   : " · 结果仅在本页保留，请及时下载"}
               </p>
             </div>
             <Button
               variant="outline"
-              disabled={!successful.length}
+              disabled={!generated.length}
               className="gap-2"
               onClick={() => {
-                saveBlob(
-                  imageZip(
-                    successful.map((item) => ({
-                      name: `photo-${String(item.index + 1).padStart(2, "0")}.png`,
-                      image: item.image!,
-                    })),
-                  ),
-                  "AI照片.zip",
-                );
+                saveBlob(imageZip(generated), "AI照片.zip");
               }}
             >
               <Download className="size-4" />
-              一键下载{busy ? "已完成照片" : "全部照片"}
+              一键下载{busy ? "已生成照片" : "全部照片"}
             </Button>
           </div>
-          <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+          <p className="text-xs text-muted-foreground">
+            每张 480×480 JPEG，不超过 20KB；下载按套保留进场、出场配对。
+          </p>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {results.map((item) => (
               <div
                 key={item.index}
                 className="overflow-hidden rounded-xl border bg-card"
               >
-                <div className="flex aspect-[2/3] items-center justify-center bg-muted/30">
-                  {item.image ? (
-                    <img
-                      src={item.image}
-                      alt={`第 ${item.index + 1} 套合成照片`}
-                      className="size-full object-contain"
-                    />
-                  ) : item.status === "running" ? (
-                    <div className="flex flex-col items-center gap-3 text-sm text-muted-foreground">
-                      <Loader2 className="size-6 animate-spin" />
-                      正在生成第 {item.index + 1} 套
-                    </div>
-                  ) : (
-                    <div className="space-y-3 px-4 text-center">
-                      <p className="break-words text-sm text-red-600">
-                        {item.error}
-                      </p>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={busy}
-                        onClick={() => void retry(item.index)}
-                      >
-                        重新生成
-                      </Button>
-                    </div>
-                  )}
-                </div>
-                <div className="flex items-center justify-between px-3 py-2 text-sm">
-                  <span>
-                    第 {item.index + 1}{" "}
-                    {batch.current?.change_clothes ? "套" : "张"}
+                <div className="flex items-center justify-between border-b px-3 py-2 text-sm">
+                  <span className="font-medium">第 {item.index + 1} 套</span>
+                  <span className="text-xs text-muted-foreground">
+                    {item.status === "success"
+                      ? "两张已完成"
+                      : item.status === "running"
+                        ? "生成中"
+                        : item.in_image
+                          ? "出场待重试"
+                          : "生成失败"}
                   </span>
-                  {item.image && (
-                    <a
-                      href={item.image}
-                      download={`photo-${item.index + 1}.png`}
-                      className="text-emerald-700"
-                    >
-                      下载
-                    </a>
-                  )}
                 </div>
+                <div className="grid grid-cols-2 gap-px bg-border">
+                  {(
+                    [
+                      ["in_image", "进场"],
+                      ["out_image", "出场"],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <div key={key} className="bg-card">
+                      <div className="flex aspect-square items-center justify-center bg-muted/30">
+                        {item[key] ? (
+                          <img
+                            src={item[key]}
+                            alt={`第 ${item.index + 1} 套${label}照片`}
+                            className="size-full object-contain"
+                          />
+                        ) : item.status === "running" ? (
+                          <div className="flex flex-col items-center gap-2 text-xs text-muted-foreground">
+                            <Loader2 className="size-5 animate-spin" />
+                            {label}生成中
+                          </div>
+                        ) : (
+                          <p className="px-2 text-center text-xs text-muted-foreground">
+                            {label}未生成
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between px-3 py-2 text-xs">
+                        <span>{label}</span>
+                        {item[key] && (
+                          <a
+                            href={item[key]}
+                            download={`第${String(item.index + 1).padStart(2, "0")}套-${label}.jpg`}
+                            className="text-emerald-700"
+                          >
+                            下载
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {item.status === "failed" && (
+                  <div className="space-y-2 border-t p-3">
+                    <p className="break-words text-xs text-red-600">
+                      {item.error}
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => void retry(item.index)}
+                    >
+                      {item.in_image ? "重试出场" : "重新生成这套"}
+                    </Button>
+                  </div>
+                )}
               </div>
             ))}
           </div>

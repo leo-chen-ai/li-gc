@@ -1,4 +1,4 @@
-/** Store-only ZIP: PNG files are already compressed. */
+/** Store-only ZIP: JPEG/PNG files are already compressed. */
 export function imageZip(images: { name: string; image: string }[]): Blob {
   const parts: Uint8Array<ArrayBuffer>[] = [];
   const directory: Uint8Array<ArrayBuffer>[] = [];
