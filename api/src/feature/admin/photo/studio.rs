@@ -17,6 +17,7 @@ static GENERATIONS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(3
 #[derive(Deserialize)]
 pub struct GenerateRequest {
     person_id: Uuid,
+    model: Option<String>,
     foreground_id: Option<Uuid>,
     background_id: Option<Uuid>,
     season: String,
@@ -38,21 +39,41 @@ pub struct GenerateResponse {
 }
 
 impl GenerateRequest {
+    fn resolved_model(&self) -> Result<&str, crate::infrastructure::web::response::ApiError> {
+        match self
+            .model
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            None | Some("gpt-image-2-dev") => Ok("gpt-image-2-dev"),
+            Some("gemini-3.1-flash-lite-image") => Ok("gemini-3.1-flash-lite-image"),
+            Some("gpt-image-2") => Ok("gpt-image-2"),
+            _ => Err(invalid_input("请选择页面支持的图片模型")),
+        }
+    }
+
     fn prompt(&self) -> Result<String, crate::infrastructure::web::response::ApiError> {
         if !(1..=30).contains(&self.count) || self.variant >= self.count {
             return Err(invalid_input(
                 "生成数量必须为1–30，序号必须在生成数量范围内",
             ));
         }
-        let season = match self.season.as_str() {
-            "spring" => "春季，轻薄长袖外套",
-            "summer" => "夏季，透气短袖上衣",
-            "autumn" => "秋季，长袖夹克",
-            "winter" => "冬季，保暖厚外套",
+        let (season, clothes) = match self.season.as_str() {
+            "spring" => (
+                "春季",
+                ["普通工装薄夹克", "拉链运动薄外套", "宽松连帽薄外套"],
+            ),
+            "summer" => ("夏季", ["宽松短袖T恤", "普通短袖Polo衫", "透气工装短袖"]),
+            "autumn" => ("秋季", ["普通工装夹克", "休闲拉链外套", "宽松连帽卫衣"]),
+            "winter" => (
+                "冬季",
+                ["日常保暖棉服", "普通厚工装外套", "宽松连帽保暖外套"],
+            ),
             _ => return Err(invalid_input("请选择春、夏、秋、冬")),
         };
         let mut prompt = String::from(
-            "对第一张人像照片做局部编辑，不要重新设计人物、拍摄地点或镜头。严格保留同一个人的五官、年龄、发型及身份特征。原图戴安全帽才保留同一顶；原图没有安全帽时绝对不要添加任何安全帽或帽子。保留原图的眼镜、表情、肤色、脸部纹理和真实年龄，不美化、不改变身份。人物为画面主体，只能有一个人，不加文字、水印或边框。自然匹配光照和透视。“进场”仅用于文件分类，不代表要拍摄进门、签到或操作设备的场景。",
+            "根据第一张人像照片编辑服装和人物姿态，不要重新设计拍摄地点或换一个人。严格保留同一个人的五官、年龄、发型及身份特征。原图戴安全帽才保留同一顶；原图没有安全帽时绝对不要添加任何安全帽或帽子。保留原图的眼镜、肤色、脸部纹理和真实年龄，不美化、不改变身份。表情允许自然放松或微小变化，不必照搬原图的正面严肃表情。人物为画面主体，只能有一个人，不加文字、水印或边框。自然匹配光照和透视。“进场”仅用于文件分类，不代表要拍摄进门、签到或操作设备的场景。",
         );
         prompt.push_str(CAMERA_STYLE);
         let mut reference = 2;
@@ -81,9 +102,9 @@ impl GenerateRequest {
             "橄榄绿",
         ];
         if self.change_clothes {
-            let style = ["简洁纯色款", "拼色款", "带口袋的工装款"][self.variant / 10];
+            let style = clothes[self.variant % clothes.len()];
             prompt.push_str(&format!(
-                "换成适合{season}的{}{}，本批共{}套，这是第{}套，每套服装款式和颜色应不同。只编辑衣服所在区域，使用普通日常工作服的真实布料和自然褶皱，适度使用感要与原照片一致，不刻意制造污渍、不做整洁精致的服装广告；不能因为换衣服重绘人物的脸或背景。",
+                "换成适合{season}的{}{}，本批共{}套，这是第{}套，每套服装款式和颜色应不同。使用普通日常工作服的真实布料、自然褶皱和宽松随意的穿着，不做笔挺的衬衫证件照、制服展示或服装广告。适度使用感与原照片一致，不刻意制造污渍；身体姿态改变时衣服布料可以自然随姿态变化，不能因此改变人物的身份或场景。",
                 colors[self.variant % 10],
                 style,
                 self.count,
@@ -93,26 +114,10 @@ impl GenerateRequest {
             prompt.push_str("保持原图服装完全不变。");
         }
         if self.change_pose {
-            let poses = [
-                "肩膀保持放松，仅轻微调整身体重心",
-                "肩膀轻微向左转，幅度不超过5度",
-                "肩膀轻微向右转，幅度不超过5度",
-                "肩膀一侧轻微降低，保持原图的自然姿态",
-                "身体轻微前倾，保持原图的自然姿态",
-                "身体轻微后移，保持原图的自然姿态",
-            ];
-            let head_poses = [
-                "头部保持正直",
-                "头部轻微向左倾斜",
-                "头部轻微向右倾斜",
-                "下巴微抬，目光看向镜头",
-                "下巴微收，目光看向镜头",
-            ];
             prompt.push_str(&format!(
-                "只做轻微自然姿态变化：{}，{}。这是第{}张，动作必须与原图有小幅区别，但不改变人物大小、取景范围、光照或背景。保持自然随意，不摆拍，不做夸张手势；手部若原图未入镜，则不得为展示动作扩大取景或新增手部。脸部正常可辨认，保持人体比例自然，不要过度锐化。",
-                poses[self.variant % poses.len()],
-                head_poses[self.variant / poses.len()],
-                self.variant + 1
+                "必须做明显可见的自然动作变化：{}。{}。变化以身体转向、头部角度、视线或手臂位置体现，不能只微调几像素后照搬原图。让人像随手抓拍一样轻松随意，不要笔直、对称、肩膀水平的正襟危坐或证件照，不强制直盯镜头，不做夸张表演。保持近景和面部可辨认，允许在原构图范围内重绘姿态所需的人体与布料，不改变背景或新增道具。",
+                ENTRY_POSES[self.variant % ENTRY_POSES.len()],
+                GAZES[(self.variant / ENTRY_POSES.len()) % GAZES.len()],
             ));
         } else {
             prompt.push_str("保持原图动作和姿态不变。");
@@ -147,15 +152,41 @@ async fn load_image(
 // 实测考勤样本主要为480×480 JPEG、约14–18KB；输出上限20KB。
 const ATTENDANCE_SIZE: u32 = 480;
 const ATTENDANCE_MAX_BYTES: usize = 20 * 1024;
-const CAMERA_STYLE: &str = "只输出普通现场近景照片，保持来源照片的真实光照、白平衡、曝光、皮肤纹理和自然成像质感。固定参考图中的场景与物体；参考图里没有的考勤机、刷卡器、闸机、屏幕、卡片、门禁及其他设备一律不得添加，原本存在的物体也不能移动、替换或重绘。不得新增刷卡、按键、摸机器、举卡、走路或摆拍等情节。不要高清商业摄影、棚拍布光、美颜磨皮、过度锐化、电影感或精致广告效果。不要人为添加噪点、运动模糊、灰尘、污渍或杂乱材料来伪装真实，也不要清理、美化或重建原场景。匹配原人像的近景取景，不扩展成半身、全身或全景照；保留原有照片内容，再适配正方形输出，不凭空补出环境、手臂或道具。";
+const ENTRY_POSES: [&str; 6] = [
+    "上半身向左转约30度，头部向右转约15度，一侧肩膀靠前，重心自然偏向一侧",
+    "上半身向右转约30度，头部向左转约15度，肩膀放松并有自然高低差",
+    "身体稍微侧向左方，一只手在胸口附近轻轻整理自己的衣领，头部自然微倾",
+    "身体稍微侧向右方，一只手轻轻整理另一侧袖口，低头约10度但面部仍可见",
+    "身体重心偏向左侧，头部向右转约20度，下巴微抬，表情自然放松",
+    "身体重心偏向右侧，头部向左转约20度，下巴略收，姿态轻松随意",
+];
+const EXIT_POSES: [&str; 6] = [
+    "上半身转向右方约30度，头部轻转向左约15度，肩膀与第一张呈相反方向",
+    "上半身转向左方约30度，头部轻转向右约15度，肩膀与第一张呈相反方向",
+    "放下整理衣领的手，身体向右转约30度，头部轻转向左，肩膀自然放松",
+    "放下整理袖口的手，身体向左转约30度，略微抬头，视线自然偏向镜头旁边",
+    "身体重心换到右侧，头部向左转约20度，一侧肩膀靠前，改变原有头部方向",
+    "身体重心换到左侧，头部向右转约20度，略微抬头，改变原有头部方向",
+];
+const GAZES: [&str; 5] = [
+    "视线自然看向镜头旁边",
+    "视线轻微偏向左侧",
+    "视线轻微偏向右侧",
+    "自然看向镜头但不刻意摆出表情",
+    "嘴角和眼神放松，保持自然表情",
+];
+const CAMERA_STYLE: &str = "输出普通现场随手抓拍的近景照片，保持参考图的实际光照、白平衡、曝光、皮肤纹理和年龄特征。人物看起来轻松自然，不要证件照、正面笔直对称站姿、摆拍宣传照或精致广告效果。只保留参考图里的场景和物品；没有的考勤机、刷卡器、闸机、屏幕、卡片、门禁及其他设备一律不得添加，不要凭空新增刷卡、按键、摸机器或举卡等情节。不要高清商业摄影、棚拍布光、美颜磨皮、过度锐化或电影感。不要人为添加噪点、运动模糊、灰尘、污渍或杂乱材料，也不要美化或重建背景。保持原来的胸口以上近景取景，不扩展成全身或全景照；姿态变化允许身体在画面里自然转动，头部和手臂可以随动作调整，但不能因此补出新场景、道具或别的人。";
 
 impl GenerateRequest {
     fn exit_prompt(&self) -> String {
         let mut prompt = String::from(
-            "第一张图是本套已经生成的第一张照片。以它作为唯一图像依据做最小范围局部编辑，得到同一个人的第二张自然近景照片。“出场”仅用于文件分类，不代表离场动作或任何操作设备的情节。严格保持五官、发型、衣服的款式、颜色、图案、口袋、层次、褶皱和污渍完全一致，绝对不能换衣服或换颜色。进场图有安全帽才保留同一顶，进场图没有安全帽时绝对不要添加帽子。保留同样的前景和背景环境、画面中只能有一个人。",
+            "第一张图是本套已经生成的第一张照片。以它作为唯一图像依据，保持同一个人和同一套衣服，得到动作明显不同的第二张自然近景照片。“出场”仅用于文件分类，不代表离场动作或任何操作设备的情节。严格保持五官、发型、衣服的款式、颜色、图案、口袋和层次一致，布料褶皱可以随动作自然变化，绝对不能换衣服或换颜色。进场图有安全帽才保留同一顶，进场图没有安全帽时绝对不要添加帽子。保留同样的前景和背景环境、画面中只能有一个人。",
         );
         if self.change_pose {
-            prompt.push_str("只改变人物的小幅姿态：头部左右轻转或轻微倾斜不超过5度，或肩膀轻微放松；动作必须与进场图有自然区别，面部仍自然朝向镜头。保持原图的手臂位置和取景，不迈步、不伸手、不刷卡、不按键、不叉腰、不摆拍、不改变衣服，不移动镜头或场景中的任何物体。");
+            prompt.push_str(&format!(
+                "第二张必须以第一张当前朝向为依据做明显反向变化：第一张脸朝画面右侧时，第二张脸必须转向画面左侧，反之亦然；第一张若是正面，则第二张明显侧转约30度。让第一张靠近镜头的肩膀后退、另一侧肩膀靠前，形成相反的肩膀线条，不能保持原来的身体和头部方向。动作参考：{}，但若该参考与第一张方向相同，必须以反向规则优先。若第一张有整理衣领或袖口的手势，第二张把手自然放下。与第一张的身体方向、头部角度或手臂位置至少有一项明显不同。不要生成第一张的近似复制品，不要仅微调眼睛或几像素。人物自然随意、肩膀放松，允许调整视线和轻微表情，并在原构图内重绘姿态所需的身体与衣物；不得改变衣服款式、人物身份、光照或背景，不添加道具、刷卡、按键等情节。",
+                EXIT_POSES[self.variant % EXIT_POSES.len()],
+            ));
         } else {
             prompt.push_str(
                 "保持进场图的人物动作和姿态不变，仅允许自然轻微的表情变化，不改变衣服、镜头或场景。",
@@ -274,6 +305,7 @@ pub async fn generate(
     let prompt = body.prompt()?;
     let mut config = state.config.photo_composite.clone();
     config.ephone_ai_image_size = "1024x1024".into();
+    config.ephone_ai_image_model = body.resolved_model()?.to_string();
     let client = CompositeClient::new(config);
     if !client.is_enabled() {
         return Err(invalid_input("AI合成服务尚未配置"));
@@ -303,6 +335,7 @@ mod tests {
     fn request() -> GenerateRequest {
         GenerateRequest {
             person_id: Uuid::nil(),
+            model: None,
             foreground_id: None,
             background_id: None,
             season: "spring".into(),
@@ -365,6 +398,23 @@ mod tests {
     }
 
     #[test]
+    fn studio_models_are_budget_bounded_and_pose_pairs_are_distinct() {
+        let mut req = request();
+        assert_eq!(req.resolved_model().unwrap(), "gpt-image-2-dev");
+        req.model = Some("gemini-3.1-flash-lite-image".into());
+        assert_eq!(req.resolved_model().unwrap(), "gemini-3.1-flash-lite-image");
+        req.model = Some("arbitrary-expensive-model".into());
+        assert!(req.resolved_model().is_err());
+        for variant in 0..30 {
+            req.variant = variant;
+            assert_ne!(ENTRY_POSES[variant % 6], EXIT_POSES[variant % 6]);
+            assert!(req.prompt().unwrap().contains("必须做明显可见"));
+            assert!(req.exit_prompt().contains("不要生成第一张的近似复制品"));
+            assert!(!req.prompt().unwrap().contains("不超过5度"));
+        }
+    }
+
+    #[test]
     fn attendance_output_matches_camera_size_and_retry_limits() {
         let jpeg = attendance_jpeg(&test_png()).unwrap();
         assert!(jpeg.len() <= 20 * 1024);
@@ -388,12 +438,12 @@ mod tests {
         );
         let exit = req.exit_prompt();
         assert!(exit.contains("绝对不能换衣服或换颜色"));
-        assert!(exit.contains("动作必须与进场图有自然区别"));
+        assert!(exit.contains("至少有一项明显不同"));
         assert!(exit.contains("进场图没有安全帽时绝对不要添加"));
         assert!(exit.contains("不要高清商业摄影"));
         req.change_pose = false;
         assert!(req.exit_prompt().contains("动作和姿态不变"));
-        assert!(!req.exit_prompt().contains("动作必须与进场图有自然区别"));
+        assert!(!req.exit_prompt().contains("至少有一项明显不同"));
     }
 
     #[test]
@@ -401,12 +451,12 @@ mod tests {
         let mut req = request();
         for prompt in [req.prompt().unwrap(), req.exit_prompt()] {
             assert!(prompt.contains("一律不得添加"));
-            assert!(prompt.contains("不摆拍"));
+            assert!(prompt.contains("不要证件照"));
             assert!(!prompt.contains("在考勤设备前"));
             assert!(!prompt.contains("朝向考勤设备"));
             assert!(!prompt.contains("正准备离开工地"));
             assert!(!prompt.contains("工地考勤机近景抓拍"));
-            assert!(prompt.contains("不扩展成半身、全身或全景照"));
+            assert!(prompt.contains("不扩展成全身或全景照"));
             assert!(prompt.contains("不要人为添加噪点"));
         }
         for variant in 0..30 {
@@ -415,7 +465,9 @@ mod tests {
             assert!(!prompt.contains("一只手自然叉腰"));
             assert!(!prompt.contains("双手自然放在身前"));
             assert!(!prompt.contains("自然迈步"));
-            assert!(prompt.contains("不改变人物大小"));
+            assert!(prompt.contains("明显可见"));
+            assert!(!prompt.contains("不超过5度"));
+            assert!(!prompt.contains("最小范围局部编辑"));
         }
     }
 
@@ -502,5 +554,50 @@ mod tests {
             assert!(!String::from_utf8_lossy(call).contains("original-person"));
         }
         server.abort();
+    }
+    #[tokio::test]
+    #[ignore = "Live ephone verification; performs paid image requests only when explicitly run"]
+    async fn live_ephone_dev_pair_smoke() {
+        dotenvy::from_path(".env").ok();
+        let source = std::env::var("PHOTO_REAL_REF_IMAGE").expect("test reference path required");
+        let bytes = std::fs::read(source).unwrap();
+        let person = crate::infrastructure::image_compression::compress_to_jpeg_below_async(
+            bytes,
+            2 * 1024 * 1024,
+        )
+        .await
+        .unwrap();
+        let client = CompositeClient::new(crate::infrastructure::config::PhotoCompositeConfig {
+            ephone_ai_api_key: Some(std::env::var("EPHONE_AI_API_KEY").unwrap()),
+            ephone_ai_base_url: "https://api.ephone.ai/v1".into(),
+            ephone_ai_image_model: "gpt-image-2-dev".into(),
+            ephone_ai_image_size: "1024x1024".into(),
+            ephone_ai_timeout_secs: 240,
+            concurrency: 30,
+            poll_seconds: 5,
+            lease_secs: 60,
+        });
+        let mut req = request();
+        req.count = 1;
+        if let Ok(path) = std::env::var("PHOTO_REAL_ENTRY_IMAGE") {
+            req.entry_image = Some(image_uri(&std::fs::read(path).unwrap()));
+        }
+        let pair = generate_pair(&client, &req, &[person], &req.prompt().unwrap())
+            .await
+            .unwrap();
+        assert!(
+            pair.out_error.is_none(),
+            "exit failed: {:?}",
+            pair.out_error
+        );
+        let entry = decode_entry_image(&pair.in_image).unwrap();
+        let exit = decode_entry_image(pair.out_image.as_deref().unwrap()).unwrap();
+        std::fs::write("/tmp/shanhuai-live-entry.jpg", &entry).unwrap();
+        std::fs::write("/tmp/shanhuai-live-exit.jpg", &exit).unwrap();
+        println!(
+            "Live Dev pair passed: entry {} bytes, exit {} bytes, both 480x480 JPEG",
+            entry.len(),
+            exit.len()
+        );
     }
 }

@@ -11,6 +11,7 @@ import { imageZip, saveBlob } from "./download";
 type ImageSlot = "person" | "foreground" | "background";
 type Uploaded = { id: string; url: string };
 type Payload = {
+  model: string;
   person_id: string;
   foreground_id?: string;
   background_id?: string;
@@ -50,6 +51,7 @@ export function PhotoProcessingPage() {
   >({});
   const [count, setCount] = useState(6);
   const [season, setSeason] = useState("spring");
+  const [model, setModel] = useState("gpt-image-2-dev");
   const [changeClothes, setChangeClothes] = useState(true);
   const [changePose, setChangePose] = useState(true);
   const [results, setResults] = useState<Result[]>([]);
@@ -158,6 +160,7 @@ export function PhotoProcessingPage() {
   const start = async () => {
     if (!images.person || hasUpload || inFlight.current) return;
     const payload: Payload = {
+      model,
       person_id: images.person.id,
       foreground_id: images.foreground?.id,
       background_id: images.background?.id,
@@ -283,6 +286,30 @@ export function PhotoProcessingPage() {
           15MB。
         </p>
         <div className="space-y-4 border-t pt-5">
+          <div className="space-y-2">
+            <label htmlFor="photo-model" className="block text-sm font-medium">
+              图片模型
+            </label>
+            <select
+              id="photo-model"
+              value={model}
+              disabled={busy}
+              onChange={(event) => setModel(event.target.value)}
+              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm sm:max-w-md"
+            >
+              <option value="gpt-image-2-dev">
+                经济 · GPT Image 2 Dev（默认）
+              </option>
+              <option value="gemini-3.1-flash-lite-image">
+                自然 · Nano Banana Lite
+              </option>
+              <option value="gpt-image-2">原模型 · GPT Image 2</option>
+            </select>
+            <p className="text-xs text-muted-foreground">
+              经济模型市场标价 $0.009 / 次，约 $0.018 /
+              套；其余模型按用量计费，实际扣费以 ephone 账号线路为准。
+            </p>
+          </div>
           <div className="flex flex-wrap gap-6">
             <label className="flex cursor-pointer items-center gap-2 text-sm">
               <input

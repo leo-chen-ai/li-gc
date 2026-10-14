@@ -10,6 +10,8 @@
 use base64::{Engine as _, engine::general_purpose};
 use bytes::Bytes;
 use serde::Deserialize;
+use serde_json::{Value, json};
+use std::time::{Duration, Instant};
 
 use crate::infrastructure::config::PhotoCompositeConfig;
 
@@ -72,7 +74,8 @@ impl CompositeClient {
             .timeout(std::time::Duration::from_secs(
                 config.ephone_ai_timeout_secs,
             ))
-            .connect_timeout(std::time::Duration::from_secs(10))
+            .connect_timeout(std::time::Duration::from_secs(30))
+            .user_agent("Mozilla/5.0 (compatible; ShanhuaiPhoto/1.0)")
             .build()
             .unwrap_or_else(|error| {
                 tracing::error!(error = %error, "构建照片合成HTTP客户端失败，退回默认客户端");
@@ -116,10 +119,14 @@ impl CompositeClient {
         if images.is_empty() || images.iter().any(|image| image.is_empty()) {
             return Err(CompositeError::BadImage("输入图片为空".to_string()));
         }
+        if self.config.ephone_ai_image_model == "gpt-image-2-dev" {
+            return self.compose_async_images(images, prompt).await;
+        }
         let mut form = reqwest::multipart::Form::new()
             .text("model", self.config.ephone_ai_image_model.clone())
             .text("prompt", prompt.to_string())
-            .text("size", self.config.ephone_ai_image_size.clone());
+            .text("size", self.config.ephone_ai_image_size.clone())
+            .text("response_format", "b64_json");
         for (index, image) in images.iter().enumerate() {
             let part = reqwest::multipart::Part::bytes(image.to_vec())
                 .file_name(format!("reference-{index}.jpg"))
@@ -139,7 +146,7 @@ impl CompositeClient {
             .multipart(form)
             .send()
             .await
-            .map_err(|error| CompositeError::Transport(format!("{url}: {error}")))?;
+            .map_err(|error| self.transport_error(error, "图片编辑"))?;
 
         let status = response.status();
         let body = response
@@ -181,6 +188,246 @@ impl CompositeClient {
             bytes,
             generation_id: datum.generation_id,
         })
+    }
+    fn transport_error(&self, error: reqwest::Error, phase: &str) -> CompositeError {
+        tracing::warn!(model = %self.config.ephone_ai_image_model, phase, timeout = error.is_timeout(), connect = error.is_connect(), error = ?error, "AI图片请求失败，保留完整底层错误用于排障");
+        let reason = if error.is_timeout() {
+            "请求超时"
+        } else if error.is_connect() {
+            "连接失败"
+        } else {
+            "网络连接中断"
+        };
+        CompositeError::Transport(format!("AI服务{phase}{reason}，请稍后重试"))
+    }
+
+    async fn task_json(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<&Value>,
+    ) -> CompositeResult<Value> {
+        let url = format!(
+            "{}{}",
+            self.config.ephone_ai_base_url.trim_end_matches('/'),
+            path
+        );
+        let key = self
+            .config
+            .ephone_ai_api_key
+            .as_deref()
+            .ok_or(CompositeError::NotConfigured)?;
+        let read_only = method == reqwest::Method::GET;
+        for attempt in 0..3 {
+            let mut request = self
+                .http
+                .request(method.clone(), &url)
+                .bearer_auth(key)
+                .timeout(Duration::from_secs(30));
+            if let Some(body) = body {
+                request = request.json(body);
+            }
+            let response = match request.send().await {
+                Ok(response) => response,
+                Err(error) => {
+                    // 查询可安全重试；提交仅在连接尚未建立时重试，避免重复扣费。
+                    if attempt < 2 && (read_only || error.is_connect()) {
+                        tokio::time::sleep(Duration::from_millis(500 * (1 << attempt))).await;
+                        continue;
+                    }
+                    return Err(self.transport_error(
+                        error,
+                        if read_only {
+                            "查询任务"
+                        } else {
+                            "提交任务"
+                        },
+                    ));
+                }
+            };
+            let status = response.status();
+            if read_only && attempt < 2 && (status.as_u16() == 429 || status.is_server_error()) {
+                tokio::time::sleep(Duration::from_millis(500 * (1 << attempt))).await;
+                continue;
+            }
+            let bytes = response
+                .bytes()
+                .await
+                .map_err(|error| self.transport_error(error, "读取任务结果"))?;
+            if !status.is_success() {
+                return Err(CompositeError::Upstream(format!(
+                    "HTTP {status} {}",
+                    extract_upstream_error(&bytes).unwrap_or_else(|| truncate(&bytes))
+                )));
+            }
+            return serde_json::from_slice(&bytes)
+                .map_err(|_| CompositeError::Upstream("任务响应不是合法JSON".into()));
+        }
+        Err(CompositeError::Transport(
+            "AI任务查询失败，请稍后重试".into(),
+        ))
+    }
+
+    async fn compose_async_images(
+        &self,
+        images: &[&[u8]],
+        prompt: &str,
+    ) -> CompositeResult<CompositeOutput> {
+        // 单阶段总等待窗口包含提交、轮询和下载，两阶段可落在前端10分钟窗口内。
+        let started = Instant::now();
+        let deadline = Duration::from_secs(self.config.ephone_ai_timeout_secs.max(240));
+        // ephone Dev模型官方文档指定/v1/task/submit，不支持直接换模型名调用同步编辑。
+        let refs: Vec<String> = images
+            .iter()
+            .map(|bytes| {
+                format!(
+                    "data:image/jpeg;base64,{}",
+                    general_purpose::STANDARD.encode(bytes)
+                )
+            })
+            .collect();
+        let body = json!({"model": self.config.ephone_ai_image_model, "input": {
+            "prompt": prompt, "images": refs, "size": self.config.ephone_ai_image_size,
+            "quality": "medium", "n": 1, "response_format": "url"
+        }});
+        let submitted = tokio::time::timeout(
+            deadline,
+            self.task_json(reqwest::Method::POST, "/task/submit", Some(&body)),
+        )
+        .await
+        .map_err(|_| CompositeError::Transport("AI任务提交等待超时".into()))??;
+        let id = submitted
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|id| {
+                !id.is_empty()
+                    && id.len() <= 128
+                    && id
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+            })
+            .ok_or_else(|| CompositeError::Upstream("提交任务未返回合法任务ID".into()))?;
+        tracing::info!(model = %self.config.ephone_ai_image_model, task_id = id, "AI图片异步任务已提交");
+        loop {
+            let remaining = deadline.checked_sub(started.elapsed()).ok_or_else(|| {
+                CompositeError::Transport("AI生成任务仍在排队或处理中，本次等待已超时".into())
+            })?;
+            let result = tokio::time::timeout(
+                remaining,
+                self.task_json(reqwest::Method::GET, &format!("/task/{id}"), None),
+            )
+            .await
+            .map_err(|_| CompositeError::Transport("AI生成任务等待超时".into()))??;
+            match result.get("status").and_then(Value::as_str) {
+                Some("completed") => {
+                    let output = result
+                        .get("outputs")
+                        .and_then(Value::as_array)
+                        .and_then(|a| a.first())
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| CompositeError::Upstream("任务完成但没有图片结果".into()))?;
+                    let remaining = deadline
+                        .checked_sub(started.elapsed())
+                        .ok_or_else(|| CompositeError::Transport("AI结果下载等待超时".into()))?;
+                    let bytes = tokio::time::timeout(remaining, async {
+                        let mut downloaded = self.download_image(output).await;
+                        for attempt in 0..2 {
+                            if !matches!(&downloaded, Err(CompositeError::Transport(_))) {
+                                break;
+                            }
+                            // 已完成任务只重试下载，不重新提交付费生成。
+                            tokio::time::sleep(Duration::from_millis(500 * (1 << attempt))).await;
+                            downloaded = self.download_image(output).await;
+                        }
+                        downloaded
+                    })
+                    .await
+                    .map_err(|_| CompositeError::Transport("AI结果下载等待超时".into()))??;
+                    tracing::info!(model = %self.config.ephone_ai_image_model, task_id = id, elapsed_secs = started.elapsed().as_secs(), "AI图片异步任务完成");
+                    return Ok(CompositeOutput {
+                        bytes,
+                        generation_id: Some(id.to_string()),
+                    });
+                }
+                Some("failed") => {
+                    return Err(CompositeError::Upstream(
+                        result
+                            .get("error")
+                            .and_then(Value::as_str)
+                            .unwrap_or("AI图片生成任务失败")
+                            .to_string(),
+                    ));
+                }
+                Some("queued" | "in_progress" | "pending" | "processing") => {
+                    tokio::time::sleep(Duration::from_secs(4).min(remaining)).await;
+                }
+                _ => return Err(CompositeError::Upstream("AI任务返回未知状态".into())),
+            }
+        }
+    }
+
+    async fn download_image(&self, raw: &str) -> CompositeResult<Vec<u8>> {
+        if let Some(encoded) = raw
+            .strip_prefix("data:image/png;base64,")
+            .or_else(|| raw.strip_prefix("data:image/jpeg;base64,"))
+        {
+            let bytes = general_purpose::STANDARD
+                .decode(encoded)
+                .map_err(|_| CompositeError::BadImage("图片Base64格式错误".into()))?;
+            if bytes.len() > MAX_OUTPUT_BYTES {
+                return Err(CompositeError::BadImage("图片超过20MB".into()));
+            }
+            return Ok(bytes);
+        }
+        let url = reqwest::Url::parse(raw)
+            .map_err(|_| CompositeError::Upstream("结果图片地址无效".into()))?;
+        let trusted = url.scheme() == "https"
+            && url.username().is_empty()
+            && url.password().is_none()
+            && url.port().is_none()
+            && url.host_str().is_some_and(|host| {
+                host == "storage.fonedis.cc"
+                    || host.ends_with(".fonedis.cc")
+                    || host == "api.ephone.ai"
+                    || host.ends_with(".ephone.ai")
+            });
+        if !trusted {
+            return Err(CompositeError::Upstream(
+                "结果图片来自不受信任的地址".into(),
+            ));
+        }
+        // 独立禁重定向客户端，不发送API密钥到对象存储，也不跟随到其它内网地址。
+        let http = reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .user_agent("Mozilla/5.0 (compatible; ShanhuaiPhoto/1.0)")
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|_| CompositeError::Transport("创建结果下载请求失败".into()))?;
+        let mut response = http
+            .get(url)
+            .send()
+            .await
+            .map_err(|error| self.transport_error(error, "下载结果"))?
+            .error_for_status()
+            .map_err(|error| self.transport_error(error, "下载结果"))?;
+        if response
+            .content_length()
+            .is_some_and(|n| n > MAX_OUTPUT_BYTES as u64)
+        {
+            return Err(CompositeError::BadImage("结果图片超过20MB".into()));
+        }
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|error| self.transport_error(error, "读取图片"))?
+        {
+            if bytes.len() + chunk.len() > MAX_OUTPUT_BYTES {
+                return Err(CompositeError::BadImage("结果图片超过20MB".into()));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        Ok(bytes)
     }
 }
 
@@ -337,5 +584,90 @@ mod tests {
             lease_secs: 60,
         });
         assert!(!client.is_enabled());
+    }
+    #[tokio::test]
+    async fn async_dev_uses_one_submit_and_retries_only_status_reads() {
+        use axum::{
+            Router,
+            extract::State,
+            http::StatusCode,
+            response::IntoResponse,
+            routing::{get, post},
+        };
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        struct Counts {
+            submits: AtomicUsize,
+            reads: AtomicUsize,
+        }
+        let counts = Arc::new(Counts {
+            submits: AtomicUsize::new(0),
+            reads: AtomicUsize::new(0),
+        });
+        let app = Router::new()
+            .route(
+                "/task/submit",
+                post(
+                    |State(c): State<Arc<Counts>>, axum::Json(body): axum::Json<Value>| async move {
+                        c.submits.fetch_add(1, Ordering::SeqCst);
+                        assert_eq!(body["model"], "gpt-image-2-dev");
+                        assert_eq!(body["input"]["n"], 1);
+                        assert_eq!(body["input"]["quality"], "medium");
+                        assert!(
+                            body["input"]["images"][0]
+                                .as_str()
+                                .unwrap()
+                                .starts_with("data:image/jpeg;base64,")
+                        );
+                        axum::Json(json!({"id":"task_test", "status":"queued"}))
+                    },
+                ),
+            )
+            .route(
+                "/task/task_test",
+                get(|State(c): State<Arc<Counts>>| async move {
+                    if c.reads.fetch_add(1, Ordering::SeqCst) == 0 {
+                        return (
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            axum::Json(json!({"error":{"message":"temporary"}})),
+                        )
+                            .into_response();
+                    }
+                    axum::Json(
+                        json!({"status":"completed","outputs":["data:image/png;base64,aW1hZ2U="]}),
+                    )
+                    .into_response()
+                }),
+            )
+            .with_state(Arc::clone(&counts));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let client = CompositeClient::new(PhotoCompositeConfig {
+            ephone_ai_api_key: Some("test".into()),
+            ephone_ai_base_url: format!("http://{address}"),
+            ephone_ai_image_model: "gpt-image-2-dev".into(),
+            ephone_ai_image_size: "1024x1024".into(),
+            ephone_ai_timeout_secs: 5,
+            concurrency: 30,
+            poll_seconds: 5,
+            lease_secs: 60,
+        });
+        let output = client.compose_images(&[b"jpeg"], "prompt").await.unwrap();
+        assert_eq!(output.bytes, b"image");
+        assert_eq!(output.generation_id.as_deref(), Some("task_test"));
+        assert_eq!(counts.submits.load(Ordering::SeqCst), 1);
+        assert_eq!(counts.reads.load(Ordering::SeqCst), 2);
+        for url in [
+            "http://127.0.0.1/private",
+            "https://127.0.0.1/private",
+            "https://storage.fonedis.cc.evil.test/a",
+            "https://u:p@storage.fonedis.cc/a",
+        ] {
+            assert!(client.download_image(url).await.is_err());
+        }
+        server.abort();
     }
 }
