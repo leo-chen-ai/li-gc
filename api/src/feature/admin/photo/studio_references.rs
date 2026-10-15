@@ -24,6 +24,10 @@ pub struct SampleRequest {
 pub struct Reference {
     record_id: Uuid,
     out_record_id: Uuid,
+    #[sqlx(default)]
+    in_photo: Option<String>,
+    #[sqlx(default)]
+    out_photo: Option<String>,
 }
 
 // 两条查询共用同一真实来源条件，指定ID也不能绕过时间、来源和授权过滤。
@@ -154,7 +158,7 @@ pub async fn sample(
         return Err(invalid_input("参考照片数量必须为1–30"));
     }
     let mut query = pair_query(body.project_id, &user, body.count);
-    let rows = query
+    let mut rows = query
         .build_query_as::<Reference>()
         .fetch_all(state.db.pool())
         .await
@@ -167,6 +171,26 @@ pub async fn sample(
             "所选项目近7天只有{}位具有同日进出场原图的设备考勤人员，请减少套数或更换项目；不会重复使用同一人的照片",
             rows.len()
         )));
+    }
+    // 仅查询本次抽中的至多60条原图，与生成端共用来源/项目权限过滤；不下载或重新生成图片。
+    let ids: Vec<Uuid> = rows
+        .iter()
+        .flat_map(|row| [row.record_id, row.out_record_id])
+        .collect();
+    let mut photos = filtered_query("SELECT r.id,photo.photo_data", body.project_id, &user);
+    photos.push(" AND r.id=ANY(").push_bind(ids).push(")");
+    let photos = photos
+        .build_query_as::<(Uuid, String)>()
+        .fetch_all(state.db.pool())
+        .await
+        .map_err(|error| {
+            tracing::error!(%error,"读取参考原图预览失败");
+            internal_error("读取参考原图预览失败")
+        })?;
+    let photos: std::collections::HashMap<_, _> = photos.into_iter().collect();
+    for row in &mut rows {
+        row.in_photo = photos.get(&row.record_id).cloned();
+        row.out_photo = photos.get(&row.out_record_id).cloned();
     }
     ok(rows)
 }

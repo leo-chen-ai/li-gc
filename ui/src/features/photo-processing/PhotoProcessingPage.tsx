@@ -7,7 +7,8 @@ import type { ApiResponse } from "@/lib/api/types";
 import { ProjectSearchSelect } from "@/features/projects/components/ProjectSearchSelect";
 import { Input } from "@/components/ui/input";
 import { constructionProjectService } from "@/features/projects/services/construction-project-service";
-import { prepareStudioReferences } from "./references";
+import { prepareStudioReferences, type AttendanceReference } from "./references";
+import { ReferencePhotos } from "./ReferencePhotos";
 import { imageZip, saveBlob } from "./download";
 import { generatePhotoPair, PhotoJobError } from "./generation";
 
@@ -21,7 +22,7 @@ type Payload = {
   background_out_record_id?: string;
   in_scene_image?: string;
   out_scene_image?: string;
-  references?: { record_id: string; out_record_id: string }[];
+  references?: AttendanceReference[];
   season: string;
   count: number;
   change_clothes: boolean;
@@ -63,6 +64,7 @@ export function PhotoProcessingPage() {
   const [changeClothes, setChangeClothes] = useState(true);
   const [changePose, setChangePose] = useState(true);
   const [results, setResults] = useState<Result[]>([]);
+  const [referenceBatch, setReferenceBatch] = useState<AttendanceReference[]>([]);
   const inputs = useRef<Partial<Record<ImageSlot, HTMLInputElement | null>>>(
     {},
   );
@@ -196,7 +198,7 @@ export function PhotoProcessingPage() {
         payload = preparation.current.payload;
       } else {
         const response = await apiClient.post<
-          ApiResponse<{ record_id: string; out_record_id: string }[]>
+          ApiResponse<AttendanceReference[]>
         >("/admin/photo-processing/studio-references", { project_id: projectId, count });
         const references = response.data.data;
         if (!references || references.length !== count) {
@@ -205,6 +207,8 @@ export function PhotoProcessingPage() {
         Object.assign(payload, prepareStudioReferences(references));
         preparation.current = { key, payload, jobId: crypto.randomUUID() };
       }
+      setReferenceBatch(payload.references ?? []);
+      setResults([]);
       const setup = preparation.current!;
       const { references, ...settings } = payload;
       const scenes = await generatePhotoPair({
@@ -474,6 +478,13 @@ export function PhotoProcessingPage() {
           </div>
         </div>
       </section>
+      {referenceBatch[0] && (
+        <ReferencePhotos
+          reference={referenceBatch[0]}
+          title="本批固定背景的来源原图"
+          description="整批共用这两张原图的背景：去除参考人员后，分别作为进场、出场背景。下方每套另列该套抽中的进出场原图。"
+        />
+      )}
       {results.length > 0 && (
         <section className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -520,6 +531,15 @@ export function PhotoProcessingPage() {
                           : "生成失败"}
                   </span>
                 </div>
+                {referenceBatch[item.index] && (
+                  <div className="border-b p-3">
+                    <ReferencePhotos
+                      reference={referenceBatch[item.index]}
+                      title="本套抽取的参考原图"
+                      description="换装时参考进场原图；出场人物沿用本套已生成的进场图。出场原图供对照，背景以本批固定来源为准。"
+                    />
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-px bg-border">
                   {(
                     [
@@ -547,7 +567,7 @@ export function PhotoProcessingPage() {
                         )}
                       </div>
                       <div className="flex items-center justify-between px-3 py-2 text-xs">
-                        <span>{label}</span>
+                        <span>{label}生成图</span>
                         {item[key] && (
                           <a
                             href={item[key]}
