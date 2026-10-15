@@ -49,7 +49,7 @@ export function PhotoProcessingPage() {
     Partial<Record<ImageSlot, boolean>>
   >({});
   const [count, setCount] = useState(6);
-  const [season, setSeason] = useState("spring");
+  const [season, setSeason] = useState("autumn");
   const [model, setModel] = useState("gemini-3.1-flash-lite-image");
   const [changeClothes, setChangeClothes] = useState(true);
   const [changePose, setChangePose] = useState(true);
