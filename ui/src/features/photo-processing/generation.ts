@@ -1,7 +1,7 @@
 import { apiClient } from "@/lib/api";
 import type { ApiResponse } from "@/lib/api/types";
 
-export type PhotoPair = { in_image: string; out_image?: string; out_error?: string };
+export type PhotoPair = { in_image: string; out_image?: string; out_error?: string; entry_layer?: string };
 type Job = { job_id: string; status: "running" | "completed" | "failed"; result?: PhotoPair; error?: string };
 export class PhotoJobError extends Error {
   readonly resumable: boolean;

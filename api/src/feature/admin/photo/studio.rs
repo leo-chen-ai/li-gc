@@ -1,4 +1,6 @@
 //! 每套先生成进场图，再以进场图生成出场图；套与套之间并发。
+mod layers;
+
 use axum::extract::{Extension, Path, State};
 use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
@@ -25,6 +27,13 @@ pub struct GenerateRequest {
     reference_project_id: Option<Uuid>,
     reference_record_id: Option<Uuid>,
     reference_out_record_id: Option<Uuid>,
+    background_in_record_id: Option<Uuid>,
+    background_out_record_id: Option<Uuid>,
+    #[serde(default)]
+    prepare_scenes: bool,
+    in_scene_image: Option<String>,
+    out_scene_image: Option<String>,
+    entry_layer: Option<String>,
     model: Option<String>,
     foreground_id: Option<Uuid>,
     background_id: Option<Uuid>,
@@ -44,6 +53,8 @@ pub struct GenerateResponse {
     in_image: String,
     out_image: Option<String>,
     out_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    entry_layer: Option<String>,
 }
 
 impl GenerateRequest {
@@ -71,6 +82,22 @@ impl GenerateRequest {
         &self,
         outfit_index: Option<usize>,
     ) -> Result<String, crate::infrastructure::web::response::ApiError> {
+        if self.in_scene_image.is_some() != self.out_scene_image.is_some() {
+            return Err(invalid_input("固定背景图片必须成对提供"));
+        }
+        if self.in_scene_image.is_some() && self.background_in_record_id.is_none() {
+            return Err(invalid_input("缺少所选项目背景记录"));
+        }
+        if self.background_in_record_id.is_some() != self.background_out_record_id.is_some() {
+            return Err(invalid_input("固定进场和出场背景必须成对指定"));
+        }
+        if self.background_in_record_id.is_some()
+            && (self.reference_out_record_id.is_none()
+                || self.reference_record_id.is_none()
+                || self.reference_project_id.is_none())
+        {
+            return Err(invalid_input("固定背景需要所选项目及真实衣服参考"));
+        }
         if !(1..=30).contains(&self.count) || self.variant >= self.count {
             return Err(invalid_input(
                 "生成数量必须为1–30，序号必须在生成数量范围内",
@@ -226,9 +253,20 @@ const CAMERA_STYLE: &str = "输出普通现场固定镜头连续抓拍中的一�
 const PAIRED_CAMERA_STYLE: &str = "采用普通人脸抓拍摄像头的低细节画质，轻微软化和JPEG压缩感，允许头部微动产生极轻的运动软边，五官仍可辨认。不要高清锐化、磨皮、美颜、证件照、宣传照或时装广告，不加明显拖影、双脸双眼或夸张噪声。取景范围、人物在画面中的大小和遮挡关系必须与当前方向的真实参考原图一致；参考图是脸部近景就输出脸部近景，不扩展成半身、全身或全景。参考图没有露出的墙面、地面、门口和画外区域不得补画。背景只保留当前方向真实参考原图已有的墙面、门窗、地面和物品，固定它们的位置、形状、材质、镜头视角及透视；不添加参考图没有的考勤机、屏幕、闸机、卡片、键盘、黑色挡板或其他设备。不重新布置背景，不加文字、水印或边框。人物自然融入该背景的光照、曝光和白平衡，只出现目标人物一个人。原人像没有帽子时绝对不要添加帽子，不能复制参考人员的帽子。双手自然放低留在画外，不抬手、不操作设备、不碰衣领或袖口，不摆拍。";
 
 impl GenerateRequest {
+    fn fixed_background_index(&self, outfit_index: usize) -> usize {
+        if self.background_in_record_id.is_some()
+            && self.background_in_record_id != self.reference_record_id
+        {
+            outfit_index + 1
+        } else {
+            outfit_index
+        }
+    }
+
     fn paired_entry_prompt(&self, index: usize, season: &str) -> String {
+        let background = self.fixed_background_index(index);
         let mut prompt = format!(
-            "第二张图是目标人物的唯一身份依据，严格保留其五官、眼镜、发型、肤色、真实年龄、身形和帽子状态，不复制其他人的身份。第{index}张图是所选项目真实进场考勤的完整原图，也是本次编辑的底图。直接编辑第{index}张完整底图，不重新生成场景，不改变原图取景或相机位置，不向四周扩图；只将底图中的人员身份替换为第二张目标人物，并按开关处理衣服和姿态。进场背景必须采用第{index}张真实进场图的背景和拍摄视角，替换目标人像原背景；不要把出场场景当作进场场景。参考图中的人只提供衣服和姿态参考，将其替换成第二张目标人物，不保留第二个人或叠加第二张脸。完整原图参与参考，不裁剪成衣服局部。"
+            "图片角色有严格优先级：第一张是目标人物唯一身份依据，必须保留其五官、眼镜、发型、肤色、年龄、身形和帽子状态。第{index}张只参考衣服及自然头部姿态；第{background}张只参考固定进场背景。目标人物无安全帽时，所有参考图里的安全帽、帽檐、帽绳、下巴带一律忽略，绝对不能添加，不能把参考人员的穿戴当成目标人物穿戴。只出现目标人物一个人，不复制参考人的脸、发型或身份。整批所有进场共用第{background}张的同一个背景，固定墙面、门窗、物品位置、视角和光照，不换地点、不混入衣服参考图或目标人像的背景，不扩图或补画画外区域。人物的身份与帽子状态优先于所有参考图。"
         );
         if self.change_clothes {
             let color = [
@@ -243,14 +281,14 @@ impl GenerateRequest {
                 "深红",
                 "橄榄绿",
             ][self.variant % 10];
-            prompt.push_str(&format!("参考第{index}张图中实际可见衣服的领口、肩线、袖子、版型、布料纹理、自然褶皱和穿着方式，给目标人物换上同类日常衣服。服装类别不得改动，连帽衫仍为连帽衫、T恤仍为T恤，不能凭空添加翻领、工装胸兜或改成制服。颜色适当改为{color}或与原色有区别的自然色调，略改接缝细节并去掉标识文字，按{season}只调整必要厚薄。保留洗旧、松垮和自然使用感，不改成统一新制服、修身时装或挺括新品；不凭空制造夸张泥污、破损或脸部污渍。"));
+            prompt.push_str(&format!("按第{index}张中实际衣服的领型、肩线、袖子、版型、布料纹理、自然褶皱和穿着方式换装；颜色适当改为{color}或与原色有区别的自然色调，略改接缝并去掉文字标识。按{season}仅作必要厚薄调整，保留普通劳动者真实的洗旧与松垮感，不变成新制服或修身时装，不额外添加反光背心、防护装备、安全帽、帽绳或工牌。背景图中的人的衣服和所有穿戴不得复制。"));
         } else {
-            prompt.push_str("目标人物的衣服必须沿用第二张人像原衣服，不复制参考人员的衣服。");
+            prompt.push_str("完全保持第一张目标人像的衣服与穿戴，不从任何参考图换衣服。");
         }
         if self.change_pose {
-            prompt.push_str(&format!("参考第{index}张真实进场图里自然的头部朝向、俯仰、肩颈状态和普通表情，将姿态适配到目标人物身上；双眼仍自然看向镜头，避免大幅侧脸，不复制参考人的五官。忽略参考图任何手部操作，不表演动作。"));
+            prompt.push_str(&format!("参考第{index}张的自然头部姿态，适配到目标人物，眼睛看着镜头，不复制参考人的五官，不做手部动作。{}。",ENTRY_POSES[self.variant%ENTRY_POSES.len()]));
         } else {
-            prompt.push_str("保留第二张目标人物的头部朝向和姿态，只更换到对应进场背景。");
+            prompt.push_str("保持第一张人像的头部和人物姿态。");
         }
         prompt.push_str(PAIRED_CAMERA_STYLE);
         prompt
@@ -258,13 +296,14 @@ impl GenerateRequest {
 
     fn paired_exit_prompt(&self) -> String {
         let mut prompt = String::from(
-            "第一张图是同一参考人员同一天真实出场考勤的完整原图，是本次编辑底图；第二张图是本套已经生成的进场照片，是目标人物身份和衣服的唯一依据。直接在第一张真实出场底图中替换人物，不重新生成场景，不改变取景或相机位置，不向四周扩图。出场背景必须采用第一张真实出场图，不能使用第二张进场照片的背景；进场和出场是不同方向的场景，不能沿用进场背景，也不能混合两张背景。严格保留第二张进场人物的五官、眼镜、发型、肤色、年龄、帽子状态和同一套衣服；衣服款式、颜色、领口、接缝、口袋、图案、层次和使用痕迹完全一致，绝对不能换衣服或换颜色，不能复制第一张真实出场底图中参考人员的脸、帽子或衣服。将目标人物自然放到出场背景里，只出现一个人。",
+            "第一张是本套已经生成的进场图，是人物身份、衣服和帽子状态的唯一依据，也是需要编辑的人物主图。第二张只提供本批固定出场背景；第二张里的人的脸、头发、衣服、安全帽、反光背心、帽绳、下巴带、工牌或其他穿戴全部禁止复制。必须保留第一张人物同一张脸及同一套衣服：颜色、款式、领口、袖子、接缝、口袋、图案、层次、磨损和浮尘完全一致，绝对不能换衣服或换颜色，不增减外套或背心。第一张无帽就绝对无帽，无帽绳就绝对不能有帽绳；第二张有帽子或背心也不得添加。整批出场背景统一使用第二张，墙面、门窗、物品位置、镜头角度固定；不能沿用进场背景或混入其他衣服参考图的背景。场景光照可自然匹配，但不重设计服装。若背景与人物穿戴要求有冲突，人物身份和衣服以第一张为准，第二张仅提供环境。只出现目标人物一个人。",
         );
         if self.change_pose {
-            prompt.push_str("参考第一张真实出场图的自然头部朝向、俯仰、肩颈状态和普通表情，双眼仍看着镜头；头部角度和眉眼口型应与本套进场图有细微自然差异，不能只改背景而完全复制同一张脸部姿态。忽略参考图的手势和设备操作，不抬手、不整理衣服。");
+            prompt.push_str(&format!("与第一张进场图相比，头部角度及眉眼口型至少两项有细微自然变化，其中头部角度必须变化，双眼始终看着镜头。参考动作：{}。不抬手、不整理衣服、不操作设备。",EXIT_POSES[self.variant%EXIT_POSES.len()]));
         } else {
-            prompt.push_str("保持本套进场图的头部和人物姿态，只换成真实出场背景。");
+            prompt.push_str("保持进场图的头部和人物姿态，只换成固定出场背景。");
         }
+        prompt.push_str("输出前逐项核对：同一个人、同一套衣服、同一颜色、同一帽子状态；只改变出场环境和允许的头部表情。");
         prompt.push_str(PAIRED_CAMERA_STYLE);
         prompt
     }
@@ -384,9 +423,9 @@ async fn generate_pair(
             .map_err(|e| e.to_string())?;
         shrink_output(output.bytes).await?
     };
-    // 真实出场原图作编辑底图；已生成进场图约束身份与服装，旧客户端仍只用进场图。
+    // 本套进场图始终排第一，出场原图仅提供背景，防止参考人物的穿戴覆盖本套衣服。
     let exit_images: Vec<&[u8]> = if let Some(reference) = exit_reference {
-        vec![reference, &entry]
+        vec![&entry, reference]
     } else {
         vec![&entry]
     };
@@ -407,6 +446,7 @@ async fn generate_pair(
         in_image,
         out_image,
         out_error,
+        entry_layer: None,
     })
 }
 
@@ -436,6 +476,41 @@ async fn generate_inner(
     if !client.is_enabled() {
         return Err(invalid_input("AI合成服务尚未配置"));
     }
+    if body.prepare_scenes {
+        let project = body
+            .reference_project_id
+            .ok_or_else(|| invalid_input("请选择项目"))?;
+        let entry = body
+            .background_in_record_id
+            .ok_or_else(|| invalid_input("缺少固定进场参考"))?;
+        let exit = body
+            .background_out_record_id
+            .ok_or_else(|| invalid_input("缺少固定出场参考"))?;
+        let (entry, exit) =
+            super::studio_references::load_pair(&state, &user, project, entry, exit).await?;
+        return layers::prepare(&client, &entry, &exit)
+            .await
+            .map_err(internal_error);
+    }
+    if let (Some(entry_bg), Some(exit_bg)) = (&body.in_scene_image, &body.out_scene_image) {
+        let entry_bg = decode_entry_image(entry_bg).map_err(invalid_input)?;
+        let exit_bg = decode_entry_image(exit_bg).map_err(invalid_input)?;
+        let mut refs = vec![load_image(&state, body.person_id, user.user_id).await?];
+        if body.change_clothes {
+            let project = body
+                .reference_project_id
+                .ok_or_else(|| invalid_input("请选择项目"))?;
+            let outfit = body
+                .reference_record_id
+                .ok_or_else(|| invalid_input("缺少衣服参考"))?;
+            refs.push(
+                super::studio_references::load_reference(&state, &user, project, outfit).await?,
+            );
+        }
+        return layers::generate(&client, &body, &refs, &entry_bg, &exit_bg)
+            .await
+            .map_err(internal_error);
+    }
     let mut images = vec![load_image(&state, body.person_id, user.user_id).await?];
     let mut exit_reference = None;
     let reference_index;
@@ -443,15 +518,30 @@ async fn generate_inner(
         let project_id = body
             .reference_project_id
             .ok_or_else(|| invalid_input("请选择参考项目"))?;
-        let entry_id = body
+        let outfit_id = body
             .reference_record_id
-            .ok_or_else(|| invalid_input("缺少进场参考照片，请重新抽取"))?;
-        let (entry, exit) =
-            super::studio_references::load_pair(&state, &user, project_id, entry_id, exit_id)
-                .await?;
-        images.insert(0, entry);
-        reference_index = Some(1);
-        exit_reference = Some(exit);
+            .ok_or_else(|| invalid_input("缺少衣服参考照片"))?;
+        let background_in = body.background_in_record_id.unwrap_or(outfit_id);
+        let background_out = body.background_out_record_id.unwrap_or(exit_id);
+        let (entry_background, exit_background) = super::studio_references::load_pair(
+            &state,
+            &user,
+            project_id,
+            background_in,
+            background_out,
+        )
+        .await?;
+        let outfit = if outfit_id == background_in {
+            entry_background.clone()
+        } else {
+            super::studio_references::load_reference(&state, &user, project_id, outfit_id).await?
+        };
+        images.push(outfit);
+        reference_index = Some(2);
+        if outfit_id != background_in {
+            images.push(entry_background);
+        }
+        exit_reference = Some(exit_background);
     } else {
         // 兼容刷新前的客户端；新页面不再上传前景/背景。
         for id in [body.foreground_id, body.background_id]
@@ -662,6 +752,7 @@ mod tests {
             in_image: "entry".into(),
             out_image: Some("exit".into()),
             out_error: None,
+            entry_layer: None,
         }));
         let response = get_job(auth(owner), Path(id)).await.unwrap().data.unwrap();
         assert_eq!(response.status, "completed");
@@ -671,12 +762,18 @@ mod tests {
         drop(permit);
     }
 
-    fn request() -> GenerateRequest {
+    pub(super) fn request() -> GenerateRequest {
         GenerateRequest {
             person_id: Uuid::nil(),
             reference_project_id: None,
             reference_record_id: None,
             reference_out_record_id: None,
+            background_in_record_id: None,
+            background_out_record_id: None,
+            prepare_scenes: false,
+            in_scene_image: None,
+            out_scene_image: None,
+            entry_layer: None,
             model: None,
             foreground_id: None,
             background_id: None,
@@ -734,21 +831,51 @@ mod tests {
     fn paired_backgrounds_use_entry_then_exit_without_conflicting_scene_rules() {
         let mut req = request();
         req.reference_out_record_id = Some(Uuid::new_v4());
-        let entry = req.prompt_with_outfit(Some(1)).unwrap();
-        assert!(entry.contains("第1张真实进场图的背景"));
+        let entry = req.prompt_with_outfit(Some(2)).unwrap();
+        assert!(entry.contains("第2张只参考固定进场背景"));
         assert!(
             !entry
                 .contains("衣服和姿态参考图中的场景、墙面、门窗、设备、前景及其拍摄环境一律不使用")
         );
         assert!(!entry.contains("保持人像原图的背景环境"));
         let exit = req.exit_prompt();
-        assert!(exit.contains("第一张真实出场图"));
+        assert!(exit.contains("第二张只提供本批固定出场背景"));
         assert!(exit.contains("不能沿用进场背景"));
         assert!(exit.contains("绝对不能换衣服或换颜色"));
         req.change_clothes = false;
         req.change_pose = false;
-        assert!(req.prompt_with_outfit(Some(2)).unwrap().contains("原衣服"));
-        assert!(req.exit_prompt().contains("只换成真实出场背景"));
+        assert!(
+            req.prompt_with_outfit(Some(2))
+                .unwrap()
+                .contains("完全保持第一张目标人像的衣服")
+        );
+        assert!(req.exit_prompt().contains("只换成固定出场背景"));
+    }
+
+    #[test]
+    fn fixed_scenes_are_separate_from_outfits_and_partial_options_are_rejected() {
+        let mut req = request();
+        req.reference_project_id = Some(Uuid::new_v4());
+        req.reference_record_id = Some(Uuid::new_v4());
+        req.reference_out_record_id = Some(Uuid::new_v4());
+        req.background_in_record_id = Some(Uuid::new_v4());
+        assert!(req.prompt().is_err());
+        req.background_out_record_id = Some(Uuid::new_v4());
+        for variant in 0..30 {
+            req.variant = variant;
+            req.reference_record_id = Some(Uuid::new_v4());
+            let prompt = req.prompt_with_outfit(Some(2)).unwrap();
+            assert!(prompt.contains("第一张是目标人物唯一身份依据"));
+            assert!(prompt.contains("第2张只参考衣服"));
+            assert!(prompt.contains("第3张只参考固定进场背景"));
+            assert!(req.exit_prompt().contains("第二张只提供本批固定出场背景"));
+        }
+        req.reference_record_id = req.background_in_record_id;
+        assert_eq!(
+            req.fixed_background_index(2),
+            2,
+            "衣服和场景原图一致时不重复传图"
+        );
     }
 
     #[test]
@@ -984,8 +1111,8 @@ mod tests {
                     .position(|part| part == entry)
                     .unwrap();
                 assert!(
-                    source_position < entry_position,
-                    "真实出场图必须作为第一张编辑底图"
+                    entry_position < source_position,
+                    "已生成进场图必须排第一，出场图只提供背景"
                 );
             }
             assert!(call.windows(entry.len()).any(|part| part == entry));
@@ -1020,8 +1147,21 @@ mod tests {
             .map(|v| v.parse::<usize>().unwrap())
             .unwrap_or(6);
         assert!((1..=6).contains(&pair_count));
+        let prepared = if std::env::var("PHOTO_REAL_LAYERS").as_deref() == Ok("1") {
+            let a = std::fs::read(std::env::var("PHOTO_REAL_FIXED_ENTRY").unwrap()).unwrap();
+            let b = std::fs::read(std::env::var("PHOTO_REAL_FIXED_EXIT").unwrap()).unwrap();
+            let scenes = layers::prepare(&client, &a, &b).await.unwrap();
+            let a = decode_entry_image(&scenes.in_image).unwrap();
+            let b = decode_entry_image(scenes.out_image.as_deref().unwrap()).unwrap();
+            std::fs::write("/tmp/shanhuai-fixed-bg-in.jpg", &a).unwrap();
+            std::fs::write("/tmp/shanhuai-fixed-bg-out.jpg", &b).unwrap();
+            Some((a, b))
+        } else {
+            None
+        };
         for variant in 0..pair_count {
             let (client, person) = (client.clone(), person.clone());
+            let prepared = prepared.clone();
             tasks.push(tokio::spawn(async move {
                 let mut req = request();
                 req.count = pair_count;
@@ -1043,15 +1183,24 @@ mod tests {
                     req.reference_out_record_id = Some(Uuid::nil());
                     std::fs::read(paths.split(',').nth(variant).unwrap()).unwrap()
                 });
-                let outfit_index = if exit_ref.is_some() {
-                    refs.swap(0, 1);
-                    Some(1)
-                } else {
-                    outfit_index
-                };
+                if let Ok(path) = std::env::var("PHOTO_REAL_FIXED_ENTRY") {
+                    req.reference_project_id = Some(Uuid::new_v4());
+                    req.reference_record_id = Some(Uuid::new_v4());
+                    req.background_in_record_id = Some(Uuid::new_v4());
+                    req.background_out_record_id = Some(Uuid::new_v4());
+                    refs.push(std::fs::read(path).unwrap());
+                }
+                let exit_ref = std::env::var("PHOTO_REAL_FIXED_EXIT")
+                    .ok()
+                    .map(|path| std::fs::read(path).unwrap())
+                    .or(exit_ref);
                 let prompt = req.prompt_with_outfit(outfit_index).unwrap();
-                let result =
-                    generate_pair(&client, &req, &refs, &prompt, exit_ref.as_deref()).await;
+                let result = if let Some((a, b)) = prepared {
+                    // 人物生成只接收身份和衣服，固定背景不传给每套模型。
+                    layers::generate(&client, &req, &refs[..2], &a, &b).await
+                } else {
+                    generate_pair(&client, &req, &refs, &prompt, exit_ref.as_deref()).await
+                };
                 match result {
                     Ok(pair) => {
                         let entry = decode_entry_image(&pair.in_image).unwrap();
