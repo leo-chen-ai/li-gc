@@ -30,6 +30,7 @@ pub(super) async fn prepare(
         out_image: Some(image_uri(&exit)),
         out_error: None,
         entry_layer: None,
+        pipeline: Some(STUDIO_PIPELINE),
     })
 }
 
@@ -170,6 +171,7 @@ pub(super) async fn generate(
         out_image,
         out_error,
         entry_layer: Some(image_uri(&layer)),
+        pipeline: Some(STUDIO_PIPELINE),
     })
 }
 

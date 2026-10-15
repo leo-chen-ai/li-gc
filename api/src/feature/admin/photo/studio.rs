@@ -19,11 +19,15 @@ use crate::{
 };
 
 // 跨请求限制内存占用，允许单次30套同时运行。
+const STUDIO_CLIENT_VERSION: u8 = 2;
+const STUDIO_PIPELINE: &str = "fixed-scenes-v2";
+
 static GENERATIONS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(30);
 
 #[derive(Deserialize, Serialize)]
 pub struct GenerateRequest {
     person_id: Uuid,
+    client_version: Option<u8>,
     reference_project_id: Option<Uuid>,
     reference_record_id: Option<Uuid>,
     reference_out_record_id: Option<Uuid>,
@@ -55,9 +59,59 @@ pub struct GenerateResponse {
     out_error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     entry_layer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pipeline: Option<&'static str>,
 }
 
 impl GenerateRequest {
+    /// 在预留任务、下载图片和付费调用前，禁止旧客户端降级到不稳定生成分支。
+    fn validate_live(&self) -> Result<(), crate::infrastructure::web::response::ApiError> {
+        if self.client_version != Some(STUDIO_CLIENT_VERSION) {
+            return Err(invalid_input(
+                "生成页面与服务版本不一致，请刷新后再生成；本次未调用AI服务",
+            ));
+        }
+        self.prompt()?;
+        self.resolved_model()?;
+        if self.reference_project_id.is_none()
+            || self.background_in_record_id.is_none()
+            || self.background_out_record_id.is_none()
+        {
+            return Err(invalid_input(
+                "缺少本批固定进出场背景，请刷新页面后重新生成；本次未调用AI服务",
+            ));
+        }
+        if self.prepare_scenes {
+            if self.in_scene_image.is_some()
+                || self.out_scene_image.is_some()
+                || self.entry_image.is_some()
+                || self.entry_layer.is_some()
+            {
+                return Err(invalid_input("背景准备参数不一致，请重新开始生成"));
+            }
+        } else {
+            let (Some(entry), Some(exit)) = (&self.in_scene_image, &self.out_scene_image) else {
+                return Err(invalid_input(
+                    "旧生成方式已停用，请刷新页面后重新生成；本次未调用AI服务",
+                ));
+            };
+            decode_entry_image(entry).map_err(invalid_input)?;
+            decode_entry_image(exit).map_err(invalid_input)?;
+            if self.entry_image.is_some() != self.entry_layer.is_some() {
+                return Err(invalid_input(
+                    "出场重试数据已过期，请重新生成本套；本次未调用AI服务",
+                ));
+            }
+            if let Some(entry) = &self.entry_image {
+                decode_entry_image(entry).map_err(invalid_input)?;
+            }
+            if let Some(layer) = &self.entry_layer {
+                decode_entry_image(layer).map_err(invalid_input)?;
+            }
+        }
+        Ok(())
+    }
+
     fn resolved_model(&self) -> Result<&str, crate::infrastructure::web::response::ApiError> {
         match self
             .model
@@ -405,7 +459,8 @@ fn decode_entry_image(uri: &str) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-/// 保持套内依赖顺序；出场失败也返回进场图，供客户端单独重试出场。
+/// 仅供旧路径回归测试，生产接口不允许调用此生成方式。
+#[cfg(test)]
 async fn generate_pair(
     client: &CompositeClient,
     body: &GenerateRequest,
@@ -447,6 +502,7 @@ async fn generate_pair(
         out_image,
         out_error,
         entry_layer: None,
+        pipeline: None,
     })
 }
 
@@ -455,6 +511,7 @@ pub async fn generate(
     Extension(user): Extension<AuthUser>,
     TrimmedJson(body): TrimmedJson<GenerateRequest>,
 ) -> ApiResult<GenerateResponse> {
+    body.validate_live()?;
     let _permit = GENERATIONS
         .try_acquire()
         .map_err(|_| invalid_input("当前合成请求较多，请稍后重试"))?;
@@ -468,7 +525,7 @@ async fn generate_inner(
     user: AuthUser,
     body: GenerateRequest,
 ) -> Result<GenerateResponse, crate::infrastructure::web::response::ApiError> {
-    body.prompt()?;
+    body.validate_live()?;
     let mut config = state.config.photo_composite.clone();
     config.ephone_ai_image_size = "1024x1024".into();
     config.ephone_ai_image_model = body.resolved_model()?.to_string();
@@ -511,74 +568,10 @@ async fn generate_inner(
             .await
             .map_err(internal_error);
     }
-    let mut images = vec![load_image(&state, body.person_id, user.user_id).await?];
-    let mut exit_reference = None;
-    let reference_index;
-    if let Some(exit_id) = body.reference_out_record_id {
-        let project_id = body
-            .reference_project_id
-            .ok_or_else(|| invalid_input("请选择参考项目"))?;
-        let outfit_id = body
-            .reference_record_id
-            .ok_or_else(|| invalid_input("缺少衣服参考照片"))?;
-        let background_in = body.background_in_record_id.unwrap_or(outfit_id);
-        let background_out = body.background_out_record_id.unwrap_or(exit_id);
-        let (entry_background, exit_background) = super::studio_references::load_pair(
-            &state,
-            &user,
-            project_id,
-            background_in,
-            background_out,
-        )
-        .await?;
-        let outfit = if outfit_id == background_in {
-            entry_background.clone()
-        } else {
-            super::studio_references::load_reference(&state, &user, project_id, outfit_id).await?
-        };
-        images.push(outfit);
-        reference_index = Some(2);
-        if outfit_id != background_in {
-            images.push(entry_background);
-        }
-        exit_reference = Some(exit_background);
-    } else {
-        // 兼容刷新前的客户端；新页面不再上传前景/背景。
-        for id in [body.foreground_id, body.background_id]
-            .into_iter()
-            .flatten()
-        {
-            images.push(load_image(&state, id, user.user_id).await?);
-        }
-        reference_index = if body.entry_image.is_none()
-            && (body.change_clothes || body.change_pose)
-            && body.reference_record_id.is_some()
-        {
-            let project_id = body
-                .reference_project_id
-                .ok_or_else(|| invalid_input("请选择真实衣服参考项目"))?;
-            images.push(
-                super::studio_references::load_reference(
-                    &state,
-                    &user,
-                    project_id,
-                    body.reference_record_id.unwrap(),
-                )
-                .await?,
-            );
-            Some(images.len())
-        } else {
-            None
-        };
-    }
-    if let Some(uri) = &body.entry_image {
-        decode_entry_image(uri).map_err(invalid_input)?;
-    }
-    let prompt = body.prompt_with_outfit(reference_index)?;
-    let pair = generate_pair(&client, &body, &images, &prompt, exit_reference.as_deref())
-        .await
-        .map_err(internal_error)?;
-    Ok(pair)
+    // 双背景为空时不能回退到整图生成；所有生产入口只支持准备背景/人物合成两种模式。
+    Err(invalid_input(
+        "固定背景参数缺失，请刷新后重试；本次未调用AI服务",
+    ))
 }
 
 // 临时任务与页面结果同生命周期；不创建照片组或数据库记录。
@@ -673,10 +666,9 @@ pub async fn start_job(
     Extension(user): Extension<AuthUser>,
     TrimmedJson(request): TrimmedJson<StartRequest>,
 ) -> ApiResult<JobResponse> {
-    request.body.prompt()?;
-    request.body.resolved_model()?;
-    if let Some(uri) = &request.body.entry_image {
-        decode_entry_image(uri).map_err(invalid_input)?;
+    if let Err(error) = request.body.validate_live() {
+        tracing::warn!(job_id=%request.request_id, client_version=?request.body.client_version, prepare_scenes=request.body.prepare_scenes,"拒绝旧版或不完整照片生成请求，未调用AI");
+        return Err(error);
     }
     let signature =
         serde_json::to_string(&request.body).map_err(|_| internal_error("任务参数编码失败"))?;
@@ -685,6 +677,7 @@ pub async fn start_job(
     let Some(permit) = permit else {
         return ok(response);
     };
+    tracing::info!(job_id=%id,pipeline=STUDIO_PIPELINE,phase=if request.body.prepare_scenes {"prepare_scenes"} else {"compose_person"},variant=request.body.variant,count=request.body.count,"照片生成任务启动");
     tokio::spawn(async move {
         let _permit = permit;
         // 后台任务独立于HTTP连接；断线后仍可查询，不重复提交付费生成。
@@ -697,6 +690,7 @@ pub async fn start_job(
             Ok(result) => result.map_err(|e| e.message),
             Err(_) => Err("本套生成超时，请稍后重试".into()),
         };
+        tracing::info!(job_id=%id,pipeline=STUDIO_PIPELINE,success=result.is_ok(),both_images=result.as_ref().ok().is_some_and(|pair|pair.out_image.is_some()),"照片生成任务完成");
         if let Ok(mut store) = jobs().lock() {
             if let Some(job) = store.get_mut(&id) {
                 job.result = Some(result);
@@ -753,6 +747,7 @@ mod tests {
             out_image: Some("exit".into()),
             out_error: None,
             entry_layer: None,
+            pipeline: None,
         }));
         let response = get_job(auth(owner), Path(id)).await.unwrap().data.unwrap();
         assert_eq!(response.status, "completed");
@@ -765,6 +760,7 @@ mod tests {
     pub(super) fn request() -> GenerateRequest {
         GenerateRequest {
             person_id: Uuid::nil(),
+            client_version: None,
             reference_project_id: None,
             reference_record_id: None,
             reference_out_record_id: None,
@@ -785,6 +781,39 @@ mod tests {
             entry_image: None,
         }
     }
+    #[test]
+    fn production_rejects_stale_or_incomplete_modes_before_reserving_jobs() {
+        let mut req = request();
+        assert!(req.validate_live().unwrap_err().message.contains("版本"));
+        req.client_version = Some(STUDIO_CLIENT_VERSION);
+        req.reference_project_id = Some(Uuid::new_v4());
+        req.reference_record_id = Some(Uuid::new_v4());
+        req.reference_out_record_id = Some(Uuid::new_v4());
+        req.background_in_record_id = Some(Uuid::new_v4());
+        req.background_out_record_id = Some(Uuid::new_v4());
+        assert!(
+            req.validate_live()
+                .unwrap_err()
+                .message
+                .contains("旧生成方式已停用")
+        );
+        req.prepare_scenes = true;
+        assert!(req.validate_live().is_ok());
+        req.prepare_scenes = false;
+        let image = image_uri(&attendance_jpeg(&test_png()).unwrap());
+        req.in_scene_image = Some(image.clone());
+        req.out_scene_image = Some(image.clone());
+        assert!(req.validate_live().is_ok());
+        req.entry_image = Some(image.clone());
+        assert!(req.validate_live().is_err());
+        req.entry_layer = Some(image);
+        assert!(req.validate_live().is_ok());
+        req.in_scene_image = Some("data:image/jpeg;base64,bad".into());
+        assert!(req.validate_live().is_err());
+        req.client_version = Some(STUDIO_CLIENT_VERSION + 1);
+        assert!(req.validate_live().is_err());
+    }
+
     #[test]
     fn optional_references_and_switches() {
         let mut req = request();

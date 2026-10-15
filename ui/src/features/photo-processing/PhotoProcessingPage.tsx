@@ -260,7 +260,7 @@ export function PhotoProcessingPage() {
       <div>
         <h1 className="text-xl font-semibold">AI 照片合成</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          每套包含进场和出场两张，同一套衣服保持一致。
+          固定双背景合成：整批共用一个进场背景、一个出场背景；同套进出穿同一套衣服。
         </p>
       </div>
       <section className="space-y-6 rounded-xl border bg-card p-5">

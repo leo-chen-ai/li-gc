@@ -1,7 +1,8 @@
+import { STUDIO_CLIENT_VERSION, validateStudioResult } from "./protocol";
 import { apiClient } from "@/lib/api";
 import type { ApiResponse } from "@/lib/api/types";
 
-export type PhotoPair = { in_image: string; out_image?: string; out_error?: string; entry_layer?: string };
+export type PhotoPair = { in_image: string; out_image?: string; out_error?: string; entry_layer?: string; pipeline?: string };
 type Job = { job_id: string; status: "running" | "completed" | "failed"; result?: PhotoPair; error?: string };
 export class PhotoJobError extends Error {
   readonly resumable: boolean;
@@ -23,7 +24,7 @@ export async function generatePhotoPair(payload: object, requestId: string): Pro
   let started = false;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      await apiClient.post<ApiResponse<Job>>("/admin/photo-processing/generation-jobs", { ...payload, request_id: requestId }, { timeout: 20000 });
+      await apiClient.post<ApiResponse<Job>>("/admin/photo-processing/generation-jobs", { ...payload, client_version: STUDIO_CLIENT_VERSION, request_id: requestId }, { timeout: 20000 });
       started = true;
       break;
     } catch (error) {
@@ -41,6 +42,8 @@ export async function generatePhotoPair(payload: object, requestId: string): Pro
       if (job.status === "failed") throw new PhotoJobError(job.error || "生成失败", false);
       if (job.status === "completed") {
         if (!job.result?.in_image) throw new PhotoJobError("未返回进场图片", false);
+        try { validateStudioResult(job.result, (payload as { prepare_scenes?: boolean }).prepare_scenes === true); }
+        catch (error) { throw new PhotoJobError(message(error), false); }
         return job.result;
       }
     } catch (error) {
