@@ -19,8 +19,8 @@ use crate::{
 };
 
 // 跨请求限制内存占用，允许单次30套同时运行。
-const STUDIO_CLIENT_VERSION: u8 = 2;
-const STUDIO_PIPELINE: &str = "fixed-scenes-v2";
+const STUDIO_CLIENT_VERSION: u8 = 3;
+const STUDIO_PIPELINE: &str = "paired-scenes-v3";
 
 static GENERATIONS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(30);
 
@@ -78,7 +78,14 @@ impl GenerateRequest {
             || self.background_out_record_id.is_none()
         {
             return Err(invalid_input(
-                "缺少本批固定进出场背景，请刷新页面后重新生成；本次未调用AI服务",
+                "缺少本套对应的进出场背景，请刷新页面后重新生成；本次未调用AI服务",
+            ));
+        }
+        if self.reference_record_id != self.background_in_record_id
+            || self.reference_out_record_id != self.background_out_record_id
+        {
+            return Err(invalid_input(
+                "本套背景必须分别对应本套进出场参考原图，请刷新后重试；本次未调用AI服务",
             ));
         }
         if self.prepare_scenes {
@@ -785,12 +792,14 @@ mod tests {
     fn production_rejects_stale_or_incomplete_modes_before_reserving_jobs() {
         let mut req = request();
         assert!(req.validate_live().unwrap_err().message.contains("版本"));
+        req.client_version = Some(2);
+        assert!(req.validate_live().unwrap_err().message.contains("版本"));
         req.client_version = Some(STUDIO_CLIENT_VERSION);
         req.reference_project_id = Some(Uuid::new_v4());
         req.reference_record_id = Some(Uuid::new_v4());
         req.reference_out_record_id = Some(Uuid::new_v4());
-        req.background_in_record_id = Some(Uuid::new_v4());
-        req.background_out_record_id = Some(Uuid::new_v4());
+        req.background_in_record_id = req.reference_record_id;
+        req.background_out_record_id = req.reference_out_record_id;
         assert!(
             req.validate_live()
                 .unwrap_err()
@@ -799,6 +808,14 @@ mod tests {
         );
         req.prepare_scenes = true;
         assert!(req.validate_live().is_ok());
+        req.background_in_record_id = Some(Uuid::new_v4());
+        assert!(
+            req.validate_live()
+                .unwrap_err()
+                .message
+                .contains("本套背景")
+        );
+        req.background_in_record_id = req.reference_record_id;
         req.prepare_scenes = false;
         let image = image_uri(&attendance_jpeg(&test_png()).unwrap());
         req.in_scene_image = Some(image.clone());

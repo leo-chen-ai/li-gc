@@ -8,6 +8,7 @@ import { ProjectSearchSelect } from "@/features/projects/components/ProjectSearc
 import { Input } from "@/components/ui/input";
 import { constructionProjectService } from "@/features/projects/services/construction-project-service";
 import { prepareStudioReferences, type AttendanceReference } from "./references";
+import { PairGenerationSession } from "./pair-session";
 import { ReferencePhotos } from "./ReferencePhotos";
 import { imageZip, saveBlob } from "./download";
 import { generatePhotoPair, PhotoJobError } from "./generation";
@@ -18,11 +19,7 @@ type Payload = {
   model: string;
   person_id: string;
   reference_project_id?: string;
-  background_in_record_id?: string;
-  background_out_record_id?: string;
-  in_scene_image?: string;
-  out_scene_image?: string;
-  references?: AttendanceReference[];
+  references: AttendanceReference[];
   season: string;
   count: number;
   change_clothes: boolean;
@@ -31,6 +28,7 @@ type Payload = {
 type Result = {
   index: number;
   status: "running" | "success" | "failed";
+  phase?: "preparing" | "generating";
   in_image?: string;
   out_image?: string;
   entry_layer?: string;
@@ -68,10 +66,8 @@ export function PhotoProcessingPage() {
   const inputs = useRef<Partial<Record<ImageSlot, HTMLInputElement | null>>>(
     {},
   );
-  const batch = useRef<Payload | null>(null);
-  const preparation = useRef<{ key: string; payload: Payload; jobId: string } | null>(null);
+  const session = useRef<PairGenerationSession | null>(null);
   const inFlight = useRef(false);
-  const pendingJobs = useRef(new Map<number, string>());
   const busy = preparing || results.some((item) => item.status === "running");
   const hasUpload = Object.values(uploading).some(Boolean);
   const successful = results.filter((item) => item.status === "success");
@@ -122,26 +118,14 @@ export function PhotoProcessingPage() {
 
   const generate = async (
     index: number,
-    payload: Payload,
+    currentSession: PairGenerationSession,
     entryImage?: string,
     entryLayer?: string,
   ) => {
     try {
-      const requestId = pendingJobs.current.get(index) ?? crypto.randomUUID();
-      pendingJobs.current.set(index, requestId);
-      const { references, ...settings } = payload;
-      const pair = await generatePhotoPair(
-        {
-          ...settings,
-          reference_record_id: references?.[index]?.record_id,
-          reference_out_record_id: references?.[index]?.out_record_id,
-          variant: index,
-          entry_image: entryImage,
-          entry_layer: entryLayer,
-        },
-        requestId,
-      );
-      pendingJobs.current.delete(index);
+      const pair = await currentSession.generate(index, entryImage, entryLayer, () => {
+        setResults((current) => current.map((item) => item.index === index ? { ...item, phase: "generating" } : item));
+      });
       if (!pair?.in_image) throw new Error("未返回进场图片");
       setResults((current) =>
         current.map((item) =>
@@ -160,7 +144,6 @@ export function PhotoProcessingPage() {
         ),
       );
     } catch (error) {
-      if (!(error instanceof PhotoJobError) || !error.resumable) pendingJobs.current.delete(index);
       setResults((current) =>
         current.map((item) =>
           item.index === index
@@ -181,7 +164,7 @@ export function PhotoProcessingPage() {
       toast.error("请选择真实照片的参考项目");
       return;
     }
-    let payload: Payload = {
+    const payload: Payload = {
       model,
       reference_project_id: projectId || undefined,
       person_id: images.person.id,
@@ -189,51 +172,27 @@ export function PhotoProcessingPage() {
       count,
       change_clothes: changeClothes,
       change_pose: changePose,
+      references: [],
     };
     inFlight.current = true;
     setPreparing(true);
     try {
-      const key = JSON.stringify(payload);
-      if (preparation.current?.key === key) {
-        payload = preparation.current.payload;
-      } else {
-        const response = await apiClient.post<
-          ApiResponse<AttendanceReference[]>
-        >("/admin/photo-processing/studio-references", { project_id: projectId, count });
-        const references = response.data.data;
-        if (!references || references.length !== count) {
-          throw new Error("进出场成对参考照片数量不足，请减少套数");
-        }
-        Object.assign(payload, prepareStudioReferences(references));
-        preparation.current = { key, payload, jobId: crypto.randomUUID() };
-      }
-      setReferenceBatch(payload.references ?? []);
-      setResults([]);
-      const setup = preparation.current!;
-      const { references, ...settings } = payload;
-      const scenes = await generatePhotoPair({
-        ...settings,
-        reference_record_id: references![0].record_id,
-        reference_out_record_id: references![0].out_record_id,
-        variant: 0,
-        prepare_scenes: true,
-      }, setup.jobId);
-      if (!scenes.out_image) throw new Error(scenes.out_error || "固定出场背景准备失败");
-      payload.in_scene_image = scenes.in_image;
-      payload.out_scene_image = scenes.out_image;
-      preparation.current = null;
-      batch.current = payload;
-      setResults(
-        Array.from({ length: count }, (_, index) => ({ index, status: "running" })),
+      const response = await apiClient.post<ApiResponse<AttendanceReference[]>>(
+        "/admin/photo-processing/studio-references", { project_id: projectId, count },
       );
-      pendingJobs.current.clear();
+      const references = response.data.data;
+      if (!references || references.length !== count) throw new Error("进出场成对参考照片数量不足，请减少套数");
+      Object.assign(payload, prepareStudioReferences(references));
+      setReferenceBatch(payload.references);
+      const currentSession = new PairGenerationSession(
+        payload, generatePhotoPair, (error) => error instanceof PhotoJobError && error.resumable,
+      );
+      session.current = currentSession;
+      setResults(Array.from({ length: count }, (_, index) => ({ index, status: "running", phase: "preparing" })));
       setPreparing(false);
-      await Promise.allSettled(
-        Array.from({ length: count }, (_, index) => generate(index, payload)),
-      );
+      await Promise.allSettled(Array.from({ length: count }, (_, index) => generate(index, currentSession)));
     } catch (error) {
-      if (!(error instanceof PhotoJobError) || !error.resumable) preparation.current = null;
-      toast.error(errorMessage(error, "准备固定进出场背景失败"));
+      toast.error(errorMessage(error, "抽取进出场参考原图失败"));
     } finally {
       setPreparing(false);
       inFlight.current = false;
@@ -241,19 +200,20 @@ export function PhotoProcessingPage() {
   };
 
   const retry = async (index: number) => {
-    if (!batch.current || inFlight.current) return;
+    const currentSession = session.current;
+    if (!currentSession || inFlight.current) return;
     const previous = results.find((item) => item.index === index);
     const entryImage = previous?.in_image;
     inFlight.current = true;
     setResults((current) =>
       current.map((item) =>
         item.index === index
-          ? { ...item, status: "running", error: undefined }
+          ? { ...item, status: "running", phase: currentSession.hasScenes(index) ? "generating" : "preparing", error: undefined }
           : item,
       ),
     );
     try {
-      await generate(index, batch.current, entryImage, previous?.entry_layer);
+      await generate(index, currentSession, entryImage, previous?.entry_layer);
     } finally {
       inFlight.current = false;
     }
@@ -264,7 +224,7 @@ export function PhotoProcessingPage() {
       <div>
         <h1 className="text-xl font-semibold">AI 照片合成</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          固定双背景合成：整批共用一个进场背景、一个出场背景；同套进出穿同一套衣服。
+          每套分别使用自己参考原图的进场、出场背景；同套进出穿同一套衣服。
         </p>
       </div>
       <section className="space-y-6 rounded-xl border bg-card p-5">
@@ -375,7 +335,7 @@ export function PhotoProcessingPage() {
             />
             <p className="text-xs text-muted-foreground">
               自动抽取近7天不同人员同一天的进出场完整原图，参考衣服和自然头部姿态。
-              整批只用一个进场背景和一个出场背景；每套进出场穿同一套衣服。不复制参考人的脸或安全帽。
+              每套分别使用本套两张原图的进出场背景；每套进出场穿同一套衣服。不复制参考人的脸或安全帽。
             </p>
           </div>
           <div className="flex flex-wrap gap-6">
@@ -473,18 +433,11 @@ export function PhotoProcessingPage() {
               ) : (
                 <Sparkles className="size-4" />
               )}
-              {preparing ? "准备固定进出场背景" : busy ? "正在生成" : `开始生成 ${count} 套（${count * 2} 张）`}
+              {preparing ? "抽取进出场参考原图" : busy ? "正在生成" : `开始生成 ${count} 套（${count * 2} 张）`}
             </Button>
           </div>
         </div>
       </section>
-      {referenceBatch[0] && (
-        <ReferencePhotos
-          reference={referenceBatch[0]}
-          title="本批固定背景的来源原图"
-          description="整批共用这两张原图的背景：去除参考人员后，分别作为进场、出场背景。下方每套另列该套抽中的进出场原图。"
-        />
-      )}
       {results.length > 0 && (
         <section className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -494,7 +447,7 @@ export function PhotoProcessingPage() {
                 完成 {successful.length} / {results.length} 套 · 已生成{" "}
                 {generated.length} 张
                 {busy
-                  ? " · 各套并发，套内先生成进场，再由进场图生成出场"
+                  ? " · 各套并发，分别准备各自背景；套内先生成进场，再由进场图生成出场"
                   : " · 结果仅在本页保留，请及时下载"}
               </p>
             </div>
@@ -525,7 +478,7 @@ export function PhotoProcessingPage() {
                     {item.status === "success"
                       ? "两张已完成"
                       : item.status === "running"
-                        ? "生成中"
+                        ? item.phase === "preparing" ? "准备本套背景" : "生成中"
                         : item.in_image
                           ? "出场待重试"
                           : "生成失败"}
@@ -536,7 +489,7 @@ export function PhotoProcessingPage() {
                     <ReferencePhotos
                       reference={referenceBatch[item.index]}
                       title="本套抽取的参考原图"
-                      description="换装时参考进场原图；出场人物沿用本套已生成的进场图。出场原图供对照，背景以本批固定来源为准。"
+                      description="本套两张原图分别提供进场、出场背景；换装时参考进场原图，出场沿用本套生成的进场衣服。"
                     />
                   </div>
                 )}
@@ -558,7 +511,7 @@ export function PhotoProcessingPage() {
                         ) : item.status === "running" ? (
                           <div className="flex flex-col items-center gap-2 text-xs text-muted-foreground">
                             <Loader2 className="size-5 animate-spin" />
-                            {label}生成中
+                            {item.phase === "preparing" ? "准备本套背景" : `${label}生成中`}
                           </div>
                         ) : (
                           <p className="px-2 text-center text-xs text-muted-foreground">
@@ -592,7 +545,7 @@ export function PhotoProcessingPage() {
                       disabled={busy}
                       onClick={() => void retry(item.index)}
                     >
-                      {pendingJobs.current.has(item.index) ? "继续获取结果" : item.in_image ? "重试出场" : "重新生成这套"}
+                      {session.current?.hasPending(item.index) ? "继续获取结果" : item.in_image ? "重试出场" : "重新生成这套"}
                     </Button>
                   </div>
                 )}

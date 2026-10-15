@@ -1,14 +1,23 @@
 export type AttendanceReference = { record_id: string; out_record_id: string; in_photo?: string | null; out_photo?: string | null };
 
-// 整批确定一次背景；各套只随机衣服，重试复用同一份批次参数。
+// 保存同次抽样，每套分别使用自己的进出场原图，重试不重新抽取。
 export function prepareStudioReferences(references: AttendanceReference[]) {
   if (!references.length || references.some((item) => !item.record_id || !item.out_record_id)) {
     throw new Error("缺少完整的进出场参考照片，请重新抽取");
   }
   return {
-    background_in_record_id: references[0].record_id,
-    background_out_record_id: references[0].out_record_id,
     references: references.map((item) => ({ ...item })),
+  };
+}
+
+export function studioPairReference(references: AttendanceReference[], index: number) {
+  const pair = references[index];
+  if (!pair?.record_id || !pair.out_record_id) throw new Error("缺少本套进出场参考原图");
+  return {
+    reference_record_id: pair.record_id,
+    reference_out_record_id: pair.out_record_id,
+    background_in_record_id: pair.record_id,
+    background_out_record_id: pair.out_record_id,
   };
 }
 

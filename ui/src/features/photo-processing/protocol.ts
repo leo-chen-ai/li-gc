@@ -1,5 +1,5 @@
-export const STUDIO_CLIENT_VERSION = 2;
-export const STUDIO_PIPELINE = "fixed-scenes-v2";
+export const STUDIO_CLIENT_VERSION = 3;
+export const STUDIO_PIPELINE = "paired-scenes-v3";
 
 export function validateStudioResult(
   result: { pipeline?: string; entry_layer?: string },

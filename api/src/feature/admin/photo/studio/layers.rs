@@ -1,6 +1,24 @@
-//! 一批只准备两个场景；人物在单色底上生成，背景像素由程序合成，不交给每套模型重画。
+//! 每套分别准备自己的进出场背景；人物在单色底上生成，再分别叠到本套背景。
 use super::*;
 use image::{DynamicImage, Rgb, RgbImage};
+
+// 每套的两个背景可并行准备，但全局最多30条模型请求，避免30套同时产生60条上游请求。
+static MODEL_REQUESTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(30);
+async fn request_layer(
+    client: &CompositeClient,
+    images: &[&[u8]],
+    prompt: &str,
+) -> Result<Vec<u8>, String> {
+    let _permit = MODEL_REQUESTS
+        .acquire()
+        .await
+        .map_err(|_| "图片生成服务暂不可用")?;
+    client
+        .compose_images(images, prompt)
+        .await
+        .map(|output| output.bytes)
+        .map_err(|error| error.to_string())
+}
 
 pub(super) async fn prepare(
     client: &CompositeClient,
@@ -15,11 +33,8 @@ pub(super) async fn prepare(
         let prompt = format!(
             "这是项目真实{direction}考勤原图。本次只准备空背景，不生成人像：完整移除画面中的全部人员、脸、头发、衣服、帽子及其影子，保留原图已见的墙面、门窗、物品、颜色和相机视角。被人遮挡区域只延续周围可见背景的材质和颜色，不新增门窗、标语、设备、文字、物品或其他场景。原图是近景就保持近景，不向四周扩图。最终画面必须没有任何人、脸、人体、衣服、帽子或人形轮廓，仅保留该方向的空环境。普通低清摄像头画质。"
         );
-        let output = client
-            .compose_images(&[source], &prompt)
-            .await
-            .map_err(|e| e.to_string())?;
-        shrink_output(output.bytes).await
+        let output = request_layer(client, &[source], &prompt).await?;
+        shrink_output(output).await
     }
     let (entry, exit) =
         tokio::try_join!(scene(client, entry, "进场"), scene(client, exit, "出场"))?;
@@ -140,16 +155,13 @@ async fn generate_exit(
                 "{base_prompt} 上次结果与进场人物头部几乎重复。本次必须重新绘制头部到指定的相反朝向，让鼻尖朝向、两侧脸颊可见比例、下巴和眉眼口型都有可见自然变化；不能靠平移、缩放、曝光变化或重画衣服代替转头。继续保留身份、原眼镜和全部衣服，双眼回看镜头，双手留在画外。"
             )
         };
-        let output = client
-            .compose_images(&[entry_layer], &prompt)
-            .await
-            .map_err(|e| e.to_string())?;
+        let output = request_layer(client, &[entry_layer], &prompt).await?;
         // 先确认图层可分离，错误绿幕不应触发付费的动作重试。
-        let image = finish(output.bytes.clone(), exit_bg.to_vec()).await?;
+        let image = finish(output.clone(), exit_bg.to_vec()).await?;
         if !body.change_pose {
             return Ok(image);
         }
-        let difference = head_difference(entry_layer, &output.bytes)?;
+        let difference = head_difference(entry_layer, &output)?;
         tracing::info!(
             variant = body.variant,
             attempt,
@@ -232,12 +244,9 @@ pub(super) async fn generate(
         )?
     } else {
         let refs: Vec<&[u8]> = refs.iter().map(Vec::as_slice).collect();
-        let result = client
-            .compose_images(&refs, &entry_prompt(body))
-            .await
-            .map_err(|e| e.to_string())?;
+        let result = request_layer(client, &refs, &entry_prompt(body)).await?;
         // 小图层用于出场和断线重试；画质与最终考勤图相同。
-        shrink_output(result.bytes).await?
+        shrink_output(result).await?
     };
     let entry = finish(layer.clone(), entry_bg.to_vec()).await?;
     // 出场模型仅看到本套进场人物，完全不接触其他人员或背景的图片。
@@ -285,6 +294,68 @@ mod tests {
             }
         }))
     }
+    #[tokio::test]
+    async fn all_pair_phases_share_a_global_model_request_limit() {
+        use axum::{Router, extract::State, routing::post};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        struct Mock {
+            active: AtomicUsize,
+            peak: AtomicUsize,
+            image: String,
+        }
+        let mock = Arc::new(Mock {
+            active: AtomicUsize::new(0),
+            peak: AtomicUsize::new(0),
+            image: general_purpose::STANDARD.encode(png(RgbImage::from_pixel(
+                16,
+                16,
+                Rgb([0, 255, 0]),
+            ))),
+        });
+        let app = Router::new()
+            .route(
+                "/images/edits",
+                post(|State(mock): State<Arc<Mock>>| async move {
+                    let active = mock.active.fetch_add(1, Ordering::SeqCst) + 1;
+                    mock.peak.fetch_max(active, Ordering::SeqCst);
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                    mock.active.fetch_sub(1, Ordering::SeqCst);
+                    axum::Json(serde_json::json!({"data":[{"b64_json":mock.image}]}))
+                }),
+            )
+            .with_state(mock.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let client = CompositeClient::new(crate::infrastructure::config::PhotoCompositeConfig {
+            ephone_ai_api_key: Some("test".into()),
+            ephone_ai_base_url: format!("http://{addr}"),
+            ephone_ai_image_model: "test".into(),
+            ephone_ai_image_size: "1024x1024".into(),
+            ephone_ai_timeout_secs: 5,
+            concurrency: 30,
+            poll_seconds: 5,
+            lease_secs: 60,
+        });
+        let mut tasks = vec![];
+        for _ in 0..64 {
+            let client = client.clone();
+            tasks.push(tokio::spawn(async move {
+                request_layer(&client, &[b"source"], "test").await.unwrap();
+            }));
+        }
+        for task in tasks {
+            task.await.unwrap();
+        }
+        let peak = mock.peak.load(Ordering::SeqCst);
+        assert!(peak > 1, "各套必须能并发执行");
+        assert!(peak <= 30, "实际模型请求不能因每套两个背景翻倍");
+        server.abort();
+    }
+
     #[tokio::test]
     #[ignore = "Paid live pose-pair verification; explicit opt-in only"]
     async fn live_ephone_pose_pairs() {

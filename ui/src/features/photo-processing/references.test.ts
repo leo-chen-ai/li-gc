@@ -1,20 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { prepareStudioReferences, referencePhotoSrc } from "./references.ts";
+import { prepareStudioReferences, referencePhotoSrc, studioPairReference } from "./references.ts";
 
-test("整批固定两个方向背景，各套和重试只更换衣服参考", () => {
+test("30套背景分别对应各自进出场原图，不复用第1套", () => {
   const source = Array.from({ length: 30 }, (_, i) => ({ record_id: `in-${i}`, out_record_id: `out-${i}` }));
   const batch = prepareStudioReferences(source);
-  const { references, ...scenes } = batch;
+  assert.equal("background_in_record_id" in batch, false);
   for (let index = 0; index < 30; index++) {
-    const request = { ...scenes, reference_record_id: references[index].record_id };
-    assert.equal(request.background_in_record_id, "in-0");
-    assert.equal(request.background_out_record_id, "out-0");
-    assert.equal(request.reference_record_id, `in-${index}`);
+    const request = studioPairReference(batch.references, index);
+    assert.deepEqual(request, {
+      reference_record_id: `in-${index}`, reference_out_record_id: `out-${index}`,
+      background_in_record_id: `in-${index}`, background_out_record_id: `out-${index}`,
+    });
   }
   source[0].record_id = "changed";
   assert.equal(batch.references[0].record_id, "in-0");
-  assert.equal(batch.background_in_record_id, "in-0");
+  assert.throws(() => studioPairReference(batch.references, 30));
 });
 test("没有成对参考时不启动批次", () => {
   assert.throws(() => prepareStudioReferences([]));
