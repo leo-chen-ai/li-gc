@@ -58,6 +58,7 @@ fn entry_prompt(body: &GenerateRequest) -> String {
         prompt.push_str("保持第一张人像的全部衣服和穿戴。");
     }
     if body.change_pose {
+        prompt.push_str("这是进场帧，严格按以下绝对角度呈现，身体基本正对镜头：");
         prompt.push_str(ENTRY_POSES[body.variant % ENTRY_POSES.len()]);
     } else {
         prompt.push_str("保持原人像姿态。");
@@ -67,15 +68,99 @@ fn entry_prompt(body: &GenerateRequest) -> String {
 }
 fn exit_prompt(body: &GenerateRequest) -> String {
     let mut prompt = String::from(
-        "只有一张参考图：这是本套已经生成的进场人物。保留这个人的所有身份特征、眼镜、头发和同一套衣服，款式、颜色、领口、袖子、口袋、图案、接缝、磨损与层次必须完全一致，绝对不能换衣服或换颜色。无帽就保持无帽，无帽绳就保持无帽绳；眼镜必须原样保留，不增减任何穿戴。只允许自然头部和表情微调。",
+        "只有一张参考图：这是本套已经生成的进场人物。保留这个人的所有身份特征、眼镜、头发和同一套衣服，款式、颜色、领口、袖子、口袋、图案、接缝、磨损与层次必须完全一致，绝对不能换衣服或换颜色。无帽就保持无帽，无帽绳就保持无帽绳；眼镜必须原样保留，不增减任何穿戴。",
     );
     if body.change_pose {
+        prompt.push_str("首要编辑任务是重新转头：这是另一时刻的出场帧，头部必须转到下面指定的不同角度，左右朝向应与进场帧相反，形成自然可见的角度差。保留同一个人不是保留相同脸部角度，必须重新绘制脸颊与耳朵的可见比例、鼻尖朝向及下巴角度；不是只改变光线、背景、清晰度或移动整个人物。脸可轻转，但双眼要回看镜头，不能看向画外。目标姿态：");
         prompt.push_str(EXIT_POSES[body.variant % EXIT_POSES.len()]);
     } else {
         prompt.push_str("保持同样的头部和人物姿态。");
     }
     prompt.push_str(SCREEN);
     prompt
+}
+
+// 这是近重复检查，不是头部姿态识别。只比较绿幕人物的上半部，背景与下方衣服不参与；
+// 消除整体亮度差，避免模型仅改变曝光就把复制帧当作新动作。
+fn head_difference(entry: &[u8], exit: &[u8]) -> Result<f32, String> {
+    fn head(bytes: &[u8]) -> Result<[(f32, bool); 96 * 56], String> {
+        let image = image::load_from_memory(bytes)
+            .map_err(|_| "人物图层格式错误")?
+            .resize_exact(96, 96, image::imageops::FilterType::Triangle)
+            .to_rgb8();
+        let mut result = [(0.0, false); 96 * 56];
+        for (index, value) in result.iter_mut().enumerate() {
+            let p = image.get_pixel((index % 96) as u32, (index / 96) as u32);
+            *value = (
+                0.299 * p[0] as f32 + 0.587 * p[1] as f32 + 0.114 * p[2] as f32,
+                foreground_alpha(p[0], p[1], p[2]) > 0.95,
+            );
+        }
+        Ok(result)
+    }
+    let (a, b) = (head(entry)?, head(exit)?);
+    let mean = |head: &[(f32, bool)]| {
+        let (sum, n) = head
+            .iter()
+            .filter(|(_, mask)| *mask)
+            .fold((0.0, 0usize), |(sum, n), (v, _)| (sum + v, n + 1));
+        sum / n.max(1) as f32
+    };
+    let (a_mean, b_mean) = (mean(&a), mean(&b));
+    let (mut sum, mut count) = (0.0, 0usize);
+    for ((a, a_mask), (b, b_mask)) in a.into_iter().zip(b) {
+        if a_mask || b_mask {
+            sum += if a_mask != b_mask {
+                80.0
+            } else {
+                ((a - a_mean) - (b - b_mean)).abs()
+            };
+            count += 1;
+        }
+    }
+    if count < 100 {
+        return Err("人物头部区域不足，请重试出场".into());
+    }
+    Ok(sum / count as f32)
+}
+const MIN_HEAD_DIFFERENCE: f32 = 8.0;
+
+async fn generate_exit(
+    client: &CompositeClient,
+    body: &GenerateRequest,
+    entry_layer: &[u8],
+    exit_bg: &[u8],
+) -> Result<Vec<u8>, String> {
+    let base_prompt = exit_prompt(body);
+    for attempt in 0..=usize::from(body.change_pose) {
+        let prompt = if attempt == 0 {
+            base_prompt.clone()
+        } else {
+            format!(
+                "{base_prompt} 上次结果与进场人物头部几乎重复。本次必须重新绘制头部到指定的相反朝向，让鼻尖朝向、两侧脸颊可见比例、下巴和眉眼口型都有可见自然变化；不能靠平移、缩放、曝光变化或重画衣服代替转头。继续保留身份、原眼镜和全部衣服，双眼回看镜头，双手留在画外。"
+            )
+        };
+        let output = client
+            .compose_images(&[entry_layer], &prompt)
+            .await
+            .map_err(|e| e.to_string())?;
+        // 先确认图层可分离，错误绿幕不应触发付费的动作重试。
+        let image = finish(output.bytes.clone(), exit_bg.to_vec()).await?;
+        if !body.change_pose {
+            return Ok(image);
+        }
+        let difference = head_difference(entry_layer, &output.bytes)?;
+        tracing::info!(
+            variant = body.variant,
+            attempt,
+            head_difference = difference,
+            "进出场人物头部近重复检查"
+        );
+        if difference >= MIN_HEAD_DIFFERENCE {
+            return Ok(image);
+        }
+    }
+    Err("出场头部与进场过于相似，已尝试调整一次；进场已保留，请重试出场".into())
 }
 
 /// 绿幕作为明确的分离色；不接受任意重绘背景混进最终输出。
@@ -156,10 +241,7 @@ pub(super) async fn generate(
     };
     let entry = finish(layer.clone(), entry_bg.to_vec()).await?;
     // 出场模型仅看到本套进场人物，完全不接触其他人员或背景的图片。
-    let exit = match client.compose_images(&[&layer], &exit_prompt(body)).await {
-        Ok(output) => finish(output.bytes, exit_bg.to_vec()).await,
-        Err(error) => Err(error.to_string()),
-    };
+    let exit = generate_exit(client, body, &layer, exit_bg).await;
     let (out_image, out_error) = match exit {
         Ok(bytes) => (Some(image_uri(&bytes)), None),
         Err(error) => (None, Some(error)),
@@ -186,6 +268,197 @@ mod tests {
             .unwrap();
         c.into_inner()
     }
+    fn head_layer(offset: i32, brightness: u8, lower_color: u8) -> Vec<u8> {
+        png(RgbImage::from_fn(480, 480, |x, y| {
+            let head = (180 + offset..300 + offset).contains(&(x as i32)) && (30..225).contains(&y);
+            if head {
+                let detail = ((x / 12 + y / 12) % 3 * 25) as u8;
+                Rgb([
+                    90 + detail + brightness,
+                    80 + detail + brightness,
+                    70 + detail + brightness,
+                ])
+            } else if (140..340).contains(&x) && y >= 290 {
+                Rgb([lower_color; 3])
+            } else {
+                Rgb([0, 255, 0])
+            }
+        }))
+    }
+    #[tokio::test]
+    #[ignore = "Paid live pose-pair verification; explicit opt-in only"]
+    async fn live_ephone_pose_pairs() {
+        dotenvy::from_path(".env").ok();
+        let client = CompositeClient::new(crate::infrastructure::config::PhotoCompositeConfig {
+            ephone_ai_api_key: Some(std::env::var("EPHONE_AI_API_KEY").unwrap()),
+            ephone_ai_base_url: std::env::var("PHOTO_REAL_BASE_URL").unwrap(),
+            ephone_ai_image_model: "gemini-3.1-flash-lite-image".into(),
+            ephone_ai_image_size: "1024x1024".into(),
+            ephone_ai_timeout_secs: 240,
+            concurrency: 30,
+            poll_seconds: 5,
+            lease_secs: 60,
+        });
+        let person = std::fs::read("/tmp/shanhuai-fixed-scenes-person.jpg").unwrap();
+        let entry_bg = std::fs::read("/tmp/shanhuai-fixed-bg-in.jpg").unwrap();
+        let exit_bg = std::fs::read("/tmp/shanhuai-fixed-bg-out.jpg").unwrap();
+        let mut tasks = vec![];
+        let variants: Vec<usize> = std::env::var("PHOTO_POSE_VARIANTS")
+            .unwrap_or("1,3,4".into())
+            .split(',')
+            .map(|v| v.parse().unwrap())
+            .collect();
+        let expected = variants.len();
+        for variant in variants {
+            let (client, person, a, b) = (
+                client.clone(),
+                person.clone(),
+                entry_bg.clone(),
+                exit_bg.clone(),
+            );
+            tasks.push(tokio::spawn(async move {
+                let mut req = super::super::tests::request();
+                req.variant = variant;
+                req.count = 6;
+                let outfit = std::fs::read(format!(
+                    "/tmp/shanhuai-fixed-scenes-ref/{}-entry.jpg",
+                    variant + 1
+                ))
+                .unwrap();
+                let pair = generate(&client, &req, &[person, outfit], &a, &b)
+                    .await
+                    .unwrap();
+                std::fs::write(
+                    format!("/tmp/shanhuai-pose-{variant}-entry.jpg"),
+                    decode_entry_image(&pair.in_image).unwrap(),
+                )
+                .unwrap();
+                if let Some(output) = pair.out_image {
+                    std::fs::write(
+                        format!("/tmp/shanhuai-pose-{variant}-exit.jpg"),
+                        decode_entry_image(&output).unwrap(),
+                    )
+                    .unwrap();
+                    println!("pose pair {variant}: both generated");
+                    true
+                } else {
+                    println!("pose pair {variant}: {:?}", pair.out_error);
+                    false
+                }
+            }));
+        }
+        let mut completed = 0;
+        for task in tasks {
+            if task.await.unwrap() {
+                completed += 1;
+            }
+        }
+        assert_eq!(completed, expected);
+    }
+
+    #[test]
+    fn near_duplicate_check_ignores_background_lower_clothes_and_exposure() {
+        let entry = head_layer(0, 0, 30);
+        assert!(head_difference(&entry, &entry).unwrap() < MIN_HEAD_DIFFERENCE);
+        let exposure = head_layer(0, 20, 180);
+        assert!(
+            head_difference(&entry, &exposure).unwrap() < MIN_HEAD_DIFFERENCE,
+            "只改曝光或下方衣服不能冒充动作变化"
+        );
+        let jpeg = attendance_jpeg(&entry).unwrap();
+        assert!(
+            head_difference(&entry, &jpeg).unwrap() < MIN_HEAD_DIFFERENCE,
+            "JPEG压缩差异不能冒充动作变化"
+        );
+        let moved = head_layer(35, 0, 30);
+        assert!(head_difference(&entry, &moved).unwrap() >= MIN_HEAD_DIFFERENCE);
+    }
+    #[tokio::test]
+    async fn duplicate_exit_has_one_bounded_retry_and_keeps_entry_as_only_reference() {
+        use axum::{Router, body::Bytes, extract::State, routing::post};
+        use std::sync::{Arc, Mutex};
+        struct Mock {
+            calls: Mutex<Vec<Vec<u8>>>,
+            images: Vec<String>,
+        }
+        async fn run(
+            different_on_retry: bool,
+            change_pose: bool,
+        ) -> (Result<Vec<u8>, String>, usize) {
+            let entry = head_layer(0, 0, 30);
+            let moved = head_layer(35, 0, 30);
+            let mock = Arc::new(Mock {
+                calls: Mutex::new(vec![]),
+                images: vec![
+                    general_purpose::STANDARD.encode(&entry),
+                    general_purpose::STANDARD.encode(if different_on_retry {
+                        &moved
+                    } else {
+                        &entry
+                    }),
+                ],
+            });
+            let app = Router::new()
+                .route(
+                    "/images/edits",
+                    post(|State(mock): State<Arc<Mock>>, body: Bytes| async move {
+                        let index = {
+                            let mut calls = mock.calls.lock().unwrap();
+                            calls.push(body.to_vec());
+                            calls.len() - 1
+                        };
+                        axum::Json(
+                            serde_json::json!({"data":[{"b64_json":mock.images[index.min(1)]}]}),
+                        )
+                    }),
+                )
+                .with_state(mock.clone());
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            let client =
+                CompositeClient::new(crate::infrastructure::config::PhotoCompositeConfig {
+                    ephone_ai_api_key: Some("test".into()),
+                    ephone_ai_base_url: format!("http://{addr}"),
+                    ephone_ai_image_model: "test".into(),
+                    ephone_ai_image_size: "1024x1024".into(),
+                    ephone_ai_timeout_secs: 5,
+                    concurrency: 30,
+                    poll_seconds: 5,
+                    lease_secs: 60,
+                });
+            let mut req = super::super::tests::request();
+            req.change_pose = change_pose;
+            let bg = png(RgbImage::from_pixel(480, 480, Rgb([120, 130, 140])));
+            let result = generate_exit(&client, &req, &entry, &bg).await;
+            let calls = mock.calls.lock().unwrap();
+            for call in calls.iter() {
+                assert_eq!(
+                    String::from_utf8_lossy(call)
+                        .matches("name=\"image\"")
+                        .count(),
+                    1
+                );
+                assert!(call.windows(entry.len()).any(|bytes| bytes == entry));
+                assert!(!call.windows(bg.len()).any(|bytes| bytes == bg));
+            }
+            if calls.len() == 2 {
+                assert!(String::from_utf8_lossy(&calls[1]).contains("上次结果"));
+            }
+            server.abort();
+            (result, calls.len())
+        }
+        let (failed, calls) = run(false, true).await;
+        assert!(failed.unwrap_err().contains("过于相似"));
+        assert_eq!(calls, 2);
+        let (success, calls) = run(true, true).await;
+        assert!(success.is_ok());
+        assert_eq!(calls, 2);
+        let (unchanged, calls) = run(false, false).await;
+        assert!(unchanged.is_ok());
+        assert_eq!(calls, 1, "不勾换动作时不能自动重试");
+    }
+
     #[tokio::test]
     async fn failed_exit_retry_keeps_entry_layer_and_sends_no_background_to_model() {
         use axum::{
@@ -244,6 +517,7 @@ mod tests {
         });
         let bg = png(RgbImage::from_pixel(480, 480, Rgb([120, 130, 140])));
         let mut req = super::super::tests::request();
+        req.change_pose = false;
         let refs = vec![b"person-identity".to_vec(), b"real-outfit".to_vec()];
         let first = generate(&client, &req, &refs, &bg, &bg).await.unwrap();
         assert!(first.out_image.is_none());
