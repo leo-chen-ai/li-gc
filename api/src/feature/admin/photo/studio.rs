@@ -160,6 +160,9 @@ impl GenerateRequest {
         } else {
             prompt.push_str("保持原图动作和姿态不变。");
         }
+        if outfit_index.is_some() {
+            prompt.push_str("最终背景仅来自明确标注的背景图；没有单独上传背景时仅来自第一张人像。衣服和姿态参考图中的场景、墙面、门窗、设备、前景及其拍摄环境一律不使用。");
+        }
         Ok(prompt)
     }
 }

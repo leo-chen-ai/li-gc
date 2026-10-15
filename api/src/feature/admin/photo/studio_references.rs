@@ -146,7 +146,15 @@ fn storage_key<'a>(raw: &'a str, base: &str) -> Option<&'a str> {
     let key = raw
         .strip_prefix(base.trim_end_matches('/'))?
         .strip_prefix('/')?;
-    if key.is_empty() || key.contains('?') || key.contains('#') || key.split('/').any(|s| s == "..")
+    let decoded = percent_encoding::percent_decode_str(key)
+        .decode_utf8()
+        .ok()?;
+    if key.is_empty()
+        || decoded.starts_with('/')
+        || decoded.contains('\\')
+        || decoded.split('/').any(|part| part == "." || part == "..")
+        || key.contains('?')
+        || key.contains('#')
     {
         return None;
     }
@@ -201,6 +209,8 @@ mod tests {
             "https://bucket.example/attendance.evil/a",
             "https://bucket.example/attendance/../secret",
             "http://127.0.0.1/a",
+            "https://bucket.example/attendance//etc/passwd",
+            "https://bucket.example/attendance/%2e%2e/secret",
             "https://bucket.example/attendance/a?redirect=x",
         ] {
             assert!(storage_key(bad, base).is_none());
