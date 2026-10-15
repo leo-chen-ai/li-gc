@@ -107,7 +107,7 @@ impl CompositeClient {
         self.compose_images(&[person, background], &prompt).await
     }
 
-    /// 第一张始终为人像；其余参考图由提示词明确标注用途。
+    /// 参考图角色由提示词明确标注；需要保留原场景时将编辑底图放在第一张。
     pub async fn compose_images(
         &self,
         images: &[&[u8]],
