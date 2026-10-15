@@ -23,6 +23,7 @@ pub struct SampleRequest {
 #[derive(Serialize, sqlx::FromRow)]
 pub struct Reference {
     record_id: Uuid,
+    out_record_id: Uuid,
 }
 
 // 两条查询共用同一真实来源条件，指定ID也不能绕过时间、来源和授权过滤。
@@ -59,6 +60,91 @@ fn filtered_query<'a>(
     query
 }
 
+const PAIR_SELECT: &str = "WITH recent AS (SELECT r.id AS record_id,r.worker_id,r.direction,r.trigger_time,(r.trigger_time AT TIME ZONE 'Asia/Shanghai')::date AS day";
+const PAIR_RESULT: &str = r#"
+), days AS (
+ SELECT worker_id,day,
+ (array_agg(record_id ORDER BY trigger_time,record_id) FILTER (WHERE direction=0))[1] AS record_id,
+ (array_agg(record_id ORDER BY trigger_time DESC,record_id) FILTER (WHERE direction=1))[1] AS out_record_id
+ FROM recent GROUP BY worker_id,day
+ HAVING COUNT(*) FILTER (WHERE direction=0)>0 AND COUNT(*) FILTER (WHERE direction=1)>0
+   AND MIN(trigger_time) FILTER (WHERE direction=0)<=MAX(trigger_time) FILTER (WHERE direction=1)
+), people AS (
+ SELECT DISTINCT ON(worker_id) record_id,out_record_id FROM days ORDER BY worker_id,day DESC
+) SELECT record_id,out_record_id FROM people ORDER BY random() LIMIT
+"#;
+fn pair_query(project_id: Uuid, user: &AuthUser, count: usize) -> QueryBuilder<'static, Postgres> {
+    let mut query = filtered_query(PAIR_SELECT, project_id, user);
+    query.push(PAIR_RESULT).push_bind(count as i64);
+    query
+}
+
+#[derive(sqlx::FromRow)]
+struct PairPhoto {
+    id: Uuid,
+    worker_id: Uuid,
+    day: chrono::NaiveDate,
+    direction: i16,
+    photo_data: String,
+}
+
+pub(super) async fn load_pair(
+    state: &AppState,
+    user: &AuthUser,
+    project_id: Uuid,
+    entry_id: Uuid,
+    exit_id: Uuid,
+) -> Result<(Vec<u8>, Vec<u8>), ApiError> {
+    let mut query = filtered_query(
+        "SELECT r.id,r.worker_id,(r.trigger_time AT TIME ZONE 'Asia/Shanghai')::date AS day,r.direction,photo.photo_data",
+        project_id,
+        user,
+    );
+    query
+        .push(" AND r.id IN (")
+        .push_bind(entry_id)
+        .push(",")
+        .push_bind(exit_id)
+        .push(")");
+    let rows = query
+        .build_query_as::<PairPhoto>()
+        .fetch_all(state.db.pool())
+        .await
+        .map_err(|error| {
+            tracing::error!(%error,"读取进出场参考失败");
+            internal_error("读取进出场参考失败")
+        })?;
+    let (entry, exit) = match_pair(&rows, entry_id, exit_id)?;
+    tokio::try_join!(
+        reference_bytes(state, &entry.photo_data),
+        reference_bytes(state, &exit.photo_data)
+    )
+}
+
+fn match_pair(
+    rows: &[PairPhoto],
+    entry_id: Uuid,
+    exit_id: Uuid,
+) -> Result<(&PairPhoto, &PairPhoto), ApiError> {
+    let entry = rows
+        .iter()
+        .find(|row| row.id == entry_id && row.direction == 0);
+    let exit = rows
+        .iter()
+        .find(|row| row.id == exit_id && row.direction == 1);
+    let (Some(entry), Some(exit)) = (entry, exit) else {
+        return Err(invalid_input(
+            "参考照片必须分别为所选项目近7天的真实进场、出场原图，请重新抽取",
+        ));
+    };
+    if entry.worker_id != exit.worker_id || entry.day != exit.day {
+        return Err(invalid_input(
+            "同套参考必须来自同一人员、同一天的进出场照片",
+        ));
+    }
+    Ok((entry, exit))
+}
+
 pub async fn sample(
     State(state): State<AppState>,
     Extension(user): Extension<AuthUser>,
@@ -67,14 +153,7 @@ pub async fn sample(
     if !(1..=30).contains(&body.count) {
         return Err(invalid_input("参考照片数量必须为1–30"));
     }
-    let mut query = filtered_query(
-        "WITH people AS (SELECT DISTINCT ON (r.worker_id) r.id AS record_id, r.worker_id",
-        body.project_id,
-        &user,
-    );
-    // 每人只取最近一张，随机选不同人，不读取或返回姓名、身份证号。
-    query.push(" ORDER BY r.worker_id,r.trigger_time DESC,r.id) SELECT record_id FROM people ORDER BY random() LIMIT ")
-        .push_bind(body.count as i64);
+    let mut query = pair_query(body.project_id, &user, body.count);
     let rows = query
         .build_query_as::<Reference>()
         .fetch_all(state.db.pool())
@@ -85,7 +164,7 @@ pub async fn sample(
         })?;
     if rows.len() < body.count {
         return Err(invalid_input(format!(
-            "所选项目近7天只有{}位可用的设备考勤人员，请减少套数或更换项目；不会重复使用同一人的照片",
+            "所选项目近7天只有{}位具有同日进出场原图的设备考勤人员，请减少套数或更换项目；不会重复使用同一人的照片",
             rows.len()
         )));
     }
@@ -109,6 +188,10 @@ pub(super) async fn load_reference(
             internal_error("读取真实考勤参考失败")
         })?
         .ok_or_else(|| invalid_input("参考照片不属于可访问项目近7天的设备原始考勤，请重新抽取"))?;
+    reference_bytes(state, &raw).await
+}
+
+async fn reference_bytes(state: &AppState, raw: &str) -> Result<Vec<u8>, ApiError> {
     let bytes = if raw.starts_with("data:image/") {
         let (header, encoded) = raw
             .split_once(',')
@@ -119,7 +202,7 @@ pub(super) async fn load_reference(
         general_purpose::STANDARD
             .decode(encoded)
             .map_err(|_| invalid_input("参考图片编码错误"))?
-    } else if let Some(key) = storage_key(&raw, state.storage.public_base_url()) {
+    } else if let Some(key) = storage_key(raw, state.storage.public_base_url()) {
         // 对象存储走自身provider，不抓取任意URL，也不跟随重定向。
         state
             .storage
@@ -198,6 +281,54 @@ mod tests {
                 .contains("user_managed_projects")
         );
     }
+    #[test]
+    fn pairs_require_distinct_directions_same_worker_and_same_local_day() {
+        let worker = Uuid::new_v4();
+        let date = chrono::NaiveDate::from_ymd_opt(2026, 10, 15).unwrap();
+        let mut rows = vec![
+            PairPhoto {
+                id: Uuid::new_v4(),
+                worker_id: worker,
+                day: date,
+                direction: 0,
+                photo_data: "entry".into(),
+            },
+            PairPhoto {
+                id: Uuid::new_v4(),
+                worker_id: worker,
+                day: date,
+                direction: 1,
+                photo_data: "exit".into(),
+            },
+        ];
+        let (entry, exit) = (rows[0].id, rows[1].id);
+        assert!(match_pair(&rows, entry, exit).is_ok());
+        assert!(match_pair(&rows, exit, entry).is_err());
+        assert!(match_pair(&rows, entry, entry).is_err());
+        rows[1].worker_id = Uuid::new_v4();
+        assert!(match_pair(&rows, entry, exit).is_err());
+        rows[1].worker_id = worker;
+        rows[1].day = date.pred_opt().unwrap();
+        assert!(match_pair(&rows, entry, exit).is_err());
+        let user = AuthUser {
+            user_id: Uuid::new_v4(),
+            email: "test@example.invalid".into(),
+            roles: vec![Role::User],
+            session_id: "test".into(),
+        };
+        let query = pair_query(Uuid::new_v4(), &user, 30);
+        for clause in [
+            "user_managed_projects",
+            "WHERE direction=0",
+            "WHERE direction=1",
+            "GROUP BY worker_id,day",
+            "DISTINCT ON(worker_id)",
+            "ORDER BY random()",
+        ] {
+            assert!(query.sql().contains(clause));
+        }
+    }
+
     #[test]
     fn storage_keys_cannot_escape_or_use_similar_hosts() {
         let base = "https://bucket.example/attendance";

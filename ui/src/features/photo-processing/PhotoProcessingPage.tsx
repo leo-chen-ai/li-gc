@@ -10,15 +10,13 @@ import { constructionProjectService } from "@/features/projects/services/constru
 import { imageZip, saveBlob } from "./download";
 import { generatePhotoPair, PhotoJobError } from "./generation";
 
-type ImageSlot = "person" | "foreground" | "background";
+type ImageSlot = "person";
 type Uploaded = { id: string; url: string };
 type Payload = {
   model: string;
   person_id: string;
   reference_project_id?: string;
-  reference_record_ids?: string[];
-  foreground_id?: string;
-  background_id?: string;
+  references?: { record_id: string; out_record_id: string }[];
   season: string;
   count: number;
   change_clothes: boolean;
@@ -33,8 +31,6 @@ type Result = {
 };
 const slots: { key: ImageSlot; label: string; hint: string }[] = [
   { key: "person", label: "人像照片", hint: "必填 · 上传清晰的人像照片" },
-  { key: "foreground", label: "前景图", hint: "选填 · 放在人物前方的物体" },
-  { key: "background", label: "背景图", hint: "选填 · 人物身后的环境" },
 ];
 
 function errorMessage(error: unknown, fallback: string): string {
@@ -123,11 +119,12 @@ export function PhotoProcessingPage() {
     try {
       const requestId = pendingJobs.current.get(index) ?? crypto.randomUUID();
       pendingJobs.current.set(index, requestId);
-      const { reference_record_ids, ...settings } = payload;
+      const { references, ...settings } = payload;
       const pair = await generatePhotoPair(
         {
           ...settings,
-          reference_record_id: reference_record_ids?.[index],
+          reference_record_id: references?.[index]?.record_id,
+          reference_out_record_id: references?.[index]?.out_record_id,
           variant: index,
           entry_image: entryImage,
         },
@@ -168,16 +165,14 @@ export function PhotoProcessingPage() {
 
   const start = async () => {
     if (!images.person || hasUpload || inFlight.current) return;
-    if ((changeClothes || changePose) && !projectId) {
-      toast.error("请选择真实衣服和动作的参考项目");
+    if (!projectId) {
+      toast.error("请选择真实照片的参考项目");
       return;
     }
     const payload: Payload = {
       model,
       reference_project_id: projectId || undefined,
       person_id: images.person.id,
-      foreground_id: images.foreground?.id,
-      background_id: images.background?.id,
       season,
       count,
       change_clothes: changeClothes,
@@ -186,16 +181,17 @@ export function PhotoProcessingPage() {
     inFlight.current = true;
     setPreparing(true);
     try {
-      if (changeClothes || changePose) {
-        const response = await apiClient.post<ApiResponse<{ record_id: string }[]>>(
-          "/admin/photo-processing/studio-references", { project_id: projectId, count },
-        );
-        const references = response.data.data;
-        if (!references || references.length !== count) {
-          throw new Error("真实参考照片数量不足，请减少套数");
-        }
-        payload.reference_record_ids = references.map((item) => item.record_id);
+      const response = await apiClient.post<
+        ApiResponse<{ record_id: string; out_record_id: string }[]>
+      >("/admin/photo-processing/studio-references", { project_id: projectId, count });
+      const references = response.data.data;
+      if (
+        !references || references.length !== count ||
+        references.some((item) => !item.out_record_id)
+      ) {
+        throw new Error("进出场成对参考照片数量不足，请减少套数");
       }
+      payload.references = references;
       batch.current = payload;
       setResults(
         Array.from({ length: count }, (_, index) => ({ index, status: "running" })),
@@ -240,7 +236,7 @@ export function PhotoProcessingPage() {
         </p>
       </div>
       <section className="space-y-6 rounded-xl border bg-card p-5">
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="max-w-sm">
           {slots.map(({ key, label, hint }) => (
             <div key={key} className="space-y-2">
               <div className="flex items-center justify-between">
@@ -309,8 +305,7 @@ export function PhotoProcessingPage() {
           ))}
         </div>
         <p className="text-xs text-muted-foreground">
-          前景和背景都不上传时，直接根据人像原图变换。支持图片，单张不超过
-          15MB。
+          只需上传人像，单张不超过15MB。背景自动采用所选项目的真实考勤照片，进场、出场分别匹配。
         </p>
         <div className="space-y-4 border-t pt-5">
           <div className="space-y-2">
@@ -338,7 +333,7 @@ export function PhotoProcessingPage() {
             </p>
           </div>
           <div className="space-y-2">
-            <label className="block text-sm font-medium">真实衣服、动作参考项目</label>
+            <label className="block text-sm font-medium">真实照片参考项目</label>
             <ProjectSearchSelect
               value={projectId}
               onValueChange={setProjectId}
@@ -347,8 +342,8 @@ export function PhotoProcessingPage() {
               className="sm:max-w-md"
             />
             <p className="text-xs text-muted-foreground">
-              自动抽取近7天不同人员的真实设备考勤完整原图，每套参考一位人员的衣服和自然头部姿态。
-              不使用参考人的脸、背景或安全帽；衣服适当改色，背景沿用上传图片。人员不足时提示减少套数。
+              自动抽取近7天不同人员同一天的进出场完整原图，参考衣服和自然头部姿态。
+              进场用进场背景，出场用出场背景；同套衣服保持一致。不复制参考人的脸或安全帽。
             </p>
           </div>
           <div className="flex flex-wrap gap-6">
