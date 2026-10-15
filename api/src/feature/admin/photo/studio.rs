@@ -22,6 +22,8 @@ static GENERATIONS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(3
 #[derive(Deserialize, Serialize)]
 pub struct GenerateRequest {
     person_id: Uuid,
+    reference_project_id: Option<Uuid>,
+    reference_record_id: Option<Uuid>,
     model: Option<String>,
     foreground_id: Option<Uuid>,
     background_id: Option<Uuid>,
@@ -61,6 +63,13 @@ impl GenerateRequest {
     }
 
     fn prompt(&self) -> Result<String, crate::infrastructure::web::response::ApiError> {
+        self.prompt_with_outfit(None)
+    }
+
+    fn prompt_with_outfit(
+        &self,
+        outfit_index: Option<usize>,
+    ) -> Result<String, crate::infrastructure::web::response::ApiError> {
         if !(1..=30).contains(&self.count) || self.variant >= self.count {
             return Err(invalid_input(
                 "生成数量必须为1–30，序号必须在生成数量范围内",
@@ -123,18 +132,25 @@ impl GenerateRequest {
             "橄榄绿",
         ];
         if self.change_clothes {
-            let style = clothes[self.variant % clothes.len()];
-            prompt.push_str(&format!(
+            if let Some(index) = outfit_index {
+                prompt.push_str(&format!("第{index}张图是另一位人员真实考勤的完整原图，不是衣服裁片。整张图仅用作服装参考，姿态是否参考以本次动作开关要求为准，需要结合完整可见衣服的轮廓、领口、肩线、袖子、版型和穿着方式进行换装。人的脸、眼镜、发型、年龄和身形只能来自第一张人像，第{index}张完整参考图中的人物只是一位穿衣模特，绝对不能复制其脸、眼睛、发型、皮肤、年龄、体型、帽子或背景；不要把第一张人像换成第二个人。只参考完整原图中可见的整件衣服，依据其真实领型、布料纹理、接缝、松紧、自然褶皱、日常使用程度来换装，不再凭空设计统一工装或新制服。颜色改成{}，与参考原色有区别但仍是普通日常穿衣配色；略微改变领口边缘或接缝细节，去掉文字、标识、工牌和大面积图案，不能完整照搬参考。保持普通劳动者实际穿着的松垮和自然垂坠，不熨平、不修身、不做新品广告，不额外制造斑点、夸张泥污或破损。按{season}温度仅作必要的厚薄调整，不擅自将普通T恤、Polo衫改成制式工装夹克。原图背景和人物身份不变。", colors[self.variant % 10]));
+            } else {
+                let style = clothes[self.variant % clothes.len()];
+                prompt.push_str(&format!(
                 "换成适合{season}的{}{}，本批共{}套，这是第{}套，每套服装款式和颜色应不同。衣服应像普通建筑工人平时穿着劳动的旧工作服：棉布或涤棉面料、宽松实用，有不规则自然褶皱、轻微洗旧褪色、领口袖口自然磨损，以及衣服局部少量浅灰浮尘和劳动留下的轻微灰印。不要全新干净、熨烫平整、挺括修身、时装卫衣、广告展示或统一新制服。灰尘仅限衣服且少量自然，不用夸张泥点、油污、破洞或全身脏污；不能给脸、头发或背景加污渍。身体位置轻微改变时布料随姿态自然变化，不改变人物身份或场景。",
                 colors[self.variant % 10],
                 style,
                 self.count,
                 self.variant + 1
             ));
+            }
         } else {
             prompt.push_str("保持原图服装完全不变。");
         }
-        if self.change_pose {
+        if self.change_pose && outfit_index.is_some() {
+            let index = outfit_index.unwrap();
+            prompt.push_str(&format!("第{index}张完整真实考勤图同时提供姿态参考：参考其肩颈放松程度、头部朝向、轻微俯仰、自然嘴部状态和人物占画面比例，将这些姿态适配到第一张人物身上。只转移姿态，不复制参考人的五官、眼睛形状、发型、年龄、肤色、身形或身份。眼睛仍注视镜头，身体基本正对镜头，避免大幅侧脸；如参考图有抬手、操作设备或遮脸，忽略手部动作，双手自然放低留在画外。不采用统一摆拍姿势，不照搬参考背景、设备或光照。"));
+        } else if self.change_pose {
             prompt.push_str(&format!(
                 "人物在现场固定镜头前自然站立。{}本张的头部动作与表情要求：{}。{}。变化重点是头部转动或俯仰与自然表情，眼睛始终保持看着镜头，不能只有身体重心变化而脸部完全一样。身体和胸口仍基本朝向镜头，不大幅扭身，不看远处，不做摆拍表演。不用手做动作，不触摸设备或衣物，不整理领口袖口，不抬手不叉腰；双手自然放低并留在画外。取头部正在轻微调整但双眼仍注视镜头中心的一帧，保持近景和原有背景。",
                 FACE_SCAN_STANCE,
@@ -336,17 +352,17 @@ pub async fn generate(
     let _permit = GENERATIONS
         .try_acquire()
         .map_err(|_| invalid_input("当前合成请求较多，请稍后重试"))?;
-    generate_inner(state, user.user_id, body)
+    generate_inner(state, user, body)
         .await
         .map(|pair| crate::infrastructure::web::response::ApiSuccess::default().with_data(pair))
 }
 
 async fn generate_inner(
     state: AppState,
-    user_id: Uuid,
+    user: AuthUser,
     body: GenerateRequest,
 ) -> Result<GenerateResponse, crate::infrastructure::web::response::ApiError> {
-    let prompt = body.prompt()?;
+    body.prompt()?;
     let mut config = state.config.photo_composite.clone();
     config.ephone_ai_image_size = "1024x1024".into();
     config.ephone_ai_image_model = body.resolved_model()?.to_string();
@@ -354,16 +370,37 @@ async fn generate_inner(
     if !client.is_enabled() {
         return Err(invalid_input("AI合成服务尚未配置"));
     }
-    let mut images = vec![load_image(&state, body.person_id, user_id).await?];
+    let mut images = vec![load_image(&state, body.person_id, user.user_id).await?];
     for id in [body.foreground_id, body.background_id]
         .into_iter()
         .flatten()
     {
-        images.push(load_image(&state, id, user_id).await?);
+        images.push(load_image(&state, id, user.user_id).await?);
     }
     if let Some(uri) = &body.entry_image {
         decode_entry_image(uri).map_err(invalid_input)?;
     }
+    let reference_index = if body.entry_image.is_none()
+        && (body.change_clothes || body.change_pose)
+        && body.reference_record_id.is_some()
+    {
+        let project_id = body
+            .reference_project_id
+            .ok_or_else(|| invalid_input("请选择真实衣服参考项目"))?;
+        images.push(
+            super::studio_references::load_reference(
+                &state,
+                &user,
+                project_id,
+                body.reference_record_id.unwrap(),
+            )
+            .await?,
+        );
+        Some(images.len())
+    } else {
+        None
+    };
+    let prompt = body.prompt_with_outfit(reference_index)?;
     let pair = generate_pair(&client, &body, &images, &prompt)
         .await
         .map_err(internal_error)?;
@@ -479,7 +516,7 @@ pub async fn start_job(
         // 后台任务独立于HTTP连接；断线后仍可查询，不重复提交付费生成。
         let result = match tokio::time::timeout(
             Duration::from_secs(600),
-            generate_inner(state, user.user_id, request.body),
+            generate_inner(state, user, request.body),
         )
         .await
         {
@@ -553,6 +590,8 @@ mod tests {
     fn request() -> GenerateRequest {
         GenerateRequest {
             person_id: Uuid::nil(),
+            reference_project_id: None,
+            reference_record_id: None,
             model: None,
             foreground_id: None,
             background_id: None,
@@ -579,6 +618,33 @@ mod tests {
         assert!(prompt.contains("服装完全不变"));
         assert!(prompt.contains("动作和姿态不变"));
     }
+    #[test]
+    fn whole_attendance_reference_separates_identity_clothes_pose_and_background() {
+        let mut req = request();
+        req.foreground_id = Some(Uuid::nil());
+        req.background_id = Some(Uuid::nil());
+        let prompt = req.prompt_with_outfit(Some(4)).unwrap();
+        assert!(prompt.contains("第2张图是前景"));
+        assert!(prompt.contains("第3张图是背景"));
+        assert!(prompt.contains("第4张图是另一位人员真实考勤的完整原图"));
+        assert!(prompt.contains("第4张完整真实考勤图同时提供姿态参考"));
+        assert!(prompt.contains("不照搬参考背景、设备或光照"));
+        assert!(
+            !prompt.contains("头部动作与表情要求"),
+            "有真实参考时不再叠加模板姿态"
+        );
+        req.change_pose = false;
+        let prompt = req.prompt_with_outfit(Some(4)).unwrap();
+        assert!(prompt.contains("保持原图动作和姿态不变"));
+        assert!(!prompt.contains("同时提供姿态参考"));
+        req.change_clothes = false;
+        req.change_pose = true;
+        let prompt = req.prompt_with_outfit(Some(4)).unwrap();
+        assert!(prompt.contains("保持原图服装完全不变"));
+        assert!(prompt.contains("同时提供姿态参考"));
+        assert!(!prompt.contains("颜色改成"));
+    }
+
     #[test]
     fn validates_limits_and_seasons_and_varies_outfits() {
         let mut req = request();
@@ -752,7 +818,12 @@ mod tests {
             lease_secs: 60,
         });
         let mut req = request();
-        let images = vec![b"original-person".to_vec(), b"foreground".to_vec()];
+        let images = vec![
+            b"original-person".to_vec(),
+            b"foreground".to_vec(),
+            b"background".to_vec(),
+            b"real-attendance-reference".to_vec(),
+        ];
         let first = generate_pair(&client, &req, &images, &req.prompt().unwrap())
             .await
             .unwrap();
@@ -772,7 +843,7 @@ mod tests {
             String::from_utf8_lossy(&calls[0])
                 .matches("name=\"image\"")
                 .count(),
-            2
+            4
         );
         for call in &calls[1..] {
             assert_eq!(
@@ -819,7 +890,21 @@ mod tests {
                 let mut req = request();
                 req.count = pair_count;
                 req.variant = variant;
-                let result = generate_pair(&client, &req, &[person], &req.prompt().unwrap()).await;
+                req.season = std::env::var("PHOTO_REAL_SEASON").unwrap_or("autumn".into());
+                let mut refs = vec![person];
+                let outfit_index = if let Ok(paths) = std::env::var("PHOTO_REAL_OUTFIT_FILES") {
+                    let paths: Vec<_> = paths.split(',').collect();
+                    assert!(
+                        variant < paths.len(),
+                        "Each pair requires a distinct real outfit"
+                    );
+                    refs.push(std::fs::read(paths[variant]).unwrap());
+                    Some(refs.len())
+                } else {
+                    None
+                };
+                let prompt = req.prompt_with_outfit(outfit_index).unwrap();
+                let result = generate_pair(&client, &req, &refs, &prompt).await;
                 match result {
                     Ok(pair) => {
                         let entry = decode_entry_image(&pair.in_image).unwrap();

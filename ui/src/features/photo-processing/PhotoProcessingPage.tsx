@@ -2,6 +2,9 @@ import { useRef, useState } from "react";
 import { Download, ImagePlus, Loader2, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { apiClient } from "@/lib/api";
+import type { ApiResponse } from "@/lib/api/types";
+import { ProjectSearchSelect } from "@/features/projects/components/ProjectSearchSelect";
 import { Input } from "@/components/ui/input";
 import { constructionProjectService } from "@/features/projects/services/construction-project-service";
 import { imageZip, saveBlob } from "./download";
@@ -12,6 +15,8 @@ type Uploaded = { id: string; url: string };
 type Payload = {
   model: string;
   person_id: string;
+  reference_project_id?: string;
+  reference_record_ids?: string[];
   foreground_id?: string;
   background_id?: string;
   season: string;
@@ -48,6 +53,8 @@ export function PhotoProcessingPage() {
   const [uploading, setUploading] = useState<
     Partial<Record<ImageSlot, boolean>>
   >({});
+  const [projectId, setProjectId] = useState("");
+  const [preparing, setPreparing] = useState(false);
   const [count, setCount] = useState(6);
   const [season, setSeason] = useState("autumn");
   const [model, setModel] = useState("gemini-3.1-flash-lite-image");
@@ -60,7 +67,7 @@ export function PhotoProcessingPage() {
   const batch = useRef<Payload | null>(null);
   const inFlight = useRef(false);
   const pendingJobs = useRef(new Map<number, string>());
-  const busy = results.some((item) => item.status === "running");
+  const busy = preparing || results.some((item) => item.status === "running");
   const hasUpload = Object.values(uploading).some(Boolean);
   const successful = results.filter((item) => item.status === "success");
   const generated = results.flatMap((item) =>
@@ -116,7 +123,16 @@ export function PhotoProcessingPage() {
     try {
       const requestId = pendingJobs.current.get(index) ?? crypto.randomUUID();
       pendingJobs.current.set(index, requestId);
-      const pair = await generatePhotoPair({ ...payload, variant: index, entry_image: entryImage }, requestId);
+      const { reference_record_ids, ...settings } = payload;
+      const pair = await generatePhotoPair(
+        {
+          ...settings,
+          reference_record_id: reference_record_ids?.[index],
+          variant: index,
+          entry_image: entryImage,
+        },
+        requestId,
+      );
       pendingJobs.current.delete(index);
       if (!pair?.in_image) throw new Error("未返回进场图片");
       setResults((current) =>
@@ -152,8 +168,13 @@ export function PhotoProcessingPage() {
 
   const start = async () => {
     if (!images.person || hasUpload || inFlight.current) return;
+    if ((changeClothes || changePose) && !projectId) {
+      toast.error("请选择真实衣服和动作的参考项目");
+      return;
+    }
     const payload: Payload = {
       model,
+      reference_project_id: projectId || undefined,
       person_id: images.person.id,
       foreground_id: images.foreground?.id,
       background_id: images.background?.id,
@@ -162,20 +183,32 @@ export function PhotoProcessingPage() {
       change_clothes: changeClothes,
       change_pose: changePose,
     };
-    batch.current = payload;
     inFlight.current = true;
-    setResults(
-      Array.from({ length: count }, (_, index) => ({
-        index,
-        status: "running",
-      })),
-    );
+    setPreparing(true);
     try {
+      if (changeClothes || changePose) {
+        const response = await apiClient.post<ApiResponse<{ record_id: string }[]>>(
+          "/admin/photo-processing/studio-references", { project_id: projectId, count },
+        );
+        const references = response.data.data;
+        if (!references || references.length !== count) {
+          throw new Error("真实参考照片数量不足，请减少套数");
+        }
+        payload.reference_record_ids = references.map((item) => item.record_id);
+      }
+      batch.current = payload;
+      setResults(
+        Array.from({ length: count }, (_, index) => ({ index, status: "running" })),
+      );
       pendingJobs.current.clear();
+      setPreparing(false);
       await Promise.allSettled(
         Array.from({ length: count }, (_, index) => generate(index, payload)),
       );
+    } catch (error) {
+      toast.error(errorMessage(error, "抽取真实考勤参考失败"));
     } finally {
+      setPreparing(false);
       inFlight.current = false;
     }
   };
@@ -302,6 +335,20 @@ export function PhotoProcessingPage() {
             <p className="text-xs text-muted-foreground">
               Nano Banana Lite 按用量计费，实际扣费以 ephone 账号线路为准。
               Dev 上游近期大量失败，暂不开放，避免重复提交。
+            </p>
+          </div>
+          <div className="space-y-2">
+            <label className="block text-sm font-medium">真实衣服、动作参考项目</label>
+            <ProjectSearchSelect
+              value={projectId}
+              onValueChange={setProjectId}
+              disabled={busy}
+              allOptionLabel="请选择参考项目"
+              className="sm:max-w-md"
+            />
+            <p className="text-xs text-muted-foreground">
+              自动抽取近7天不同人员的真实设备考勤完整原图，每套参考一位人员的衣服和自然头部姿态。
+              不使用参考人的脸、背景或安全帽；衣服适当改色，背景沿用上传图片。人员不足时提示减少套数。
             </p>
           </div>
           <div className="flex flex-wrap gap-6">

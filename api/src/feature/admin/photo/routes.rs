@@ -13,6 +13,7 @@ use super::handler;
 /// 避免重复执行。天然满足「先只开放 admin」。
 pub fn photo_routes() -> Router<AppState> {
     Router::new()
+        .route("/studio-references", post(super::studio_references::sample))
         .route("/generate", post(super::studio::generate))
         .route("/generation-jobs", post(super::studio::start_job))
         .route("/generation-jobs/{id}", get(super::studio::get_job))

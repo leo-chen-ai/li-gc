@@ -5,6 +5,7 @@ pub mod handler;
 pub mod repository;
 pub mod routes;
 pub mod studio;
+pub mod studio_references;
 
 pub use routes::photo_routes;
 
