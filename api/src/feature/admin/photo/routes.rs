@@ -14,6 +14,8 @@ use super::handler;
 pub fn photo_routes() -> Router<AppState> {
     Router::new()
         .route("/generate", post(super::studio::generate))
+        .route("/generation-jobs", post(super::studio::start_job))
+        .route("/generation-jobs/{id}", get(super::studio::get_job))
         .route(
             "/groups",
             get(handler::list_groups).post(handler::create_group),

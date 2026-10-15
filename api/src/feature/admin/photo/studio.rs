@@ -1,7 +1,12 @@
 //! 每套先生成进场图，再以进场图生成出场图；套与套之间并发。
-use axum::extract::{Extension, State};
+use axum::extract::{Extension, Path, State};
 use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
+use std::{
+    collections::HashMap,
+    sync::{Mutex, OnceLock},
+    time::{Duration, Instant},
+};
 use uuid::Uuid;
 
 use super::{composite::CompositeClient, internal_error, invalid_input, ok};
@@ -14,7 +19,7 @@ use crate::{
 // 跨请求限制内存占用，允许单次30套同时运行。
 static GENERATIONS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(30);
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct GenerateRequest {
     person_id: Uuid,
     model: Option<String>,
@@ -29,7 +34,7 @@ pub struct GenerateRequest {
     entry_image: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct GenerateResponse {
     /// 兼容刷新前仍使用旧页面的客户端。
     image: String,
@@ -302,6 +307,19 @@ pub async fn generate(
     Extension(user): Extension<AuthUser>,
     TrimmedJson(body): TrimmedJson<GenerateRequest>,
 ) -> ApiResult<GenerateResponse> {
+    let _permit = GENERATIONS
+        .try_acquire()
+        .map_err(|_| invalid_input("当前合成请求较多，请稍后重试"))?;
+    generate_inner(state, user.user_id, body)
+        .await
+        .map(|pair| crate::infrastructure::web::response::ApiSuccess::default().with_data(pair))
+}
+
+async fn generate_inner(
+    state: AppState,
+    user_id: Uuid,
+    body: GenerateRequest,
+) -> Result<GenerateResponse, crate::infrastructure::web::response::ApiError> {
     let prompt = body.prompt()?;
     let mut config = state.config.photo_composite.clone();
     config.ephone_ai_image_size = "1024x1024".into();
@@ -310,15 +328,12 @@ pub async fn generate(
     if !client.is_enabled() {
         return Err(invalid_input("AI合成服务尚未配置"));
     }
-    let _permit = GENERATIONS
-        .try_acquire()
-        .map_err(|_| invalid_input("当前合成请求较多，请稍后重试"))?;
-    let mut images = vec![load_image(&state, body.person_id, user.user_id).await?];
+    let mut images = vec![load_image(&state, body.person_id, user_id).await?];
     for id in [body.foreground_id, body.background_id]
         .into_iter()
         .flatten()
     {
-        images.push(load_image(&state, id, user.user_id).await?);
+        images.push(load_image(&state, id, user_id).await?);
     }
     if let Some(uri) = &body.entry_image {
         decode_entry_image(uri).map_err(invalid_input)?;
@@ -326,12 +341,189 @@ pub async fn generate(
     let pair = generate_pair(&client, &body, &images, &prompt)
         .await
         .map_err(internal_error)?;
-    ok(pair)
+    Ok(pair)
+}
+
+// 临时任务与页面结果同生命周期；不创建照片组或数据库记录。
+// 限量缓存避免结果图片无限占用内存，已完成结果保留30分钟。
+static JOBS: OnceLock<Mutex<HashMap<Uuid, PhotoJob>>> = OnceLock::new();
+const JOB_TTL: Duration = Duration::from_secs(30 * 60);
+#[derive(Clone)]
+struct PhotoJob {
+    owner: Uuid,
+    signature: String,
+    updated: Instant,
+    result: Option<Result<GenerateResponse, String>>,
+}
+fn jobs() -> &'static Mutex<HashMap<Uuid, PhotoJob>> {
+    JOBS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+#[derive(Deserialize)]
+pub struct StartRequest {
+    request_id: Uuid,
+    #[serde(flatten)]
+    body: GenerateRequest,
+}
+#[derive(Serialize)]
+pub struct JobResponse {
+    job_id: Uuid,
+    status: &'static str,
+    result: Option<GenerateResponse>,
+    error: Option<String>,
+}
+impl PhotoJob {
+    fn response(&self, id: Uuid) -> JobResponse {
+        match &self.result {
+            None => JobResponse {
+                job_id: id,
+                status: "running",
+                result: None,
+                error: None,
+            },
+            Some(Ok(result)) => JobResponse {
+                job_id: id,
+                status: "completed",
+                result: Some(result.clone()),
+                error: None,
+            },
+            Some(Err(error)) => JobResponse {
+                job_id: id,
+                status: "failed",
+                result: None,
+                error: Some(error.clone()),
+            },
+        }
+    }
+}
+
+fn reserve_job(
+    id: Uuid,
+    owner: Uuid,
+    signature: String,
+) -> Result<
+    (JobResponse, Option<tokio::sync::SemaphorePermit<'static>>),
+    crate::infrastructure::web::response::ApiError,
+> {
+    let mut store = jobs()
+        .lock()
+        .map_err(|_| internal_error("任务状态暂不可用"))?;
+    store.retain(|_, job| job.updated.elapsed() < JOB_TTL);
+    if let Some(job) = store.get(&id) {
+        if job.owner != owner || job.signature != signature {
+            return Err(invalid_input("任务编号已使用，请重新发起"));
+        }
+        return Ok((job.response(id), None));
+    }
+    if store.len() >= 256 {
+        return Err(invalid_input("临时任务较多，请稍后重试"));
+    }
+    let permit = GENERATIONS
+        .try_acquire()
+        .map_err(|_| invalid_input("当前合成请求较多，请稍后重试"))?;
+    let job = PhotoJob {
+        owner,
+        signature,
+        updated: Instant::now(),
+        result: None,
+    };
+    let response = job.response(id);
+    store.insert(id, job);
+    Ok((response, Some(permit)))
+}
+
+pub async fn start_job(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    TrimmedJson(request): TrimmedJson<StartRequest>,
+) -> ApiResult<JobResponse> {
+    request.body.prompt()?;
+    request.body.resolved_model()?;
+    if let Some(uri) = &request.body.entry_image {
+        decode_entry_image(uri).map_err(invalid_input)?;
+    }
+    let signature =
+        serde_json::to_string(&request.body).map_err(|_| internal_error("任务参数编码失败"))?;
+    let id = request.request_id;
+    let (response, permit) = reserve_job(id, user.user_id, signature)?;
+    let Some(permit) = permit else {
+        return ok(response);
+    };
+    tokio::spawn(async move {
+        let _permit = permit;
+        // 后台任务独立于HTTP连接；断线后仍可查询，不重复提交付费生成。
+        let result = match tokio::time::timeout(
+            Duration::from_secs(600),
+            generate_inner(state, user.user_id, request.body),
+        )
+        .await
+        {
+            Ok(result) => result.map_err(|e| e.message),
+            Err(_) => Err("本套生成超时，请稍后重试".into()),
+        };
+        if let Ok(mut store) = jobs().lock() {
+            if let Some(job) = store.get_mut(&id) {
+                job.result = Some(result);
+                job.updated = Instant::now();
+            }
+        }
+    });
+    ok(response)
+}
+
+pub async fn get_job(
+    Extension(user): Extension<AuthUser>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<JobResponse> {
+    let mut store = jobs()
+        .lock()
+        .map_err(|_| internal_error("任务状态暂不可用"))?;
+    store.retain(|_, job| job.updated.elapsed() < JOB_TTL);
+    let job = store
+        .get(&id)
+        .filter(|job| job.owner == user.user_id)
+        .ok_or_else(|| super::not_found("任务已过期或服务已重启，请重新生成"))?;
+    ok(job.response(id))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn jobs_are_idempotent_private_and_expire() {
+        let id = Uuid::new_v4();
+        let owner = Uuid::new_v4();
+        let other = Uuid::new_v4();
+        let (_, permit) = reserve_job(id, owner, "same".into()).unwrap();
+        assert!(permit.is_some());
+        let (again, duplicate_permit) = reserve_job(id, owner, "same".into()).unwrap();
+        assert_eq!(again.status, "running");
+        assert!(duplicate_permit.is_none(), "重复POST不得启动第二个付费任务");
+        assert!(reserve_job(id, other, "same".into()).is_err());
+        assert!(reserve_job(id, owner, "changed".into()).is_err());
+        let auth = |user_id| {
+            Extension(AuthUser {
+                user_id,
+                email: "test@example.invalid".into(),
+                roles: vec![],
+                session_id: "test".into(),
+            })
+        };
+        assert!(get_job(auth(other), Path(id)).await.is_err());
+        // 模拟请求连接结束后，后台仍写入结果，并能通过短GET取回。
+        jobs().lock().unwrap().get_mut(&id).unwrap().result = Some(Ok(GenerateResponse {
+            image: "entry".into(),
+            in_image: "entry".into(),
+            out_image: Some("exit".into()),
+            out_error: None,
+        }));
+        let response = get_job(auth(owner), Path(id)).await.unwrap().data.unwrap();
+        assert_eq!(response.status, "completed");
+        assert_eq!(response.result.unwrap().out_image.as_deref(), Some("exit"));
+        jobs().lock().unwrap().get_mut(&id).unwrap().updated = Instant::now() - JOB_TTL;
+        assert!(get_job(auth(owner), Path(id)).await.is_err());
+        drop(permit);
+    }
+
     fn request() -> GenerateRequest {
         GenerateRequest {
             person_id: Uuid::nil(),

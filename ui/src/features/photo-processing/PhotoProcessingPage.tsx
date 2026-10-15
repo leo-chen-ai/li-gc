@@ -3,10 +3,9 @@ import { Download, ImagePlus, Loader2, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { apiClient } from "@/lib/api";
-import type { ApiResponse } from "@/lib/api/types";
 import { constructionProjectService } from "@/features/projects/services/construction-project-service";
 import { imageZip, saveBlob } from "./download";
+import { generatePhotoPair, PhotoJobError } from "./generation";
 
 type ImageSlot = "person" | "foreground" | "background";
 type Uploaded = { id: string; url: string };
@@ -60,6 +59,7 @@ export function PhotoProcessingPage() {
   );
   const batch = useRef<Payload | null>(null);
   const inFlight = useRef(false);
+  const pendingJobs = useRef(new Map<number, string>());
   const busy = results.some((item) => item.status === "running");
   const hasUpload = Object.values(uploading).some(Boolean);
   const successful = results.filter((item) => item.status === "success");
@@ -114,18 +114,10 @@ export function PhotoProcessingPage() {
     entryImage?: string,
   ) => {
     try {
-      const response = await apiClient.post<
-        ApiResponse<{
-          in_image: string;
-          out_image?: string;
-          out_error?: string;
-        }>
-      >("/admin/photo-processing/generate", {
-        ...payload,
-        variant: index,
-        entry_image: entryImage,
-      });
-      const pair = response.data.data;
+      const requestId = pendingJobs.current.get(index) ?? crypto.randomUUID();
+      pendingJobs.current.set(index, requestId);
+      const pair = await generatePhotoPair({ ...payload, variant: index, entry_image: entryImage }, requestId);
+      pendingJobs.current.delete(index);
       if (!pair?.in_image) throw new Error("未返回进场图片");
       setResults((current) =>
         current.map((item) =>
@@ -143,6 +135,7 @@ export function PhotoProcessingPage() {
         ),
       );
     } catch (error) {
+      if (!(error instanceof PhotoJobError) || !error.resumable) pendingJobs.current.delete(index);
       setResults((current) =>
         current.map((item) =>
           item.index === index
@@ -178,6 +171,7 @@ export function PhotoProcessingPage() {
       })),
     );
     try {
+      pendingJobs.current.clear();
       await Promise.allSettled(
         Array.from({ length: count }, (_, index) => generate(index, payload)),
       );
@@ -508,7 +502,7 @@ export function PhotoProcessingPage() {
                       disabled={busy}
                       onClick={() => void retry(item.index)}
                     >
-                      {item.in_image ? "重试出场" : "重新生成这套"}
+                      {pendingJobs.current.has(item.index) ? "继续获取结果" : item.in_image ? "重试出场" : "重新生成这套"}
                     </Button>
                   </div>
                 )}
