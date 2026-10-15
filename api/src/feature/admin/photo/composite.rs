@@ -350,13 +350,15 @@ impl CompositeClient {
                     });
                 }
                 Some("failed") => {
-                    return Err(CompositeError::Upstream(
-                        result
-                            .get("error")
-                            .and_then(Value::as_str)
-                            .unwrap_or("AI图片生成任务失败")
-                            .to_string(),
-                    ));
+                    let detail = result
+                        .get("error")
+                        .and_then(Value::as_str)
+                        .unwrap_or("AI图片生成任务失败");
+                    tracing::warn!(model = %self.config.ephone_ai_image_model, task_id = id, elapsed_secs = started.elapsed().as_secs(), error = detail, "AI上游任务已明确失败，不自动重提付费任务");
+                    return Err(CompositeError::Upstream(format!(
+                        "{} 上游生成失败（任务 {}）：{}；请切换其他模型，不要反复重试同一线路",
+                        self.config.ephone_ai_image_model, id, detail
+                    )));
                 }
                 Some("queued" | "in_progress" | "pending" | "processing") => {
                     tokio::time::sleep(Duration::from_secs(4).min(remaining)).await;

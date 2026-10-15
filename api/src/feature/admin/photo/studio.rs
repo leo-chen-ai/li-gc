@@ -51,8 +51,10 @@ impl GenerateRequest {
             .map(str::trim)
             .filter(|s| !s.is_empty())
         {
-            None | Some("gpt-image-2-dev") => Ok("gpt-image-2-dev"),
-            Some("gemini-3.1-flash-lite-image") => Ok("gemini-3.1-flash-lite-image"),
+            None | Some("gemini-3.1-flash-lite-image") => Ok("gemini-3.1-flash-lite-image"),
+            Some("gpt-image-2-dev") => Err(invalid_input(
+                "Dev模型上游当前异常，已暂停使用；请刷新页面选择Nano Banana Lite",
+            )),
             Some("gpt-image-2") => Ok("gpt-image-2"),
             _ => Err(invalid_input("请选择页面支持的图片模型")),
         }
@@ -592,7 +594,9 @@ mod tests {
     #[test]
     fn studio_models_are_budget_bounded_and_pose_pairs_are_distinct() {
         let mut req = request();
-        assert_eq!(req.resolved_model().unwrap(), "gpt-image-2-dev");
+        assert_eq!(req.resolved_model().unwrap(), "gemini-3.1-flash-lite-image");
+        req.model = Some("gpt-image-2-dev".into());
+        assert!(req.resolved_model().is_err());
         req.model = Some("gemini-3.1-flash-lite-image".into());
         assert_eq!(req.resolved_model().unwrap(), "gemini-3.1-flash-lite-image");
         req.model = Some("arbitrary-expensive-model".into());
@@ -747,6 +751,71 @@ mod tests {
         }
         server.abort();
     }
+    #[tokio::test]
+    #[ignore = "Paid live ephone parallel pair verification; explicit opt-in only"]
+    async fn live_ephone_lite_parallel_pairs() {
+        dotenvy::from_path(".env").ok();
+        let person = crate::infrastructure::image_compression::compress_to_jpeg_below_async(
+            std::fs::read(std::env::var("PHOTO_REAL_REF_IMAGE").unwrap()).unwrap(),
+            2 * 1024 * 1024,
+        )
+        .await
+        .unwrap();
+        let client = CompositeClient::new(crate::infrastructure::config::PhotoCompositeConfig {
+            ephone_ai_api_key: Some(std::env::var("EPHONE_AI_API_KEY").unwrap()),
+            ephone_ai_base_url: std::env::var("PHOTO_REAL_BASE_URL")
+                .unwrap_or("https://api.ephone.ai/v1".into()),
+            ephone_ai_image_model: "gemini-3.1-flash-lite-image".into(),
+            ephone_ai_image_size: "1024x1024".into(),
+            ephone_ai_timeout_secs: 240,
+            concurrency: 30,
+            poll_seconds: 5,
+            lease_secs: 60,
+        });
+        let mut tasks = Vec::new();
+        for variant in 0..6 {
+            let (client, person) = (client.clone(), person.clone());
+            tasks.push(tokio::spawn(async move {
+                let mut req = request();
+                req.count = 6;
+                req.variant = variant;
+                let result = generate_pair(&client, &req, &[person], &req.prompt().unwrap()).await;
+                match result {
+                    Ok(pair) => {
+                        let entry = decode_entry_image(&pair.in_image).unwrap();
+                        std::fs::write(format!("/tmp/shanhuai-lite-{variant}-entry.jpg"), &entry)
+                            .unwrap();
+                        if let Some(exit) = &pair.out_image {
+                            let exit = decode_entry_image(exit).unwrap();
+                            std::fs::write(format!("/tmp/shanhuai-lite-{variant}-exit.jpg"), &exit)
+                                .unwrap();
+                            println!(
+                                "Lite set {variant}: both passed, entry {} bytes / exit {} bytes",
+                                entry.len(),
+                                exit.len()
+                            );
+                            true
+                        } else {
+                            println!("Lite set {variant}: exit failed {:?}", pair.out_error);
+                            false
+                        }
+                    }
+                    Err(error) => {
+                        println!("Lite set {variant}: entry failed {error}");
+                        false
+                    }
+                }
+            }));
+        }
+        let mut complete = 0;
+        for task in tasks {
+            if task.await.unwrap() {
+                complete += 1;
+            }
+        }
+        assert_eq!(complete, 6, "Six real pairs must all complete");
+    }
+
     #[tokio::test]
     #[ignore = "Live ephone verification; performs paid image requests only when explicitly run"]
     async fn live_ephone_dev_pair_smoke() {
