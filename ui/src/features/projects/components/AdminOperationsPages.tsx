@@ -94,6 +94,7 @@ import {
   buildYongxinV2Config,
   createNingboHousingConfigForm,
   createXinledaConfigForm,
+  isXinledaDefaultProject,
   createYongxinV2ConfigForm,
   isNingboHousingConfig,
   isXinledaConfig,
@@ -642,6 +643,8 @@ function PlatformTabControls({ tab, setTab }: { tab: "configs" | "logs"; setTab:
 
 function PlatformConfigPanel({ filters, setFilters, tabControls }: { filters: ConstructionModuleListFilters; setFilters: (updater: (current: ConstructionModuleListFilters) => ConstructionModuleListFilters) => void; tabControls: ReactNode }) {
   const query = usePlatformConfigsQuery(filters);
+  const projectsQuery = useProjectsQuery();
+  const projects = projectsQuery.data ?? [];
   const createConfig = useCreatePlatformConfigMutation();
   const updateConfig = useUpdatePlatformConfigMutation();
   const deleteConfig = useDeletePlatformConfigMutation();
@@ -650,6 +653,10 @@ function PlatformConfigPanel({ filters, setFilters, tabControls }: { filters: Co
   const [form, setForm] = useState(createNingboHousingConfigForm);
   const rows = query.data?.items ?? [];
   const selectedPlatform = BUILT_IN_PLATFORM_OPTIONS.find((option) => option.value === form.platform_type);
+  const selectedProject = projects.find((project) => project.id === form.project_id);
+  const defaultXinledaProjectCode = createXinledaConfigForm(selectedProject).project_code;
+  const showXinledaProjectCode = !isXinledaDefaultProject(form.project_id)
+    || Boolean(editing && form.project_code !== defaultXinledaProjectCode);
   const openCreate = () => { setEditing(null); setForm(createNingboHousingConfigForm()); setDialogOpen(true); };
   const openEdit = (config: ConstructionPlatformConfig) => {
     if (!isNingboHousingConfig(config) && !isYongxinV2Config(config) && !isXinledaConfig(config)) {
@@ -665,14 +672,15 @@ function PlatformConfigPanel({ filters, setFilters, tabControls }: { filters: Co
     setDialogOpen(true);
   };
   const selectPlatform = (platform_type: string) => {
+    const currentProjectId = form.project_id;
     const empty = platform_type === YONGXIN_V2_PLATFORM_TYPE
       ? createYongxinV2ConfigForm()
       : platform_type === XINLEDA_PLATFORM_TYPE
-        ? createXinledaConfigForm()
+        ? createXinledaConfigForm(projects.find((project) => currentProjectId ? project.id === currentProjectId : isXinledaDefaultProject(project.id)))
         : createNingboHousingConfigForm();
     setForm((current) => ({
       ...empty,
-      project_id: current.project_id,
+      project_id: current.project_id || empty.project_id,
       platform_type,
       base_url: platform_type === NINGBO_HOUSING_PLATFORM_TYPE
         ? NINGBO_HOUSING_DEFAULT_BASE_URL
@@ -752,7 +760,13 @@ function PlatformConfigPanel({ filters, setFilters, tabControls }: { filters: Co
                   <div className="mt-1 text-xs text-slate-500">一个项目可以添加多个不同的对接平台。</div>
                 </div>
                 <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2"><Label>山淮筑项目 <span className="text-red-500">*</span></Label><ProjectSearchSelect value={form.project_id} onValueChange={(project_id) => setForm((current) => ({ ...current, project_id }))} /></div>
+                  <div className="space-y-2"><Label>山淮筑项目 <span className="text-red-500">*</span></Label><ProjectSearchSelect value={form.project_id} onValueChange={(project_id) => setForm((current) => ({
+                    ...current,
+                    project_id,
+                    project_code: current.platform_type === XINLEDA_PLATFORM_TYPE
+                      ? createXinledaConfigForm(projects.find((project) => project.id === project_id)).project_code
+                      : current.project_code,
+                  }))} /></div>
                   <div className="space-y-2">
                     <Label>对接平台 <span className="text-red-500">*</span></Label>
                     <select
@@ -820,52 +834,20 @@ function PlatformConfigPanel({ filters, setFilters, tabControls }: { filters: Co
                 </section>
               </> : null}
 
-              {form.platform_type === XINLEDA_PLATFORM_TYPE ? <>
+              {form.platform_type === XINLEDA_PLATFORM_TYPE ? (
                 <section className="rounded-lg border p-4">
-                  <div className="mb-4">
-                    <div className="text-sm font-semibold text-slate-900">接口凭证</div>
-                    <div className="mt-1 text-xs text-slate-500">AppID、AppSecret 由薪乐达提供；项目编码可在薪乐达项目后台查看。测试模式只记录任务，不发送真实请求。</div>
-                  </div>
                   <div className="grid gap-4 md:grid-cols-2">
-                    <PlatformCredentialField className="md:col-span-2" label="接口地址" value={form.base_url} onChange={(base_url) => setForm((current) => ({ ...current, base_url }))} placeholder={XINLEDA_DEFAULT_BASE_URL} />
+                    <PlatformCredentialField className="md:col-span-2" label="测试环境地址" value={form.base_url} onChange={(base_url) => setForm((current) => ({ ...current, base_url }))} placeholder={XINLEDA_DEFAULT_BASE_URL} />
                     <PlatformCredentialField label="AppID" value={form.app_id} onChange={(app_id) => setForm((current) => ({ ...current, app_id }))} autoComplete="off" />
                     <PlatformCredentialField label="AppSecret" value={form.app_secret} onChange={(app_secret) => setForm((current) => ({ ...current, app_secret }))} type="password" autoComplete="new-password" />
-                    <PlatformCredentialField label="项目编码" value={form.project_code} onChange={(project_code) => setForm((current) => ({ ...current, project_code }))} autoComplete="off" />
-                    <div className="space-y-2">
-                      <Label>运行模式</Label>
-                      <select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={form.mode} onChange={(event) => setForm((current) => ({ ...current, mode: event.target.value as "test" | "production" }))}>
-                        <option value="test">测试模式（不发真实请求）</option>
-                        <option value="production">正式模式（自动推送）</option>
-                      </select>
-                    </div>
+                    {showXinledaProjectCode ? (
+                      <PlatformCredentialField label="项目对接码" value={form.project_code} onChange={(project_code) => setForm((current) => ({ ...current, project_code }))} autoComplete="off" />
+                    ) : null}
                   </div>
                 </section>
+              ) : null}
 
-                <section className="rounded-lg border p-4">
-                  <div className="mb-4">
-                    <div className="text-sm font-semibold text-slate-900">异步同步范围</div>
-                    <div className="mt-1 text-xs text-slate-500">每条薪乐达配置使用独立绑定、队列、限流、映射与日志；同一项目可配置多个薪乐达账户。</div>
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <CheckboxField label="同步项目基本信息" checked={form.sync_project} onChange={(sync_project) => setForm((current) => ({ ...current, sync_project }))} />
-                    <CheckboxField label="同步企业基础信息" checked={form.sync_units} onChange={(sync_units) => setForm((current) => ({ ...current, sync_units }))} />
-                    <CheckboxField label="同步班组关联" checked={form.sync_teams} onChange={(sync_teams) => setForm((current) => ({ ...current, sync_teams }))} />
-                    <CheckboxField label="同步实名人员与进退场" checked={form.sync_workers} onChange={(sync_workers) => setForm((current) => ({ ...current, sync_workers }))} />
-                    <CheckboxField label="同步设备考勤（含照片上传）" checked={form.sync_attendance} onChange={(sync_attendance) => setForm((current) => ({ ...current, sync_attendance }))} />
-                    <PlatformCredentialField className="md:col-span-2" label="历史考勤补传起始日期（留空则从启用时开始）" value={form.attendance_backfill_from} onChange={(attendance_backfill_from) => setForm((current) => ({ ...current, attendance_backfill_from }))} type="date" required={false} />
-                  </div>
-                </section>
-
-                <section className="rounded-lg border p-4">
-                  <div className="mb-4">
-                    <div className="text-sm font-semibold text-slate-900">企业保证金接口数据（可选）</div>
-                    <div className="mt-1 text-xs text-slate-500">填写 company.safeguard 所需的 JSON 对象或对象数组；未配置时跳过。代发委托书、维权告示牌、三方协议按要求不接入。</div>
-                  </div>
-                  <TextareaField label="保证金 JSON" value={form.company_safeguard_payload} onChange={(company_safeguard_payload) => setForm((current) => ({ ...current, company_safeguard_payload }))} rows={8} />
-                </section>
-              </> : null}
-
-              <TextareaField label="备注" value={form.remark} onChange={(remark) => setForm((current) => ({ ...current, remark }))} rows={3} />
+              {form.platform_type !== XINLEDA_PLATFORM_TYPE ? <TextareaField label="备注" value={form.remark} onChange={(remark) => setForm((current) => ({ ...current, remark }))} rows={3} /> : null}
             </div>
             <DialogFooter className="mt-5"><Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>取消</Button><Button type="submit" disabled={createConfig.isPending || updateConfig.isPending} className="bg-[#0f6b5d] text-white hover:bg-[#0b5148]">{createConfig.isPending || updateConfig.isPending ? "保存中" : "保存配置"}</Button></DialogFooter>
           </form>

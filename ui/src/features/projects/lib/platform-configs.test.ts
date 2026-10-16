@@ -12,6 +12,7 @@ import {
   validateYongxinV2Config,
   buildXinledaConfig,
   createXinledaConfigForm,
+  XINLEDA_DEFAULT_PROJECT_ID,
   parseXinledaConfig,
   validateXinledaConfig,
 } from "./platform-configs.ts";
@@ -184,7 +185,7 @@ test("甬薪旧配置编辑时兼容历史字段", () => {
   assert.equal(form.sync_attendance, true);
 });
 
-test("薪乐达配置使用 AppID、项目编码并支持保证金数据", () => {
+test("薪乐达 V3.8 配置使用 AppID、项目编码且忽略旧保证金数据", () => {
   const form = {
     ...createXinledaConfigForm(),
     project_id: "local-project",
@@ -209,7 +210,7 @@ test("薪乐达配置使用 AppID、项目编码并支持保证金数据", () =>
 
   assert.equal(validateXinledaConfig(form), null);
   assert.deepEqual(buildXinledaConfig(form), {
-    base_url: "https://openapi.hwxld.com",
+    base_url: "https://test.hwxld.com:8093",
     app_id: "xinleda-app",
     app_secret: "1234567890abcdef",
     project_code: "XLD-PROJECT-1",
@@ -222,18 +223,6 @@ test("薪乐达配置使用 AppID、项目编码并支持保证金数据", () =>
       sync_attendance: false,
     },
     attendance_backfill_from: null,
-    company_safeguard_payload: {
-      company_name: "测试企业",
-      organization_code: "91330212062914115M",
-      province_code: "330000",
-      city_code: "330200",
-      county_code: "330203",
-      institution_name: "测试银行",
-      assure_amt: 100,
-      type: 2,
-      status: 3,
-      attrs_url: "https://example.test/margin.jpg",
-    },
   });
 });
 
@@ -264,4 +253,18 @@ test("薪乐达配置可编辑同平台多账户且兼容 appid 字段", () => {
   assert.equal(form.project_code, "XLD-B");
   assert.equal(form.sync_project, false);
   assert.equal(form.sync_workers, true);
+});
+
+
+test("薪乐达测试凭证默认填入且项目对接码只用于指定项目", () => {
+  const target = createXinledaConfigForm({ id: XINLEDA_DEFAULT_PROJECT_ID, name: "测试薪乐达" });
+  assert.equal(target.base_url, "https://test.hwxld.com:8093");
+  assert.equal(target.app_id, "8210");
+  assert.equal(target.app_secret.length, 32);
+  assert.equal(target.project_id, XINLEDA_DEFAULT_PROJECT_ID);
+  assert.equal(target.project_code, "110102P726240726348001");
+  assert.equal(target.mode, "production");
+  assert.equal(validateXinledaConfig(target), null);
+  assert.equal(createXinledaConfigForm({ id: "other", name: "其他项目" }).project_code, "");
+  assert.equal(createXinledaConfigForm({ id: "old-project", name: "2026年高新区雨污管网综合改造工程" }).project_code, "");
 });

@@ -147,31 +147,6 @@ async fn bootstrap_binding(
     .execute(pool)
     .await?;
 
-    if platform_type == xinleda::PLATFORM_CODE {
-        sqlx::query(
-            r#"
-            INSERT INTO integration_jobs (
-                project_id, binding_id, platform_code, operation, entity_type,
-                local_entity_id, idempotency_key, request_payload, status,
-                attempt_count, max_attempts, next_attempt_at
-            )
-            VALUES ($1, $2, $3, 'safeguard.sync', 'project', $1, $4, $5,
-                    'pending', 0, 5, NOW())
-            ON CONFLICT (idempotency_key) DO NOTHING
-            "#,
-        )
-        .bind(project_id)
-        .bind(binding_id)
-        .bind(&platform_type)
-        .bind(format!("{binding_id}:safeguard.sync:{version}"))
-        .bind(json!({
-            "platform_config_id": config.id,
-            "config_version": version,
-        }))
-        .execute(pool)
-        .await?;
-    }
-
     enqueue_bootstrap_events(pool, &config).await
 }
 

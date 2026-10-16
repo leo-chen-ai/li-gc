@@ -8,7 +8,16 @@ export const YONGXIN_V2_PLATFORM_TYPE = "yongxin_v2";
 export const YONGXIN_V2_DEFAULT_BASE_URL = "https://apirs.91jtg.com/openapi";
 export const XINLEDA_PLATFORM_NAME = "薪乐达";
 export const XINLEDA_PLATFORM_TYPE = "xinleda";
-export const XINLEDA_DEFAULT_BASE_URL = "https://openapi.hwxld.com";
+export const XINLEDA_DEFAULT_BASE_URL = "https://test.hwxld.com:8093";
+const XINLEDA_DEFAULT_APP_ID = "8210";
+const XINLEDA_DEFAULT_APP_SECRET = "97f5c069d3de43829fd9e65467ec5033";
+const XINLEDA_DEFAULT_PROJECT_CODE = "110102P726240726348001";
+
+export const XINLEDA_DEFAULT_PROJECT_ID = "8c229337-e6c0-4763-aefb-fd3dde8986e0";
+
+export function isXinledaDefaultProject(projectId: string | null | undefined): boolean {
+  return projectId === XINLEDA_DEFAULT_PROJECT_ID;
+}
 export const BUILT_IN_PLATFORM_OPTIONS = [
   { value: NINGBO_HOUSING_PLATFORM_TYPE, label: NINGBO_HOUSING_PLATFORM_NAME },
   { value: YONGXIN_V2_PLATFORM_TYPE, label: YONGXIN_V2_PLATFORM_NAME },
@@ -34,7 +43,6 @@ export type NingboHousingConfigForm = {
   sync_workers: boolean;
   sync_attendance: boolean;
   attendance_backfill_from: string;
-  company_safeguard_payload: string;
   is_enabled: boolean;
   remark: string;
 };
@@ -59,7 +67,6 @@ export function createNingboHousingConfigForm(): NingboHousingConfigForm {
     sync_workers: true,
     sync_attendance: true,
     attendance_backfill_from: "",
-    company_safeguard_payload: "",
     is_enabled: true,
     remark: "",
   };
@@ -99,12 +106,17 @@ export function createYongxinV2ConfigForm(): NingboHousingConfigForm {
   };
 }
 
-export function createXinledaConfigForm(): NingboHousingConfigForm {
+export function createXinledaConfigForm(project?: { id: string; name?: string | null }): NingboHousingConfigForm {
   return {
     ...createNingboHousingConfigForm(),
     platform_type: XINLEDA_PLATFORM_TYPE,
     base_url: XINLEDA_DEFAULT_BASE_URL,
-    mode: "test",
+    app_id: XINLEDA_DEFAULT_APP_ID,
+    app_secret: XINLEDA_DEFAULT_APP_SECRET,
+    project_id: project?.id ?? "",
+    project_code: isXinledaDefaultProject(project?.id) ? XINLEDA_DEFAULT_PROJECT_CODE : "",
+    // The remote test environment still needs real HTTP requests.
+    mode: "production",
   };
 }
 
@@ -141,7 +153,6 @@ export function buildYongxinV2Config(form: NingboHousingConfigForm): JsonValue {
 export function parseXinledaConfig(config: ConstructionPlatformConfig): NingboHousingConfigForm {
   const value = asJsonObject(config.config);
   const modules = asJsonObject(value.modules);
-  const safeguard = value.company_safeguard_payload;
   return {
     ...createXinledaConfigForm(),
     project_id: config.project_id,
@@ -156,14 +167,12 @@ export function parseXinledaConfig(config: ConstructionPlatformConfig): NingboHo
     sync_workers: readBoolean(modules, true, "sync_workers"),
     sync_attendance: readBoolean(modules, true, "sync_attendance"),
     attendance_backfill_from: readString(value, "attendance_backfill_from").slice(0, 10),
-    company_safeguard_payload: safeguard == null ? "" : JSON.stringify(safeguard, null, 2),
     is_enabled: config.is_enabled,
     remark: config.remark ?? "",
   };
 }
 
 export function buildXinledaConfig(form: NingboHousingConfigForm): JsonValue {
-  const safeguard = form.company_safeguard_payload.trim();
   return {
     base_url: form.base_url.trim().replace(/\/+$/, ""),
     app_id: form.app_id.trim(),
@@ -180,7 +189,6 @@ export function buildXinledaConfig(form: NingboHousingConfigForm): JsonValue {
     attendance_backfill_from: form.attendance_backfill_from
       ? `${form.attendance_backfill_from}T00:00:00+08:00`
       : null,
-    company_safeguard_payload: safeguard ? JSON.parse(safeguard) as JsonValue : null,
   };
 }
 
@@ -194,16 +202,6 @@ export function validateXinledaConfig(form: NingboHousingConfigForm): string | n
   if (!form.project_code.trim()) return "请填写薪乐达项目编码";
   if (!form.sync_project && !form.sync_units && !form.sync_teams && !form.sync_workers && !form.sync_attendance) {
     return "请至少启用一个同步模块";
-  }
-  if (form.company_safeguard_payload.trim()) {
-    try {
-      const parsed: unknown = JSON.parse(form.company_safeguard_payload);
-      const valid = parsed != null && typeof parsed === "object"
-        && (!Array.isArray(parsed) || parsed.every((row) => row != null && typeof row === "object" && !Array.isArray(row)));
-      if (!valid) return "企业保证金数据必须是 JSON 对象或对象数组";
-    } catch {
-      return "企业保证金数据不是合法 JSON";
-    }
   }
   return null;
 }

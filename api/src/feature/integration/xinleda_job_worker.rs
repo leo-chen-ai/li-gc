@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use chrono::{DateTime, Utc};
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use sqlx::{FromRow, PgPool, Postgres, Transaction};
 use tokio::time::sleep;
 use tracing::{error, info, warn};
@@ -201,7 +201,15 @@ async fn execute_initial(
         "worker.sync" => execute_worker_sync(state, job, credentials, config).await,
         "entry_exit.sync" => execute_entry_exit_sync(state, job, credentials).await,
         "attendance.sync" => execute_attendance_sync(state, job, credentials).await,
-        "safeguard.sync" => execute_safeguard_sync(state, job, credentials, config).await,
+        // V3.8 no longer documents this method; finish legacy queued jobs without sending.
+        "safeguard.sync" => {
+            complete_skipped(
+                state.db.pool(),
+                job.id,
+                "薪乐达 V3.8 已移除企业保证金接口，旧任务跳过",
+            )
+            .await
+        }
         operation => Err(JobIssue::Permanent(format!(
             "薪乐达平台不支持任务操作：{operation}"
         ))),
@@ -247,7 +255,7 @@ async fn execute_project_sync(
         "end_time": optional_text(&project, "finish_date"),
         "build_properties": value_i64(&project, "build_nature"),
         "build_area": money_or_number(&project, "acreage"),
-        "construct_cost": money_or_number(&project, "invest_total"),
+        "construct_cost": required_construct_cost(&project)?,
         "build_length": money_or_number(&project, "length"),
         "status": value_i64(&project, "status").unwrap_or(3),
         "lng": optional_text(&project, "longitude"),
@@ -489,14 +497,19 @@ async fn execute_entry_exit_sync(
         let unit = worker
             .get("unit")
             .ok_or_else(|| JobIssue::WaitingData("管理人员所属单位不存在".to_owned()))?;
+        let employer_type = company_type(value_i64(unit, "company_type"))?;
+        let position = manager_position(
+            optional_text(&worker, "manager_type").as_deref(),
+            employer_type,
+        )?;
         (
             xinleda::MANAGER_ENTRY,
             json!([{
                 "project_code": credentials.project_code,
                 "real_name": required_text(&worker, "name", "管理人员姓名")?,
                 "id_card_no": id_card,
-                "position_no": manager_position(optional_text(&worker, "manager_type").as_deref())?,
-                "company_type": company_type(value_i64(unit, "company_type"))?,
+                "position_no": position,
+                "company_type": employer_type,
                 "company_name": required_text(unit, "company_name", "管理人员所属单位名称")?,
                 "organization_code": required_text(unit, "company_credit_code", "管理人员所属单位信用代码")?,
                 "type": if is_exit { 2 } else { 1 },
@@ -609,39 +622,6 @@ async fn execute_attendance_sync(
         state.db.pool(),
         job,
         xinleda::ATTENDANCE_IMPORT,
-        &response,
-        None,
-    )
-    .await
-}
-
-async fn execute_safeguard_sync(
-    state: &AppState,
-    job: &ClaimedJob,
-    credentials: &xinleda::XinledaCredentials,
-    config: &Value,
-) -> Result<(), JobIssue> {
-    let Some(value) = config.get("company_safeguard_payload") else {
-        return complete_skipped(state.db.pool(), job.id, "未配置企业保证金接口数据").await;
-    };
-    let rows = normalize_rows(value)?;
-    if rows.is_empty() {
-        return complete_skipped(state.db.pool(), job.id, "企业保证金接口数据为空").await;
-    }
-    let payload = Value::Array(rows.into_iter().map(Value::Object).collect());
-    let response = call_api(
-        state,
-        job,
-        credentials,
-        xinleda::COMPANY_SAFEGUARD,
-        &payload,
-        CallSafety::Write,
-    )
-    .await?;
-    accept_or_complete(
-        state.db.pool(),
-        job,
-        xinleda::COMPANY_SAFEGUARD,
         &response,
         None,
     )
@@ -1308,23 +1288,6 @@ async fn record_attempt(
     }
 }
 
-fn normalize_rows(value: &Value) -> Result<Vec<Map<String, Value>>, JobIssue> {
-    match value {
-        Value::Object(row) => Ok(vec![row.clone()]),
-        Value::Array(rows) => rows
-            .iter()
-            .map(|row| {
-                row.as_object().cloned().ok_or_else(|| {
-                    JobIssue::WaitingData("扩展接口数组元素必须是 JSON 对象".to_owned())
-                })
-            })
-            .collect(),
-        _ => Err(JobIssue::WaitingData(
-            "扩展接口数据必须是 JSON 对象或对象数组".to_owned(),
-        )),
-    }
-}
-
 fn local_id(job: &ClaimedJob) -> Result<Uuid, JobIssue> {
     job.local_entity_id
         .ok_or_else(|| JobIssue::Permanent("任务缺少本地实体 ID".to_owned()))
@@ -1374,6 +1337,16 @@ fn money_or_number(value: &Value, key: &str) -> Option<f64> {
     value
         .get(key)
         .and_then(|item| item.as_f64().or_else(|| item.as_str()?.parse().ok()))
+}
+
+fn required_construct_cost(project: &Value) -> Result<f64, JobIssue> {
+    money_or_number(project, "invest_total")
+        .filter(|cost| cost.is_finite() && *cost > 0.0)
+        .ok_or_else(|| {
+            JobIssue::WaitingData(
+                "薪乐达 V3.8 要求项目总投资（万元）必填且大于 0，请完善项目总投资".to_owned(),
+            )
+        })
 }
 
 fn area_codes(raw: Option<&str>) -> Result<(String, String, String), JobIssue> {
@@ -1500,17 +1473,27 @@ fn work_type_code(value: Option<i64>) -> Result<&'static str, JobIssue> {
     }
 }
 
-fn manager_position(value: Option<&str>) -> Result<&'static str, JobIssue> {
-    match value.unwrap_or("").trim() {
-        "1" => Ok("5"),
-        "2" => Ok("2"),
-        "4" => Ok("8"),
-        "5" => Ok("7"),
-        "7" => Ok("9"),
-        "8" => Ok("13"),
-        "9" => Ok("12"),
+// V3.8 section 3.31: the position must also match the employer's company type.
+fn manager_position(value: Option<&str>, company_type: i64) -> Result<&'static str, JobIssue> {
+    match (value.unwrap_or("").trim(), company_type) {
+        ("1", 2) => Ok("5"),
+        ("2", 1 | 2) => Ok("2"),
+        ("2", 3) => Ok("45"),
+        ("2", 5) => Ok("58"),
+        ("2", 4) => Ok("64"),
+        ("3", 2) => Ok("32"),
+        ("4", 2) => Ok("8"),
+        ("5", 2) => Ok("7"),
+        ("5", 3) => Ok("43"),
+        ("5", 5) => Ok("56"),
+        ("5", 4) => Ok("62"),
+        ("6", 2) => Ok("34"),
+        ("7", 2) => Ok("9"),
+        ("8", 2) => Ok("13"),
+        ("9", 2) => Ok("12"),
+        ("99", 1..=9) => Ok("1000"),
         _ => Err(JobIssue::WaitingData(
-            "管理人员类型无法映射到薪乐达岗位字典".to_owned(),
+            "管理人员类型与所属单位无法映射到薪乐达岗位字典".to_owned(),
         )),
     }
 }
@@ -1657,17 +1640,52 @@ mod tests {
         assert_eq!(company_type(Some(2)).unwrap(), 6);
         assert_eq!(company_type(Some(4)).unwrap(), 1);
         assert!(company_type(Some(12)).is_err());
-        assert_eq!(manager_position(Some("1")).unwrap(), "5");
-        assert!(manager_position(Some("99")).is_err());
+        assert_eq!(manager_position(Some("1"), 2).unwrap(), "5");
+        assert!(manager_position(Some("unknown"), 2).is_err());
     }
 
     #[test]
-    fn safeguard_payload_accepts_single_or_multiple_rows() {
-        assert_eq!(normalize_rows(&json!({"a": 1})).unwrap().len(), 1);
+    fn construct_cost_is_required_positive_and_stays_in_ten_thousand_yuan() {
+        for project in [
+            json!({}),
+            json!({"invest_total": null}),
+            json!({"invest_total": 0}),
+            json!({"invest_total": -1}),
+            json!({"invest_total": "invalid"}),
+            json!({"invest_total": "NaN"}),
+            json!({"invest_total": "inf"}),
+        ] {
+            assert!(
+                matches!(
+                    required_construct_cost(&project),
+                    Err(JobIssue::WaitingData(_))
+                ),
+                "{project}"
+            );
+        }
         assert_eq!(
-            normalize_rows(&json!([{"a": 1}, {"a": 2}])).unwrap().len(),
-            2
+            required_construct_cost(&json!({"invest_total": 123.4567})).unwrap(),
+            123.4567
         );
-        assert!(normalize_rows(&json!("invalid")).is_err());
+        assert_eq!(
+            required_construct_cost(&json!({"invest_total": "0.0001"})).unwrap(),
+            0.0001
+        );
+    }
+
+    #[test]
+    fn v38_positions_match_both_role_and_employer() {
+        assert_eq!(manager_position(Some("3"), 2).unwrap(), "32");
+        assert_eq!(manager_position(Some("6"), 2).unwrap(), "34");
+        for employer in 1..=9 {
+            assert_eq!(manager_position(Some("99"), employer).unwrap(), "1000");
+        }
+        for (employer, technical, safety) in [(3, "45", "43"), (5, "58", "56"), (4, "64", "62")] {
+            assert_eq!(manager_position(Some("2"), employer).unwrap(), technical);
+            assert_eq!(manager_position(Some("5"), employer).unwrap(), safety);
+        }
+        assert!(manager_position(Some("3"), 6).is_err());
+        assert!(manager_position(Some("1"), 1).is_err());
+        assert!(manager_position(Some("99"), 0).is_err());
     }
 }

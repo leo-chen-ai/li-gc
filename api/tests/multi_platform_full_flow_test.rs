@@ -463,7 +463,7 @@ async fn xinleda_two_accounts_use_independent_bindings_and_cover_required_interf
             manager = '项目经理', manager_phone = '13800000000',
             contractor = '测试总包单位', contractor_credit_code = '91330200MA2CLPX01N',
             build_unit = '测试建设单位', build_unit_credit_code = '91330200MA2CLPX02N',
-            category = 1, industry = 1, status = 3
+            category = 1, industry = 1, status = 3, invest_total = 123.4567
         WHERE id = $1
         "#,
     )
@@ -501,8 +501,36 @@ async fn xinleda_two_accounts_use_independent_bindings_and_cover_required_interf
     .await
     .unwrap();
 
+    // Project managers/constructors belong to a construction company in section 3.31.
+    sqlx::query("UPDATE construction_units SET company_type = 1 WHERE id = (SELECT unit_id FROM construction_workers WHERE id = $1)")
+        .bind(seeded.worker_ids[1]).execute(&pool).await.unwrap();
     drain_outbox(&state).await;
+    let legacy_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM integration_jobs WHERE platform_code = 'xinleda' AND operation = 'safeguard.sync'")
+        .fetch_one(&pool).await.unwrap();
+    assert_eq!(legacy_count, 0, "V3.8 must not enqueue guarantee jobs");
+    // Simulate an old pending job after upgrading, even with legacy config data present.
+    let legacy_job: Uuid = sqlx::query_scalar(
+        "INSERT INTO integration_jobs (project_id, binding_id, platform_code, operation, entity_type, local_entity_id, idempotency_key, request_payload, status) SELECT project_id, id, 'xinleda', 'safeguard.sync', 'project', project_id, 'v38-legacy-guarantee', '{}'::jsonb, 'pending' FROM integration_project_bindings WHERE platform_config_id = $1 RETURNING id",
+    ).bind(config_a).fetch_one(&pool).await.unwrap();
     drain_xinleda(&state, &pool).await;
+    let legacy_response: Value = sqlx::query_scalar(
+        "SELECT response_payload FROM integration_jobs WHERE id = $1 AND status = 'success'",
+    )
+    .bind(legacy_job)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(legacy_response["skipped"], true);
+    for manager_type in ["3", "6"] {
+        sqlx::query("UPDATE construction_workers SET manager_type = $2 WHERE id = $1")
+            .bind(seeded.worker_ids[1])
+            .bind(manager_type)
+            .execute(&pool)
+            .await
+            .unwrap();
+        drain_outbox(&state).await;
+        drain_xinleda(&state, &pool).await;
+    }
 
     let bindings = sqlx::query_as::<_, (Uuid, Uuid, String)>(
         r#"
@@ -548,7 +576,6 @@ async fn xinleda_two_accounts_use_independent_bindings_and_cover_required_interf
     for required in [
         "unifiedlog.get",
         "company.import",
-        "company.safeguard",
         "project.import",
         "project.labourer.entry",
         "project.labourer.attendance",
@@ -561,6 +588,7 @@ async fn xinleda_two_accounts_use_independent_bindings_and_cover_required_interf
         );
     }
     for excluded in [
+        "company.safeguard",
         "project.commission",
         "project.billboard",
         "project.agreement",
@@ -571,16 +599,32 @@ async fn xinleda_two_accounts_use_independent_bindings_and_cover_required_interf
         );
     }
     assert!(requests.iter().any(|request| request.path == "/upfiles"));
+    let positions: std::collections::HashSet<String> = openapi
+        .iter()
+        .filter(|request| request.body["method"] == "project.manager.entry")
+        .map(|request| {
+            let data: Value = serde_json::from_str(request.body["data"].as_str().unwrap()).unwrap();
+            data[0]["position_no"].as_str().unwrap().to_owned()
+        })
+        .collect();
+    assert_eq!(
+        positions,
+        ["5", "32", "34"].into_iter().map(str::to_owned).collect()
+    );
 
     let mut app_projects: HashMap<String, std::collections::HashSet<String>> = HashMap::new();
     for request in &openapi {
         assert_eq!(request.method, "POST");
         assert_eq!(request.body["version"], "1.0");
         assert_eq!(request.body["format"], "json");
+        assert!(request.body["timestamp"].as_i64().is_some());
         assert_eq!(request.body["sign"].as_str().unwrap().len(), 64);
         let app_id = request.body["appid"].as_str().unwrap().to_owned();
         if request.body["method"] != "unifiedlog.get" {
             let data: Value = serde_json::from_str(request.body["data"].as_str().unwrap()).unwrap();
+            if request.body["method"] == "project.import" {
+                assert_eq!(data[0]["construct_cost"], 123.4567);
+            }
             for row in data.as_array().into_iter().flatten() {
                 if let Some(project_code) = row.get("project_code").and_then(Value::as_str) {
                     app_projects
@@ -615,6 +659,46 @@ async fn xinleda_two_accounts_use_independent_bindings_and_cover_required_interf
     .await
     .unwrap();
     assert!(failed.is_empty(), "Xinleda jobs must complete: {failed:#?}");
+
+    // Missing/zero investment must stop before HTTP, and can be retried once corrected.
+    sqlx::query("UPDATE construction_projects SET invest_total = 0 WHERE id = $1")
+        .bind(project_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let invalid_job: Uuid = sqlx::query_scalar(
+        "INSERT INTO integration_jobs (project_id, binding_id, platform_code, operation, entity_type, local_entity_id, idempotency_key, request_payload, status) VALUES ($1, $2, 'xinleda', 'project.sync', 'project', $1, 'v38-invalid-investment', '{\"event\":{\"operation\":\"update\"}}'::jsonb, 'pending') RETURNING id",
+    ).bind(project_id).bind(bindings[0].0).fetch_one(&pool).await.unwrap();
+    let request_count = xinleda.requests().await.len();
+    drain_xinleda(&state, &pool).await;
+    let (status, error): (String, String) =
+        sqlx::query_as("SELECT status, last_error FROM integration_jobs WHERE id = $1")
+            .bind(invalid_job)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(status, "waiting_data");
+    assert!(error.contains("总投资"));
+    assert_eq!(xinleda.requests().await.len(), request_count);
+    sqlx::query("UPDATE construction_projects SET invest_total = 123.4567 WHERE id = $1")
+        .bind(project_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE integration_jobs SET status = 'pending', next_attempt_at = NOW() WHERE id = $1",
+    )
+    .bind(invalid_job)
+    .execute(&pool)
+    .await
+    .unwrap();
+    drain_xinleda(&state, &pool).await;
+    let status: String = sqlx::query_scalar("SELECT status FROM integration_jobs WHERE id = $1")
+        .bind(invalid_job)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "success");
 }
 
 async fn create_project(pool: &PgPool, name: &str) -> Uuid {

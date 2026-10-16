@@ -25,7 +25,6 @@ pub const VERSION: &str = "1.0";
 
 pub const LOG_GET: &str = "unifiedlog.get";
 pub const COMPANY_IMPORT: &str = "company.import";
-pub const COMPANY_SAFEGUARD: &str = "company.safeguard";
 pub const PROJECT_IMPORT: &str = "project.import";
 pub const LABOURER_ENTRY: &str = "project.labourer.entry";
 pub const ATTENDANCE_IMPORT: &str = "project.labourer.attendance";
@@ -35,7 +34,6 @@ pub const LABOURER_IMPORT: &str = "labourer.import";
 pub const ALL_METHODS: &[&str] = &[
     LOG_GET,
     COMPANY_IMPORT,
-    COMPANY_SAFEGUARD,
     PROJECT_IMPORT,
     LABOURER_ENTRY,
     ATTENDANCE_IMPORT,
@@ -225,7 +223,10 @@ pub fn build_request_body(
     ]);
     let sign = signature(&parameters, &credentials.app_secret);
     parameters.insert("sign".to_owned(), sign);
-    Ok(json!(parameters))
+    let mut body = json!(parameters);
+    // The JSON envelope uses a numeric millisecond timestamp; sign its decimal text.
+    body["timestamp"] = json!(timestamp);
+    Ok(body)
 }
 
 pub async fn call(
@@ -401,6 +402,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(body["method"], LABOURER_IMPORT);
+        assert_eq!(body["timestamp"], 1_590_027_113_409_i64);
         assert_eq!(body["version"], VERSION);
         assert_eq!(body["appid"], "demo-app");
         assert_eq!(
@@ -422,8 +424,8 @@ mod tests {
 
     #[test]
     fn every_documented_openapi_method_is_registered() {
-        assert_eq!(ALL_METHODS.len(), 8);
-        assert!(ALL_METHODS.contains(&COMPANY_SAFEGUARD));
+        assert_eq!(ALL_METHODS.len(), 7);
+        assert!(!ALL_METHODS.contains(&"company.safeguard"));
         assert!(ALL_METHODS.contains(&MANAGER_ENTRY));
     }
 }
