@@ -384,6 +384,29 @@ async fn execute_attendance_sync(
             "等待实名人员信息同步成功".to_owned(),
         ));
     }
+    // 人员基础资料入库和项目进场是两个异步任务；必须等进场回执成功，
+    // 避免考勤先到平台而被判定为“人员未进场”。
+    let entry_confirmed = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT status IN ('success', 'completed')
+        FROM integration_jobs
+        WHERE binding_id = $1 AND local_entity_id = $2
+          AND operation = 'entry_exit.sync'
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(job.binding_id)
+    .bind(worker_id)
+    .fetch_optional(state.db.pool())
+    .await
+    .map_err(|error| JobIssue::Retryable(error.to_string()))?
+    .unwrap_or(false);
+    if !entry_confirmed {
+        return Err(JobIssue::WaitingDependency(
+            "等待人员项目进场同步成功".to_owned(),
+        ));
+    }
     let payload = json!([{
         "project_code": credentials.project_code,
         "machine_sn": optional_text(&attendance, "serial_number"),

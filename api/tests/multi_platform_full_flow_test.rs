@@ -693,6 +693,37 @@ async fn xinleda_two_accounts_use_independent_bindings_and_cover_required_interf
     .unwrap();
     assert!(failed.is_empty(), "Xinleda jobs must complete: {failed:#?}");
 
+    // Retirement must reach every enabled project account as an explicit type=2.
+    let before_exit = xinleda.requests().await.len();
+    sqlx::query("UPDATE construction_workers SET work_status = 2, exit_time = DATE '2026-10-16' WHERE id = $1")
+        .bind(seeded.worker_ids[0]).execute(&pool).await.unwrap();
+    drain_outbox(&state).await;
+    drain_xinleda(&state, &pool).await;
+    let after_exit = xinleda.requests().await;
+    let exit_requests = after_exit[before_exit..]
+        .iter()
+        .filter(|request| {
+            if request.body["method"] != "project.labourer.entry" {
+                return false;
+            }
+            let data: Value = serde_json::from_str(request.body["data"].as_str().unwrap()).unwrap();
+            data[0]["type"] == 2 && data[0]["date"] == "2026-10-16"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        exit_requests.len(),
+        2,
+        "both Xinleda accounts must receive retirement"
+    );
+    let exit_accounts: std::collections::HashSet<_> = exit_requests
+        .iter()
+        .map(|request| request.body["appid"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        exit_accounts,
+        std::collections::HashSet::from(["xinleda-company-a", "xinleda-company-b"])
+    );
+
     let request_count = xinleda.requests().await.len();
     sqlx::query("UPDATE construction_projects SET invest_total = 0 WHERE id = $1")
         .bind(project_id)
@@ -707,6 +738,67 @@ async fn xinleda_two_accounts_use_independent_bindings_and_cover_required_interf
         xinleda.requests().await.len(),
         request_count,
         "project/unit updates must not send requests"
+    );
+}
+
+#[tokio::test]
+async fn xinleda_attendance_waits_for_personnel_entry_confirmation() {
+    let mock = MockServer::start(MockKind::Xinleda).await;
+    let (state, pool, _container) = common::build_test_state_with_pool().await;
+    let project_id = create_project(&pool, "考勤前置进场确认测试").await;
+    insert_xinleda_config(
+        &pool,
+        project_id,
+        &mock.base_url,
+        "entry-test",
+        "1234567890abcdef",
+        "ENTRY-PROJECT",
+    )
+    .await;
+    let (uri, image) = generated_test_image();
+    let seeded = seed_complete_project(&pool, project_id, 7, &uri, &image).await;
+    drain_outbox(&state).await;
+    drain_xinleda(&state, &pool).await;
+    let worker_id = seeded.worker_ids[0];
+    sqlx::query("UPDATE integration_jobs SET status = 'awaiting_result', next_attempt_at = NOW() + INTERVAL '1 day' WHERE local_entity_id = $1 AND operation = 'entry_exit.sync'")
+        .bind(worker_id).execute(&pool).await.unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    let attendance_id: Uuid = sqlx::query_scalar("INSERT INTO construction_attendance_records (project_id, worker_id, direction, trigger_time, serial_number) VALUES ($1, $2, 0, NOW(), 'ENTRY-TEST-DEVICE') RETURNING id")
+        .bind(project_id).bind(worker_id).fetch_one(&mut *tx).await.unwrap();
+    outbox_worker::enqueue_domain_event_tx(
+        &mut tx,
+        project_id,
+        "construction.attendance.created",
+        "attendance",
+        attendance_id,
+        json!({"operation":"insert","source":"mqtt_rec_push"}),
+        &format!("entry-test:{attendance_id}"),
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    drain_outbox(&state).await;
+    let before = mock.requests().await.len();
+    assert!(
+        xinleda_job_worker::process_one_pending(&state, "entry-test")
+            .await
+            .unwrap()
+    );
+    let status: String = sqlx::query_scalar("SELECT status FROM integration_jobs WHERE local_entity_id = $1 AND operation = 'attendance.sync'")
+        .bind(attendance_id).fetch_one(&pool).await.unwrap();
+    assert_eq!(
+        status, "waiting_dependency",
+        "must not send attendance before entry confirmation"
+    );
+    assert_eq!(mock.requests().await.len(), before);
+    sqlx::query("UPDATE integration_jobs SET status = 'success' WHERE local_entity_id = $1 AND operation = 'entry_exit.sync'")
+        .bind(worker_id).execute(&pool).await.unwrap();
+    drain_xinleda(&state, &pool).await;
+    let status: String = sqlx::query_scalar("SELECT status FROM integration_jobs WHERE local_entity_id = $1 AND operation = 'attendance.sync'")
+        .bind(attendance_id).fetch_one(&pool).await.unwrap();
+    assert_eq!(
+        status, "success",
+        "attendance resumes automatically after entry succeeds"
     );
 }
 

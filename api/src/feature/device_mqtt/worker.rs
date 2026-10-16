@@ -899,5 +899,12 @@ mod tests {
         assert_eq!(rows[1].0, "1");
         assert_eq!(rows[0].1, parse_device_time("2026-07-29 10:37:50").unwrap());
         assert_eq!(rows[1].1, parse_device_time("2026-07-30 15:07:35").unwrap());
+        let events: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM integration_outbox_events WHERE project_id = $1 AND event_type = 'construction.attendance.created' AND payload->>'source' = 'mqtt_rec_push'",
+        ).bind(project_id).fetch_one(&pool).await.unwrap();
+        assert_eq!(
+            events, 2,
+            "MQTT attendance and forwarding event must be committed together; duplicate delivery must not duplicate events"
+        );
     }
 }
