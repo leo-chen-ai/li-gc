@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use chrono::{DateTime, FixedOffset, Utc};
 use serde_json::{Value, json};
 use sqlx::{FromRow, PgPool, Postgres, Transaction};
@@ -15,7 +14,6 @@ const POLL_INTERVAL: Duration = Duration::from_millis(500);
 const LOCK_DURATION_MINUTES: i32 = 10;
 const ASYNC_POLL_SECONDS: f64 = 15.0;
 const RATE_SLOT_SECONDS: f64 = 1.1;
-const MAX_UPLOAD_BYTES: usize = 10 * 1024 * 1024;
 
 #[derive(Debug, FromRow)]
 struct ClaimedJob {
@@ -272,36 +270,17 @@ async fn execute_worker_sync(
     let encrypted_id = xinleda::encrypt_sensitive(&credentials.app_secret, &id_card)
         .map_err(|error| JobIssue::WaitingData(error.to_string()))?;
     let (birthday, gender) = identity_profile(&id_card, value_i64(&worker, "gender"))?;
-    let (start_date, expiry_date, is_long) = identity_validity(&worker)?;
-    let bank_no = optional_text(&worker, "salary_bank_card")
-        .map(|value| xinleda::encrypt_sensitive(&credentials.app_secret, &value))
-        .transpose()
-        .map_err(|error| JobIssue::WaitingData(error.to_string()))?;
-    let user_photo = if let Some(photo) = optional_text(&worker, "avatar") {
-        upload_photo(state, job, credentials, worker_id, &photo, "image/jpeg").await?
-    } else {
-        None
-    };
+    let (_, _, is_long) = identity_validity(&worker)?;
     let payload = json!([{
         "real_name": required_text(&worker, "name", "人员姓名")?,
-        "user_photo": user_photo,
         "gender": gender,
         "birthday": birthday,
         "id_card_no": encrypted_id,
-        "start_date": start_date,
-        "expiry_date": expiry_date,
         "is_id_card_long": is_long,
         "grant_org": required_text(&worker, "visa_office", "身份证签发机关")?,
-        "mobilephone": optional_text(&worker, "phone"),
         "address": required_text(&worker, "address", "户籍地址")?,
-        "current_address": optional_text(&worker, "current_address"),
         "nation": nation_code(optional_text(&worker, "nation").as_deref(), config),
-        "nativeplace": native_place_code(value_i64(&worker, "native_place"))?,
-        "politics_type": politics_code(value_i64(&worker, "political_status")),
-        "culture_level_type": education_code(value_i64(&worker, "education")),
-        "is_medical_record": if value_bool(&worker, "has_major_medical_history") { 1 } else { 0 },
-        "bank_code": bank_code(optional_text(&worker, "salary_bank").as_deref()),
-        "bank_no": bank_no
+        "nativeplace": native_place_code(value_i64(&worker, "native_place"))?
     }]);
     let response = call_api(
         state,
@@ -349,50 +328,21 @@ async fn execute_entry_exit_sync(
     } else {
         required_text(&worker, "entry_time", "进场日期")?
     };
-    let is_manager = value_bool(&worker, "is_manage_team")
-        || value_i64(&worker, "work_type") == Some(1001)
-        || value_i64(&worker, "worker_type") == Some(1001);
-    let (method, payload) = if is_manager {
-        let unit = worker
-            .get("unit")
-            .ok_or_else(|| JobIssue::WaitingData("管理人员所属单位不存在".to_owned()))?;
-        let employer_type = company_type(value_i64(unit, "company_type"))?;
-        let position = manager_position(
-            optional_text(&worker, "manager_type").as_deref(),
-            employer_type,
-        )?;
-        (
-            xinleda::MANAGER_ENTRY,
-            json!([{
-                "project_code": credentials.project_code,
-                "real_name": required_text(&worker, "name", "管理人员姓名")?,
-                "id_card_no": id_card,
-                "position_no": position,
-                "company_type": employer_type,
-                "company_name": required_text(unit, "company_name", "管理人员所属单位名称")?,
-                "organization_code": required_text(unit, "company_credit_code", "管理人员所属单位信用代码")?,
-                "type": if is_exit { 2 } else { 1 },
-                "date": date
-            }]),
-        )
-    } else {
-        let team = worker
-            .get("team")
-            .ok_or_else(|| JobIssue::WaitingData("人员所属班组不存在".to_owned()))?;
-        (
-            xinleda::LABOURER_ENTRY,
-            json!([{
-                "project_code": credentials.project_code,
-                "real_name": required_text(&worker, "name", "人员姓名")?,
-                "id_card_no": id_card,
-                "group_name": required_text(team, "name", "班组名称")?,
-                "is_leader": if value_bool(&worker, "is_team_leader") { 1 } else { 0 },
-                "worktype_no": work_type_code(value_i64(&worker, "work_type"))?,
-                "type": if is_exit { 2 } else { 1 },
-                "date": date
-            }]),
-        )
-    };
+    let team = worker
+        .get("team")
+        .ok_or_else(|| JobIssue::WaitingData("人员所属班组不存在".to_owned()))?;
+    // 与参考项目 1329 保持一致：所有人员使用普通进退场接口。
+    let method = xinleda::LABOURER_ENTRY;
+    let payload = json!([{
+        "project_code": credentials.project_code,
+        "real_name": required_text(&worker, "name", "人员姓名")?,
+        "id_card_no": id_card,
+        "group_name": required_text(team, "name", "班组名称")?,
+        "is_leader": if value_bool(&worker, "is_team_leader") { 1 } else { 0 },
+        "worktype_no": work_type_code(value_i64(&worker, "work_type"))?,
+        "type": if is_exit { 2 } else { 1 },
+        "date": date
+    }]);
     let response = call_api(state, job, credentials, method, &payload, CallSafety::Write).await?;
     accept_or_complete(state.db.pool(), job, method, &response, None).await
 }
@@ -414,17 +364,8 @@ async fn execute_attendance_sync(
         r#"
         SELECT to_jsonb(record)
                || jsonb_build_object('worker', to_jsonb(worker))
-               || jsonb_build_object('photo_data', photo.photo_data, 'photo_content_type', photo.content_type)
         FROM construction_attendance_records record
         JOIN construction_workers worker ON worker.id = record.worker_id AND worker.is_deleted = FALSE
-        LEFT JOIN LATERAL (
-            SELECT p.photo_data, p.content_type
-            FROM construction_attendance_record_photos p
-            WHERE p.attendance_record_id = record.id
-              AND BTRIM(p.photo_data) <> ''
-            ORDER BY CASE p.photo_kind WHEN 'closeup' THEN 0 ELSE 1 END, p.created_at
-            LIMIT 1
-        ) photo ON TRUE
         WHERE record.id = $1 AND record.is_deleted = FALSE
         "#,
         attendance_id,
@@ -443,21 +384,6 @@ async fn execute_attendance_sync(
             "等待实名人员信息同步成功".to_owned(),
         ));
     }
-    let photo_url = if let Some(photo) = optional_text(&attendance, "photo_data") {
-        upload_photo(
-            state,
-            job,
-            credentials,
-            attendance_id,
-            &photo,
-            optional_text(&attendance, "photo_content_type")
-                .as_deref()
-                .unwrap_or("image/jpeg"),
-        )
-        .await?
-    } else {
-        None
-    };
     let payload = json!([{
         "project_code": credentials.project_code,
         "machine_sn": optional_text(&attendance, "serial_number"),
@@ -465,8 +391,7 @@ async fn execute_attendance_sync(
         "inorout": match value_i64(&attendance, "direction") { Some(0) => "I", Some(1) => "O", _ => return Err(JobIssue::WaitingData("考勤方向必须为 0 或 1".to_owned())) },
         "fullname": required_text(worker, "name", "考勤人员姓名")?,
         "id_card_no": xinleda::encrypt_sensitive(&credentials.app_secret, &required_text(worker, "id_card", "身份证号码")?)
-            .map_err(|error| JobIssue::WaitingData(error.to_string()))?,
-        "shot_photo": photo_url
+            .map_err(|error| JobIssue::WaitingData(error.to_string()))?
     }]);
     let response = call_api(
         state,
@@ -689,7 +614,6 @@ async fn call_api(
             state.db.pool(),
             job,
             credentials,
-            method,
             payload,
             Some(&response),
             "dry_run",
@@ -715,7 +639,6 @@ async fn call_api(
                 state.db.pool(),
                 job,
                 credentials,
-                method,
                 payload,
                 Some(&response),
                 if accepted { "success" } else { "failed" },
@@ -739,7 +662,6 @@ async fn call_api(
                 state.db.pool(),
                 job,
                 credentials,
-                method,
                 payload,
                 None,
                 "transport_error",
@@ -754,108 +676,6 @@ async fn call_api(
             }
         }
     }
-}
-
-async fn upload_photo(
-    state: &AppState,
-    job: &ClaimedJob,
-    credentials: &xinleda::XinledaCredentials,
-    entity_id: Uuid,
-    source: &str,
-    content_type: &str,
-) -> Result<Option<String>, JobIssue> {
-    if source.starts_with("http://") || source.starts_with("https://") {
-        return Ok(Some(source.to_owned()));
-    }
-    let content_type = source
-        .strip_prefix("data:")
-        .and_then(|data| data.split_once(";base64,"))
-        .map(|(mime, _)| mime)
-        .filter(|mime| mime.starts_with("image/"))
-        .unwrap_or(content_type);
-    let encoded = source
-        .split_once(',')
-        .map(|(_, data)| data)
-        .unwrap_or(source);
-    let bytes = BASE64_STANDARD
-        .decode(encoded)
-        .map_err(|_| JobIssue::WaitingData("上传照片 Base64 格式错误".to_owned()))?;
-    if bytes.is_empty() || bytes.len() > MAX_UPLOAD_BYTES {
-        return Err(JobIssue::WaitingData(
-            "上传照片为空或超过 10 MiB".to_owned(),
-        ));
-    }
-    let response = if credentials.is_dry_run() {
-        xinleda::XinledaResponse {
-            status: 200,
-            body: json!({"code": 0, "message": "dry-run", "data": [format!("/dry-run/{entity_id}.jpg")]}),
-            duration_ms: 0,
-            request_url: credentials
-                .endpoint(xinleda::UPLOAD_PATH)
-                .map(|url| url.to_string())
-                .unwrap_or_else(|_| xinleda::UPLOAD_PATH.to_owned()),
-            request_headers: json!({"Content-Type": "multipart/form-data"}),
-            request_body: json!({"files": "[BINARY_OMITTED]"}),
-        }
-    } else {
-        let method_guard =
-            acquire_method_guard(state.db.pool(), &credentials.app_id, "upfiles").await?;
-        acquire_rate_slot(state.db.pool(), &credentials.app_id, "upfiles").await?;
-        let client =
-            xinleda::build_client().map_err(|error| JobIssue::Retryable(error.to_string()))?;
-        let result = xinleda::upload_file(
-            &client,
-            credentials,
-            &format!("{entity_id}.jpg"),
-            content_type,
-            bytes,
-        )
-        .await;
-        method_guard.commit().await.map_err(|error| {
-            JobIssue::DeliveryUnknown(format!(
-                "文件请求已发出，但释放薪乐达接口串行锁失败：{error}"
-            ))
-        })?;
-        result.map_err(|error| JobIssue::Retryable(error.to_string()))?
-    };
-    record_attempt(
-        state.db.pool(),
-        job,
-        credentials,
-        "upfiles",
-        &json!({"files": "[REDACTED]"}),
-        Some(&response),
-        if response.is_success() {
-            "success"
-        } else {
-            "failed"
-        },
-        (!response.is_success())
-            .then(|| response.message())
-            .as_deref(),
-    )
-    .await;
-    if !response.is_success() {
-        return Err(JobIssue::Permanent(response.message()));
-    }
-    let url = response.body.get("data").and_then(|data| {
-        data.as_str()
-            .map(ToOwned::to_owned)
-            .or_else(|| data.as_array()?.first()?.as_str().map(ToOwned::to_owned))
-    });
-    let url = url
-        .filter(|url| !url.trim().is_empty())
-        .ok_or_else(|| JobIssue::Retryable("薪乐达图片上传成功但未返回图片地址".to_owned()))?;
-    let url = credentials
-        .base_url
-        .join(&url)
-        .map_err(|_| JobIssue::WaitingData("薪乐达返回的图片地址无效".to_owned()))?;
-    if !matches!(url.scheme(), "https" | "http") {
-        return Err(JobIssue::WaitingData(
-            "薪乐达返回的图片地址必须使用 HTTP 或 HTTPS".to_owned(),
-        ));
-    }
-    Ok(Some(url.to_string()))
 }
 
 async fn acquire_rate_slot(pool: &PgPool, app_id: &str, method: &str) -> Result<(), JobIssue> {
@@ -1076,7 +896,6 @@ async fn record_attempt(
     pool: &PgPool,
     job: &ClaimedJob,
     credentials: &xinleda::XinledaCredentials,
-    method: &str,
     request_body: &Value,
     response: Option<&xinleda::XinledaResponse>,
     status: &str,
@@ -1095,11 +914,7 @@ async fn record_attempt(
             return;
         }
     };
-    let request_path = if method == "upfiles" {
-        xinleda::UPLOAD_PATH
-    } else {
-        xinleda::OPENAPI_PATH
-    };
+    let request_path = xinleda::OPENAPI_PATH;
     let request_url = response
         .map(|value| value.request_url.clone())
         .unwrap_or_else(|| {
@@ -1110,7 +925,7 @@ async fn record_attempt(
         });
     let request_headers = response
         .map(|value| value.request_headers.clone())
-        .unwrap_or_else(|| json!({"Content-Type": if method == "upfiles" { "multipart/form-data" } else { "application/json" }}));
+        .unwrap_or_else(|| json!({"Content-Type": "application/json"}));
     let logged_body = response
         .map(|value| value.request_body.clone())
         .unwrap_or_else(|| request_body.clone());
@@ -1231,20 +1046,6 @@ fn identity_validity(worker: &Value) -> Result<(Option<String>, Option<String>, 
     ))
 }
 
-fn company_type(value: Option<i64>) -> Result<i64, JobIssue> {
-    match value {
-        Some(1 | 5 | 6 | 7) => Ok(2),
-        Some(2) => Ok(6),
-        Some(3 | 8 | 9) => Ok(3),
-        Some(4) => Ok(1),
-        Some(10) => Ok(5),
-        Some(11) => Ok(4),
-        _ => Err(JobIssue::WaitingData(
-            "单位类型无法映射到薪乐达企业登记注册类型".to_owned(),
-        )),
-    }
-}
-
 fn work_type_code(value: Option<i64>) -> Result<&'static str, JobIssue> {
     match value {
         Some(1) => Ok("020"),
@@ -1287,54 +1088,6 @@ fn work_type_code(value: Option<i64>) -> Result<&'static str, JobIssue> {
         Some(900) => Ok("1000"),
         Some(1001) => Ok("900"),
         _ => Err(JobIssue::WaitingData("工种无法映射到薪乐达字典".to_owned())),
-    }
-}
-
-// V3.8 section 3.31: the position must also match the employer's company type.
-fn manager_position(value: Option<&str>, company_type: i64) -> Result<&'static str, JobIssue> {
-    match (value.unwrap_or("").trim(), company_type) {
-        ("1", 2) => Ok("5"),
-        ("2", 1 | 2) => Ok("2"),
-        ("2", 3) => Ok("45"),
-        ("2", 5) => Ok("58"),
-        ("2", 4) => Ok("64"),
-        ("3", 2) => Ok("32"),
-        ("4", 2) => Ok("8"),
-        ("5", 2) => Ok("7"),
-        ("5", 3) => Ok("43"),
-        ("5", 5) => Ok("56"),
-        ("5", 4) => Ok("62"),
-        ("6", 2) => Ok("34"),
-        ("7", 2) => Ok("9"),
-        ("8", 2) => Ok("13"),
-        ("9", 2) => Ok("12"),
-        ("99", 1..=9) => Ok("1000"),
-        _ => Err(JobIssue::WaitingData(
-            "管理人员类型与所属单位无法映射到薪乐达岗位字典".to_owned(),
-        )),
-    }
-}
-
-fn education_code(value: Option<i64>) -> &'static str {
-    match value {
-        Some(1) => "01",
-        Some(2) => "02",
-        Some(3) => "03",
-        Some(4) => "04",
-        Some(5) => "05",
-        Some(6) => "06",
-        Some(7) => "07",
-        Some(8) => "08",
-        _ => "99",
-    }
-}
-
-fn politics_code(value: Option<i64>) -> &'static str {
-    match value {
-        Some(2) => "01",
-        Some(3) => "02",
-        Some(4) => "03",
-        _ => "13",
     }
 }
 
@@ -1423,27 +1176,6 @@ fn native_place_code(value: Option<i64>) -> Result<i64, JobIssue> {
     }
 }
 
-// V3.8 section 3.17; local forms store bank names rather than clearing codes.
-fn bank_code(value: Option<&str>) -> Option<String> {
-    let value = value?.trim();
-    let code = match value {
-        "中国工商银行" => "102100099996",
-        "中国农业银行" => "103100000026",
-        "中国银行" => "104100000004",
-        "中国建设银行" => "105100000017",
-        "交通银行" => "301290000007",
-        "中国邮政储蓄银行" => "403100000004",
-        "招商银行" => "308584000013",
-        "中信银行" => "302100011000",
-        "浦发银行" | "上海浦东发展银行" => "310290000013",
-        "江苏银行" => "313301099999",
-        "南京银行" => "313301008887",
-        code if code.len() == 12 && code.bytes().all(|b| b.is_ascii_digit()) => code,
-        _ => return None,
-    };
-    Some(code.to_owned())
-}
-
 fn format_datetime(value: String) -> String {
     if let Ok(timestamp) = DateTime::parse_from_rfc3339(&value) {
         return timestamp
@@ -1473,27 +1205,7 @@ mod tests {
         assert_eq!(native_place_code(None).unwrap(), 27);
         assert_eq!(native_place_code(Some(0)).unwrap(), 27);
         assert_eq!(nation_code(Some("汉族"), &json!({})), 1);
-        assert_eq!(company_type(Some(1)).unwrap(), 2);
-        assert_eq!(company_type(Some(2)).unwrap(), 6);
-        assert_eq!(company_type(Some(4)).unwrap(), 1);
-        assert!(company_type(Some(12)).is_err());
-        assert_eq!(manager_position(Some("1"), 2).unwrap(), "5");
-        assert!(manager_position(Some("unknown"), 2).is_err());
-    }
-
-    #[test]
-    fn bank_names_use_xinleda_twelve_digit_codes() {
-        assert_eq!(
-            bank_code(Some("中国工商银行")).as_deref(),
-            Some("102100099996")
-        );
-        assert_eq!(bank_code(Some("浦发银行")).as_deref(), Some("310290000013"));
-        assert_eq!(
-            bank_code(Some("313301099999")).as_deref(),
-            Some("313301099999")
-        );
-        assert_eq!(bank_code(Some("其他")), None);
-        assert_eq!(bank_code(None), None);
+        assert_eq!(work_type_code(Some(1001)).unwrap(), "900");
     }
 
     #[test]
@@ -1515,21 +1227,5 @@ mod tests {
             identity_validity(&json!({"validity_period_end": "长期"})).unwrap(),
             (None, None, 1)
         );
-    }
-
-    #[test]
-    fn v38_positions_match_both_role_and_employer() {
-        assert_eq!(manager_position(Some("3"), 2).unwrap(), "32");
-        assert_eq!(manager_position(Some("6"), 2).unwrap(), "34");
-        for employer in 1..=9 {
-            assert_eq!(manager_position(Some("99"), employer).unwrap(), "1000");
-        }
-        for (employer, technical, safety) in [(3, "45", "43"), (5, "58", "56"), (4, "64", "62")] {
-            assert_eq!(manager_position(Some("2"), employer).unwrap(), technical);
-            assert_eq!(manager_position(Some("5"), employer).unwrap(), safety);
-        }
-        assert!(manager_position(Some("3"), 6).is_err());
-        assert!(manager_position(Some("1"), 1).is_err());
-        assert!(manager_position(Some("99"), 0).is_err());
     }
 }

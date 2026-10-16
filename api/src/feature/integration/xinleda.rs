@@ -6,7 +6,7 @@ use std::{
 use aes::{Aes128, Aes192, Aes256};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use cbc::cipher::{BlockEncryptMut, KeyIvInit, block_padding::Pkcs7};
-use reqwest::{Client, Url, multipart};
+use reqwest::{Client, Url};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -20,22 +20,14 @@ pub const PLATFORM_CODE: &str = "xinleda";
 pub const PLATFORM_NAME: &str = "薪乐达";
 pub const DEFAULT_BASE_URL: &str = "https://openapi.hwxld.com";
 pub const OPENAPI_PATH: &str = "openapi";
-pub const UPLOAD_PATH: &str = "upfiles";
 pub const VERSION: &str = "1.0";
 
 pub const LOG_GET: &str = "unifiedlog.get";
 pub const LABOURER_ENTRY: &str = "project.labourer.entry";
 pub const ATTENDANCE_IMPORT: &str = "project.labourer.attendance";
-pub const MANAGER_ENTRY: &str = "project.manager.entry";
 pub const LABOURER_IMPORT: &str = "labourer.import";
 
-pub const ALL_METHODS: &[&str] = &[
-    LOG_GET,
-    LABOURER_ENTRY,
-    ATTENDANCE_IMPORT,
-    MANAGER_ENTRY,
-    LABOURER_IMPORT,
-];
+pub const ALL_METHODS: &[&str] = &[LOG_GET, LABOURER_ENTRY, ATTENDANCE_IMPORT, LABOURER_IMPORT];
 
 const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 
@@ -244,42 +236,6 @@ pub async fn call(
     .await
 }
 
-pub async fn upload_file(
-    client: &Client,
-    credentials: &XinledaCredentials,
-    file_name: &str,
-    content_type: &str,
-    bytes: Vec<u8>,
-) -> Result<XinledaResponse, XinledaError> {
-    let timestamp = chrono::Utc::now().timestamp_millis();
-    let parameters = BTreeMap::from([
-        ("appid".to_owned(), credentials.app_id.clone()),
-        ("timestamp".to_owned(), timestamp.to_string()),
-    ]);
-    let sign = signature(&parameters, &credentials.app_secret);
-    let mut url = credentials.endpoint(UPLOAD_PATH)?;
-    url.query_pairs_mut()
-        .append_pair("appid", &credentials.app_id)
-        .append_pair("timestamp", &timestamp.to_string())
-        .append_pair("sign", &sign);
-    let part = multipart::Part::bytes(bytes)
-        .file_name(file_name.to_owned())
-        .mime_str(content_type)
-        .map_err(|error| XinledaError::Request(error.to_string()))?;
-    let request_url = url.to_string();
-    send(
-        client
-            .post(url)
-            .multipart(multipart::Form::new().part("files", part)),
-        request_url,
-        json!({"Content-Type": "multipart/form-data"}),
-        json!({
-            "files": format!("[BINARY_OMITTED:{file_name}]"),
-        }),
-    )
-    .await
-}
-
 pub fn async_token(_method: &str, body: &Value) -> Option<String> {
     body.get("data")
         .and_then(value_string)
@@ -417,10 +373,10 @@ mod tests {
 
     #[test]
     fn enabled_methods_only_cover_outbound_personnel_and_attendance() {
-        assert_eq!(ALL_METHODS.len(), 5);
+        assert_eq!(ALL_METHODS.len(), 4);
         assert!(!ALL_METHODS.contains(&"company.import"));
         assert!(!ALL_METHODS.contains(&"project.import"));
         assert!(!ALL_METHODS.contains(&"company.safeguard"));
-        assert!(ALL_METHODS.contains(&MANAGER_ENTRY));
+        assert!(!ALL_METHODS.contains(&"project.manager.entry"));
     }
 }

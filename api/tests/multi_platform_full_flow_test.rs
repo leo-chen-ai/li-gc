@@ -487,8 +487,7 @@ async fn xinleda_two_accounts_use_independent_bindings_and_cover_required_interf
 
     sqlx::query("UPDATE construction_workers SET salary_bank = '中国工商银行', salary_bank_card = '6222020200000000001' WHERE id = $1")
         .bind(seeded.worker_ids[0]).execute(&pool).await.unwrap();
-    // Project managers/constructors belong to a construction company in section 3.31.
-    sqlx::query("UPDATE construction_units SET company_type = 1 WHERE id = (SELECT unit_id FROM construction_workers WHERE id = $1)")
+    sqlx::query("UPDATE construction_units SET company_credit_code = NULL WHERE id = (SELECT unit_id FROM construction_workers WHERE id = $1)")
         .bind(seeded.worker_ids[1]).execute(&pool).await.unwrap();
     drain_outbox(&state).await;
     let legacy_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM integration_jobs WHERE platform_code = 'xinleda' AND operation IN ('safeguard.sync', 'project.sync', 'unit.sync')")
@@ -585,7 +584,6 @@ async fn xinleda_two_accounts_use_independent_bindings_and_cover_required_interf
         "unifiedlog.get",
         "project.labourer.entry",
         "project.labourer.attendance",
-        "project.manager.entry",
         "labourer.import",
     ] {
         assert!(
@@ -594,6 +592,7 @@ async fn xinleda_two_accounts_use_independent_bindings_and_cover_required_interf
         );
     }
     for excluded in [
+        "project.manager.entry",
         "company.import",
         "project.import",
         "company.safeguard",
@@ -606,18 +605,20 @@ async fn xinleda_two_accounts_use_independent_bindings_and_cover_required_interf
             "excluded method was called: {excluded}"
         );
     }
-    assert!(requests.iter().any(|request| request.path == "/upfiles"));
-    let positions: std::collections::HashSet<String> = openapi
+    assert!(!requests.iter().any(|request| request.path == "/upfiles"));
+    let manager_entry_count = openapi
         .iter()
-        .filter(|request| request.body["method"] == "project.manager.entry")
-        .map(|request| {
+        .filter(|request| {
+            if request.body["method"] != "project.labourer.entry" {
+                return false;
+            }
             let data: Value = serde_json::from_str(request.body["data"].as_str().unwrap()).unwrap();
-            data[0]["position_no"].as_str().unwrap().to_owned()
+            data[0]["worktype_no"] == "900"
         })
-        .collect();
-    assert_eq!(
-        positions,
-        ["5", "32", "34"].into_iter().map(str::to_owned).collect()
+        .count();
+    assert!(
+        manager_entry_count >= 2,
+        "管理人员按参考项目走普通进退场接口"
     );
 
     let mut app_projects: HashMap<String, std::collections::HashSet<String>> = HashMap::new();
@@ -631,17 +632,31 @@ async fn xinleda_two_accounts_use_independent_bindings_and_cover_required_interf
         if request.body["method"] != "unifiedlog.get" {
             let data: Value = serde_json::from_str(request.body["data"].as_str().unwrap()).unwrap();
             if request.body["method"] == "labourer.import" {
-                if !data[0]["bank_no"].is_null() {
-                    assert_eq!(data[0]["bank_code"], "102100099996");
-                    assert_ne!(data[0]["bank_no"], "6222020200000000001");
-                }
-                assert!(
-                    data[0]["user_photo"]
-                        .as_str()
-                        .unwrap()
-                        .starts_with("https://files.test/"),
-                    "user_photo must be an uploaded URL, not inline Base64"
+                let keys: std::collections::HashSet<&str> = data[0]
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .map(String::as_str)
+                    .collect();
+                assert_eq!(
+                    keys,
+                    [
+                        "real_name",
+                        "gender",
+                        "birthday",
+                        "id_card_no",
+                        "is_id_card_long",
+                        "grant_org",
+                        "address",
+                        "nation",
+                        "nativeplace"
+                    ]
+                    .into_iter()
+                    .collect()
                 );
+            }
+            if request.body["method"] == "project.labourer.attendance" {
+                assert!(data[0].get("shot_photo").is_none());
             }
             for row in data.as_array().into_iter().flatten() {
                 if let Some(project_code) = row.get("project_code").and_then(Value::as_str) {
