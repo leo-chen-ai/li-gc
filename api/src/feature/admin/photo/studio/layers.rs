@@ -223,7 +223,7 @@ async fn finish(layer: Vec<u8>, background: Vec<u8>) -> Result<Vec<u8>, String> 
         image::codecs::jpeg::JpegEncoder::new_with_quality(&mut encoded, 85)
             .encode_image(&image)
             .map_err(|_| "合成人物失败")?;
-        attendance_jpeg(&encoded)
+        final_attendance_jpeg(&encoded)
     })
     .await
     .map_err(|_| "人物合成任务失败".to_string())?
@@ -593,6 +593,14 @@ mod tests {
         let first = generate(&client, &req, &refs, &bg, &bg).await.unwrap();
         assert!(first.out_image.is_none());
         assert!(first.entry_layer.is_some());
+        let exported =
+            image::load_from_memory(&decode_entry_image(&first.in_image).unwrap()).unwrap();
+        assert_eq!((exported.width(), exported.height()), (240, 240));
+        let layer = image::load_from_memory(
+            &decode_entry_image(first.entry_layer.as_deref().unwrap()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!((layer.width(), layer.height()), (480, 480));
         req.entry_image = Some(first.in_image.clone());
         req.entry_layer = first.entry_layer.clone();
         let retried = generate(&client, &req, &refs, &bg, &bg).await.unwrap();

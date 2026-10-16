@@ -282,8 +282,9 @@ async fn load_image(
     .map_err(|_| invalid_input("图片格式无法解析"))
 }
 
-// 实测考勤样本主要为480×480 JPEG、约14–18KB；输出上限20KB。
+// 中间背景与人物图层保持480×480；最终下载图降为240×240，仍不超过20KB。
 const ATTENDANCE_SIZE: u32 = 480;
+const FINAL_ATTENDANCE_SIZE: u32 = ATTENDANCE_SIZE / 2;
 const ATTENDANCE_MAX_BYTES: usize = 20 * 1024;
 const ENTRY_POSES: [&str; 6] = [
     "头部向左转约12度，双眼仍看镜头中心，眉头略微集中，嘴唇自然闭合",
@@ -395,22 +396,25 @@ impl GenerateRequest {
 }
 
 fn attendance_jpeg(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    studio_jpeg(bytes, ATTENDANCE_SIZE)
+}
+
+fn final_attendance_jpeg(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    studio_jpeg(bytes, FINAL_ATTENDANCE_SIZE)
+}
+
+fn studio_jpeg(bytes: &[u8], size: u32) -> Result<Vec<u8>, String> {
     let image = image::load_from_memory(bytes)
         .map_err(|_| "AI返回的图片格式无法解析".to_string())?
-        .resize_to_fill(
-            ATTENDANCE_SIZE,
-            ATTENDANCE_SIZE,
+        .resize_to_fill(size, size, image::imageops::FilterType::Triangle)
+        .resize_exact(
+            size * 3 / 4,
+            size * 3 / 4,
             image::imageops::FilterType::Triangle,
         )
-        .resize_exact(360, 360, image::imageops::FilterType::Triangle)
-        .resize_exact(
-            ATTENDANCE_SIZE,
-            ATTENDANCE_SIZE,
-            image::imageops::FilterType::Triangle,
-        );
-    // 先降低有效细节，让480像素输出更接近普通摄像头；不制造重影或大幅拖影。
-    // 噪点/纹理极多的图仅降低JPEG质量仍可能超限。逐步轻微软化，
-    // 保持480×480尺寸，避免压缩失败或重新缩成超小缩略图。
+        .resize_exact(size, size, image::imageops::FilterType::Triangle);
+    // 有效细节再降一档并轻微软化，不制造重影或大幅拖影。
+    // 原尺寸用于中间图层；最终导出尺寸减半，不能再放大回480。
     for softness in [0.7, 1.0, 1.4, 2.0] {
         let softened = image.blur(softness);
         for quality in [48, 42, 36, 28, 20, 12, 8] {
@@ -460,8 +464,8 @@ fn decode_entry_image(uri: &str) -> Result<Vec<u8>, String> {
         .map_err(|_| "进场图片无法解析")?
         .into_dimensions()
         .map_err(|_| "进场图片无法解析")?;
-    if width != ATTENDANCE_SIZE || height != ATTENDANCE_SIZE {
-        return Err("进场图片尺寸必须为480×480".into());
+    if ![ATTENDANCE_SIZE, FINAL_ATTENDANCE_SIZE].contains(&width) || width != height {
+        return Err("进场图片尺寸必须为240×240或480×480".into());
     }
     Ok(bytes)
 }
@@ -987,6 +991,14 @@ mod tests {
         let decoded = image::load_from_memory(&jpeg).unwrap();
         assert_eq!((decoded.width(), decoded.height()), (480, 480));
         assert_eq!(decode_entry_image(&image_uri(&jpeg)).unwrap(), jpeg);
+        let final_jpeg = final_attendance_jpeg(&test_png()).unwrap();
+        let final_image = image::load_from_memory(&final_jpeg).unwrap();
+        assert_eq!((final_image.width(), final_image.height()), (240, 240));
+        assert!(final_jpeg.len() <= ATTENDANCE_MAX_BYTES);
+        assert_eq!(
+            decode_entry_image(&image_uri(&final_jpeg)).unwrap(),
+            final_jpeg
+        );
         assert!(decode_entry_image("data:image/png;base64,aGVsbG8=").is_err());
         assert!(
             decode_entry_image(&format!("data:image/jpeg;base64,{}", "x".repeat(50_000))).is_err()

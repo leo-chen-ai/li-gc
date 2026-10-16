@@ -464,7 +464,7 @@ export function PhotoProcessingPage() {
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            每张 480×480 JPEG，不超过 20KB；下载按套保留进场、出场配对。
+            每张 240×240 JPEG，低清柔化，不超过 20KB；下载按套保留进场、出场配对。
           </p>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {results.map((item) => (
