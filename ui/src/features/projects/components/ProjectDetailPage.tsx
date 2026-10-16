@@ -3742,6 +3742,9 @@ function TeamReportingOverview({
               <span className="text-red-600">
                 失败 {platform.failure_count}
               </span>
+              <span className="text-amber-600">
+                等待中 {platform.pending_count}
+              </span>
               <span className="text-slate-400">
                 未传 {platform.not_reported_count}
               </span>
@@ -4167,16 +4170,18 @@ function EntityReportingPlatforms({
       {showLabel ? <div className="text-slate-400">上报平台</div> : null}
       {platforms.map((platform) => {
         const isSuccess = platform.status === "success";
-        const isFailed =
-          platform.status === "failed" || platform.status === "pending";
+        const isFailed = platform.status === "failed";
+        const isPending = platform.status === "pending";
         const isIgnored = platform.status === "ignored";
         const statusText = isSuccess
           ? "成功"
-          : isFailed
-            ? `失败${platform.failure_reason ? `：${platform.failure_reason}` : ""}`
-            : isIgnored
-              ? "已跳过（市平台无法获取工人ID）"
-              : "未传";
+          : isPending
+            ? "等待中"
+            : isFailed
+              ? `失败${platform.failure_reason ? `：${platform.failure_reason}` : ""}`
+              : isIgnored
+                ? "已跳过（市平台无法获取工人ID）"
+                : "未传";
 
         return (
           <div
@@ -4188,9 +4193,11 @@ function EntityReportingPlatforms({
                 "flex items-start gap-1",
                 isSuccess
                   ? "text-emerald-600"
-                  : isFailed
-                    ? "text-red-600"
-                    : "text-slate-400",
+                  : isPending
+                    ? "text-amber-600"
+                    : isFailed
+                      ? "text-red-600"
+                      : "text-slate-400",
               )}
               title={`${platform.platform_name}：${statusText}`}
             >

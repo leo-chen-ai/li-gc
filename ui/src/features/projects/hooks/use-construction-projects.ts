@@ -211,6 +211,10 @@ export function useProjectUnitsQuery(
     queryKey: constructionProjectKeys.units(projectId, filters),
     queryFn: () => constructionProjectService.listUnits(projectId, filters),
     enabled: canQueryProject(projectId),
+    refetchInterval: (query) =>
+      query.state.data?.reporting_summary?.some((platform) => platform.pending_count > 0)
+        ? 15_000
+        : false,
   });
 }
 
@@ -294,6 +298,10 @@ export function useProjectTeamsQuery(
     queryKey: constructionProjectKeys.teams(projectId, filters),
     queryFn: () => constructionProjectService.listTeams(projectId, filters),
     enabled: canQueryProject(projectId),
+    refetchInterval: (query) =>
+      query.state.data?.reporting_summary?.some((platform) => platform.pending_count > 0)
+        ? 15_000
+        : false,
   });
 }
 
@@ -377,6 +385,10 @@ export function useProjectWorkersQuery(
     queryKey: constructionProjectKeys.workers(projectId, filters),
     queryFn: () => constructionProjectService.listWorkers(projectId, filters),
     enabled: canQueryProject(projectId),
+    refetchInterval: (query) =>
+      query.state.data?.reporting_summary?.some((platform) => platform.pending_count > 0)
+        ? 15_000
+        : false,
   });
 }
 
