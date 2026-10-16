@@ -140,6 +140,7 @@ export type ConstructionTeamReportingSummary = {
   pending_count: number;
   not_reported_count: number;
   ignored_count: number;
+  not_required_count?: number;
 };
 
 export type ConstructionProjectOption = {

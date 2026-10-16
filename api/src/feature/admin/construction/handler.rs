@@ -4064,7 +4064,7 @@ pub async fn repair_worker_reporting(
         SELECT worker.id
         FROM construction_workers worker
         LEFT JOIN LATERAL (
-            SELECT job.status, job.last_error
+            SELECT job.status, job.operation, job.last_error
             FROM integration_jobs job
             WHERE job.project_id = worker.project_id
               AND job.entity_type IN ('worker', 'construction_worker')
@@ -4096,6 +4096,8 @@ pub async fn repair_worker_reporting(
         ) active_mapping ON TRUE
         WHERE worker.project_id = $1
           AND worker.is_deleted = FALSE
+          AND NOT COALESCE((worker.work_status = 2 AND latest_job.operation = 'Project/ProjectWorkerExit'
+                   AND latest_job.status IN ('success', 'completed')), FALSE)
           AND EXISTS (
                 SELECT 1
                 FROM construction_platform_configs config
@@ -6794,6 +6796,8 @@ async fn list_workers_page(
                             'platform_type', config.platform_type,
                             'is_enabled', config.is_enabled,
                             'status', CASE
+                                WHEN latest_job.response_payload->>'reporting_status' = 'not_required' THEN 'not_required'
+                                WHEN r.work_status = 2 AND latest_job.operation = 'Project/ProjectWorkerExit' AND latest_job.status IN ('success', 'completed') THEN 'retired'
                                 WHEN latest_job.id IS NULL THEN 'not_reported'
                                 WHEN (config.platform_type = 'ningbo_housing' OR config.platform_name = '市住建')
                                      AND COALESCE(latest_job.last_error, '') ILIKE '%备案人员%'
@@ -6811,6 +6815,7 @@ async fn list_workers_page(
                                      AND latest_job.status IN ('success', 'completed')
                                      AND (config.platform_type = 'ningbo_housing' OR config.platform_name = '市住建')
                                      AND yongjian_identity.external_person_id IS NULL
+                                     AND NOT (r.work_status = 2 AND latest_job.operation = 'Project/ProjectWorkerExit')
                                     THEN '市住建未返回甬建码，请修正上报'
                                 WHEN latest_job.id IS NOT NULL
                                      AND latest_job.status NOT IN ('success', 'completed', 'pending', 'processing', 'retry', 'awaiting_result', 'waiting_dependency', 'waiting_media')
@@ -6838,7 +6843,7 @@ async fn list_workers_page(
                     )
                     FROM construction_platform_configs config
                     LEFT JOIN LATERAL (
-                        SELECT job.id, job.status, job.last_error, job.response_payload, job.updated_at
+                        SELECT job.id, job.status, job.operation, job.last_error, job.response_payload, job.updated_at
                         FROM integration_jobs job
                         LEFT JOIN integration_project_bindings binding
                           ON binding.id = job.binding_id
@@ -6944,6 +6949,8 @@ async fn worker_reporting_summary(
                 config.created_at AS platform_created_at,
                 worker.id AS worker_id,
                 CASE
+                    WHEN latest_job.response_payload->>'reporting_status' = 'not_required' THEN 'not_required'
+                    WHEN worker.work_status = 2 AND latest_job.operation = 'Project/ProjectWorkerExit' AND latest_job.status IN ('success', 'completed') THEN 'success'
                     WHEN worker.id IS NULL OR latest_job.id IS NULL THEN 'not_reported'
                     WHEN (config.platform_type = 'ningbo_housing' OR config.platform_name = '市住建')
                          AND COALESCE(latest_job.last_error, '') ILIKE '%备案人员%'
@@ -6961,7 +6968,7 @@ async fn worker_reporting_summary(
               ON worker.project_id = config.project_id
              AND worker.is_deleted = FALSE
             LEFT JOIN LATERAL (
-                SELECT job.id, job.status, job.last_error
+                SELECT job.id, job.status, job.operation, job.response_payload, job.last_error
                 FROM integration_jobs job
                 LEFT JOIN integration_project_bindings binding
                   ON binding.id = job.binding_id
@@ -6994,12 +7001,13 @@ async fn worker_reporting_summary(
                 platform_name,
                 platform_type,
                 platform_created_at,
-                COUNT(*) FILTER (WHERE worker_id IS NOT NULL AND reporting_status <> 'ignored')::int AS total_count,
+                COUNT(*) FILTER (WHERE worker_id IS NOT NULL AND reporting_status NOT IN ('ignored', 'not_required'))::int AS total_count,
                 COUNT(*) FILTER (WHERE worker_id IS NOT NULL AND reporting_status = 'success')::int AS success_count,
                 COUNT(*) FILTER (WHERE worker_id IS NOT NULL AND reporting_status = 'failed')::int AS failure_count,
                 COUNT(*) FILTER (WHERE worker_id IS NOT NULL AND reporting_status = 'pending')::int AS pending_count,
                 COUNT(*) FILTER (WHERE worker_id IS NOT NULL AND reporting_status = 'not_reported')::int AS not_reported_count,
-                COUNT(*) FILTER (WHERE worker_id IS NOT NULL AND reporting_status = 'ignored')::int AS ignored_count
+                COUNT(*) FILTER (WHERE worker_id IS NOT NULL AND reporting_status = 'ignored')::int AS ignored_count,
+                COUNT(*) FILTER (WHERE worker_id IS NOT NULL AND reporting_status = 'not_required')::int AS not_required_count
             FROM worker_platform_statuses
             GROUP BY platform_config_id, platform_name, platform_type, platform_created_at
         )
@@ -7013,7 +7021,8 @@ async fn worker_reporting_summary(
                     'failure_count', failure_count,
                     'pending_count', pending_count,
                     'not_reported_count', not_reported_count,
-                    'ignored_count', ignored_count
+                    'ignored_count', ignored_count,
+                    'not_required_count', not_required_count
                 ) ORDER BY platform_created_at, platform_name
             ),
             '[]'::jsonb

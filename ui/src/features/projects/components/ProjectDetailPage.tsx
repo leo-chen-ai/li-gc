@@ -3748,6 +3748,9 @@ function TeamReportingOverview({
               <span className="text-slate-400">
                 未传 {platform.not_reported_count}
               </span>
+              {(platform.not_required_count ?? 0) > 0 && (
+                <span className="text-slate-400">无需上报 {platform.not_required_count}</span>
+              )}
               {platform.ignored_count > 0 && (
                 <span className="text-slate-400">
                   跳过 {platform.ignored_count}
@@ -4169,19 +4172,23 @@ function EntityReportingPlatforms({
     <div className="space-y-1 text-[11px]">
       {showLabel ? <div className="text-slate-400">上报平台</div> : null}
       {platforms.map((platform) => {
-        const isSuccess = platform.status === "success";
+        const isSuccess = platform.status === "success" || platform.status === "retired";
         const isFailed = platform.status === "failed";
         const isPending = platform.status === "pending";
         const isIgnored = platform.status === "ignored";
-        const statusText = isSuccess
-          ? "成功"
-          : isPending
-            ? "等待中"
-            : isFailed
-              ? `失败${platform.failure_reason ? `：${platform.failure_reason}` : ""}`
-              : isIgnored
-                ? "已跳过（市平台无法获取工人ID）"
-                : "未传";
+        const statusText = platform.status === "not_required"
+          ? "已离场，无需上报"
+          : platform.status === "retired"
+            ? "退场成功"
+            : isSuccess
+              ? "成功"
+              : isPending
+                ? "等待中"
+                : isFailed
+                  ? `失败${platform.failure_reason ? `：${platform.failure_reason}` : ""}`
+                  : isIgnored
+                    ? "已跳过（市平台无法获取工人ID）"
+                    : "未传";
 
         return (
           <div

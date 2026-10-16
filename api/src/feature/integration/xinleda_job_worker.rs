@@ -248,6 +248,33 @@ async fn execute_team_sync(state: &AppState, job: &ClaimedJob) -> Result<(), Job
     .await
 }
 
+async fn retired_before_activation(
+    pool: &PgPool,
+    job: &ClaimedJob,
+    worker_id: Uuid,
+) -> Result<bool, JobIssue> {
+    sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS (
+            SELECT 1 FROM construction_workers worker
+            JOIN integration_project_bindings binding ON binding.id = $2
+            JOIN construction_platform_configs config ON config.id = binding.platform_config_id
+            WHERE worker.id = $1 AND worker.project_id = binding.project_id
+              AND worker.is_deleted = FALSE AND worker.work_status = 2
+              AND worker.exit_time < (config.created_at AT TIME ZONE 'Asia/Shanghai')::date
+              AND NOT EXISTS (
+                  SELECT 1 FROM integration_jobs previous
+                  WHERE previous.binding_id = binding.id AND previous.local_entity_id = worker.id
+                    AND previous.id <> $3 AND previous.operation = 'entry_exit.sync'
+                    AND previous.status IN ('success', 'completed', 'awaiting_result', 'delivery_unknown')
+                    AND COALESCE(previous.response_payload->>'reporting_status', '') <> 'not_required'
+              )
+        )
+        "#,
+    ).bind(worker_id).bind(job.binding_id).bind(job.id).fetch_one(pool).await
+     .map_err(|error| JobIssue::Retryable(error.to_string()))
+}
+
 async fn execute_worker_sync(
     state: &AppState,
     job: &ClaimedJob,
@@ -255,6 +282,19 @@ async fn execute_worker_sync(
     config: &Value,
 ) -> Result<(), JobIssue> {
     let worker_id = local_id(job)?;
+    if retired_before_activation(state.db.pool(), job, worker_id).await? {
+        return complete_job(
+            state.db.pool(),
+            job.id,
+            &json!({
+                "skipped": true,
+                "reporting_status": "not_required",
+                "reason": "启用对接前已离场，无需上报"
+            }),
+        )
+        .await;
+    }
+
     if event_operation(job) == "delete" {
         return complete_skipped(state.db.pool(), job.id, "删除事件由人员退场接口处理").await;
     }
@@ -307,6 +347,19 @@ async fn execute_entry_exit_sync(
     credentials: &xinleda::XinledaCredentials,
 ) -> Result<(), JobIssue> {
     let worker_id = local_id(job)?;
+    if retired_before_activation(state.db.pool(), job, worker_id).await? {
+        return complete_job(
+            state.db.pool(),
+            job.id,
+            &json!({
+                "skipped": true,
+                "reporting_status": "not_required",
+                "reason": "启用对接前已离场，无需上报"
+            }),
+        )
+        .await;
+    }
+
     let worker = match load_worker(state.db.pool(), worker_id).await {
         Ok(worker) => worker,
         Err(JobIssue::WaitingData(_)) => job
@@ -376,6 +429,19 @@ async fn execute_attendance_sync(
         .get("worker")
         .ok_or_else(|| JobIssue::WaitingData("考勤人员不存在".to_owned()))?;
     let worker_id = required_uuid(&attendance, "worker_id", "考勤人员")?;
+    if retired_before_activation(state.db.pool(), job, worker_id).await? {
+        return complete_job(
+            state.db.pool(),
+            job.id,
+            &json!({
+                "skipped": true,
+                "reporting_status": "not_required",
+                "reason": "启用对接前已离场，无需上报"
+            }),
+        )
+        .await;
+    }
+
     if mapping_external(state.db.pool(), job.binding_id, "worker", worker_id)
         .await?
         .is_none()

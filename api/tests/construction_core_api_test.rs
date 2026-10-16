@@ -1851,7 +1851,7 @@ async fn xinleda_management_worker_is_reported_instead_of_ignored() {
         .await
         .unwrap();
     let (status, repair) = authed_json(
-        app,
+        app.clone(),
         "POST",
         &format!("/api/v1/admin/projects/{project_id}/workers/reporting/repair"),
         &token,
@@ -1860,6 +1860,57 @@ async fn xinleda_management_worker_is_reported_instead_of_ignored() {
     .await;
     assert_eq!(status, StatusCode::OK, "{repair}");
     assert_eq!(repair["data"]["attempted_count"], 1);
+    sqlx::query("UPDATE construction_workers SET work_status = 2, exit_time = CURRENT_DATE - 10 WHERE id = $1")
+        .bind(worker_id).execute(&pool).await.unwrap();
+    sqlx::query("UPDATE integration_jobs SET status = 'success', response_payload = '{\"reporting_status\":\"not_required\"}'::jsonb WHERE binding_id = $1")
+        .bind(binding_id).execute(&pool).await.unwrap();
+    let nb_config: Uuid = sqlx::query_scalar("INSERT INTO construction_platform_configs (project_id, platform_name, platform_type, config, is_enabled) VALUES ($1, '市住建', 'ningbo_housing', '{}'::jsonb, TRUE) RETURNING id")
+        .bind(project_uuid).fetch_one(&pool).await.unwrap();
+    let nb_binding: Uuid = sqlx::query_scalar("INSERT INTO integration_project_bindings (project_id, platform_id, platform_config_id) SELECT $1, id, $2 FROM integration_platforms WHERE code = 'ningbo_housing' AND NOT is_deleted RETURNING id")
+        .bind(project_uuid).bind(nb_config).fetch_one(&pool).await.unwrap();
+    sqlx::query("INSERT INTO integration_jobs (project_id, platform_code, operation, entity_type, local_entity_id, idempotency_key, status, binding_id) VALUES ($1, 'ningbo_housing', 'Project/ProjectWorkerExit', 'worker', $2, $3, 'success', $4)")
+        .bind(project_uuid).bind(worker_id).bind(format!("retired-success-{worker_id}")).bind(nb_binding).execute(&pool).await.unwrap();
+    let (status, workers) = get_authed(
+        app.clone(),
+        &format!("/api/v1/admin/projects/{project_id}/workers"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{workers}");
+    let platforms = workers["data"]["items"][0]["reporting_platforms"]
+        .as_array()
+        .unwrap();
+    let xinleda = platforms
+        .iter()
+        .find(|p| p["platform_type"] == "xinleda")
+        .unwrap();
+    let ningbo = platforms
+        .iter()
+        .find(|p| p["platform_type"] == "ningbo_housing")
+        .unwrap();
+    assert_eq!(xinleda["status"], "not_required");
+    assert_eq!(ningbo["status"], "retired");
+    assert!(ningbo["failure_reason"].is_null());
+    let summaries = workers["data"]["reporting_summary"].as_array().unwrap();
+    let summary = summaries
+        .iter()
+        .find(|p| p["platform_type"] == "xinleda")
+        .unwrap();
+    assert_eq!(summary["not_required_count"], 1);
+    assert_eq!(summary["failure_count"], 0);
+    let (status, repair) = authed_json(
+        app,
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/workers/reporting/repair"),
+        &token,
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{repair}");
+    assert_eq!(
+        repair["data"]["attempted_count"], 0,
+        "completed retirement and not-required records must not be repaired"
+    );
 }
 
 #[tokio::test]

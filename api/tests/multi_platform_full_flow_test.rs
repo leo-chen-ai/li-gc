@@ -802,6 +802,71 @@ async fn xinleda_attendance_waits_for_personnel_entry_confirmation() {
     );
 }
 
+#[tokio::test]
+async fn xinleda_retired_before_activation_is_skipped_but_real_retirement_is_sent() {
+    let mock = MockServer::start(MockKind::Xinleda).await;
+    let (state, pool, _container) = common::build_test_state_with_pool().await;
+    let project_id = create_project(&pool, "历史离场无需上报测试").await;
+    insert_xinleda_config(
+        &pool,
+        project_id,
+        &mock.base_url,
+        "retired-test",
+        "1234567890abcdef",
+        "RETIRED-PROJECT",
+    )
+    .await;
+    let (uri, image) = generated_test_image();
+    let seeded = seed_complete_project(&pool, project_id, 8, &uri, &image).await;
+    let worker_id = seeded.worker_ids[0];
+    sqlx::query("UPDATE construction_workers SET work_status = 2, exit_time = CURRENT_DATE - 10 WHERE id = $1")
+        .bind(worker_id).execute(&pool).await.unwrap();
+    // This historical worker's old attendance is outside the new reporting scope.
+    sqlx::query("DELETE FROM integration_outbox_events WHERE aggregate_id = $1")
+        .bind(seeded.attendance_ids[0])
+        .execute(&pool)
+        .await
+        .unwrap();
+    drain_outbox(&state).await;
+    drain_xinleda(&state, &pool).await;
+    let skipped: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM integration_jobs WHERE local_entity_id = $1 AND response_payload->>'reporting_status' = 'not_required'")
+        .bind(worker_id).fetch_one(&pool).await.unwrap();
+    assert!(
+        skipped > 0,
+        "retired worker must have a reviewable not-required state"
+    );
+    let entry_sent: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM integration_attempts attempt JOIN integration_jobs job ON job.id = attempt.job_id WHERE job.local_entity_id = $1")
+        .bind(worker_id).fetch_one(&pool).await.unwrap();
+    assert_eq!(
+        entry_sent, 0,
+        "historical retired worker must not be sent to Xinleda"
+    );
+    // Re-entry restores normal reporting. Later retirement must still be sent,
+    // even when the operator backdates the exit date before activation.
+    sqlx::query("UPDATE construction_workers SET work_status = 1, exit_time = NULL WHERE id = $1")
+        .bind(worker_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    drain_outbox(&state).await;
+    drain_xinleda(&state, &pool).await;
+    let before = mock.requests().await.len();
+    sqlx::query("UPDATE construction_workers SET work_status = 2, exit_time = CURRENT_DATE - 10 WHERE id = $1")
+        .bind(worker_id).execute(&pool).await.unwrap();
+    drain_outbox(&state).await;
+    drain_xinleda(&state, &pool).await;
+    assert!(
+        mock.requests().await[before..].iter().any(|request| {
+            if request.body["method"] != "project.labourer.entry" {
+                return false;
+            }
+            let data: Value = serde_json::from_str(request.body["data"].as_str().unwrap()).unwrap();
+            data[0]["type"] == 2
+        }),
+        "a previously entered worker must receive an actual exit"
+    );
+}
+
 async fn create_project(pool: &PgPool, name: &str) -> Uuid {
     sqlx::query_scalar("INSERT INTO construction_projects (name) VALUES ($1) RETURNING id")
         .bind(name)
@@ -1207,7 +1272,12 @@ async fn drain_xinleda(state: &AppState, pool: &PgPool) {
             .execute(pool)
             .await
             .unwrap();
-        assert!(index < 1_499, "Xinleda jobs did not drain");
+        if index == 1_499 {
+            let pending = sqlx::query_as::<_, (String, String, Option<String>)>(
+                "SELECT operation, status, last_error FROM integration_jobs WHERE platform_code = 'xinleda' AND status NOT IN ('success', 'completed', 'disabled', 'failed')"
+            ).fetch_all(pool).await.unwrap();
+            panic!("Xinleda jobs did not drain: {pending:?}");
+        }
     }
 }
 
