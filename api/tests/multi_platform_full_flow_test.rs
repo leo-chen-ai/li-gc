@@ -501,6 +501,8 @@ async fn xinleda_two_accounts_use_independent_bindings_and_cover_required_interf
     .await
     .unwrap();
 
+    sqlx::query("UPDATE construction_workers SET salary_bank = '中国工商银行', salary_bank_card = '6222020200000000001' WHERE id = $1")
+        .bind(seeded.worker_ids[0]).execute(&pool).await.unwrap();
     // Project managers/constructors belong to a construction company in section 3.31.
     sqlx::query("UPDATE construction_units SET company_type = 1 WHERE id = (SELECT unit_id FROM construction_workers WHERE id = $1)")
         .bind(seeded.worker_ids[1]).execute(&pool).await.unwrap();
@@ -626,6 +628,10 @@ async fn xinleda_two_accounts_use_independent_bindings_and_cover_required_interf
                 assert_eq!(data[0]["construct_cost"], 123.4567);
             }
             if request.body["method"] == "labourer.import" {
+                if !data[0]["bank_no"].is_null() {
+                    assert_eq!(data[0]["bank_code"], "102100099996");
+                    assert_ne!(data[0]["bank_no"], "6222020200000000001");
+                }
                 assert!(
                     data[0]["user_photo"]
                         .as_str()

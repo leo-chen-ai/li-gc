@@ -266,7 +266,7 @@ export function isXinledaConfig(config: ConstructionPlatformConfig) {
 export function summarizePlatformConfig(config: ConstructionPlatformConfig) {
   if (isXinledaConfig(config)) {
     const form = parseXinledaConfig(config);
-    return `${form.mode === "production" ? "正式" : "测试（不发起真实请求）"} · AppID ${form.app_id || "未填写"} · 项目编码 ${form.project_code || "未填写"}`;
+    return `AppID ${form.app_id || "未填写"} · 项目编码 ${form.project_code || "未填写"}`;
   }
   if (isYongxinV2Config(config)) {
     const form = parseYongxinV2Config(config);

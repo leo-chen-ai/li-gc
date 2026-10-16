@@ -1626,11 +1626,25 @@ fn native_place_code(value: Option<i64>) -> Result<i64, JobIssue> {
     }
 }
 
+// V3.8 section 3.17; local forms store bank names rather than clearing codes.
 fn bank_code(value: Option<&str>) -> Option<String> {
-    value
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
+    let value = value?.trim();
+    let code = match value {
+        "中国工商银行" => "102100099996",
+        "中国农业银行" => "103100000026",
+        "中国银行" => "104100000004",
+        "中国建设银行" => "105100000017",
+        "交通银行" => "301290000007",
+        "中国邮政储蓄银行" => "403100000004",
+        "招商银行" => "308584000013",
+        "中信银行" => "302100011000",
+        "浦发银行" | "上海浦东发展银行" => "310290000013",
+        "江苏银行" => "313301099999",
+        "南京银行" => "313301008887",
+        code if code.len() == 12 && code.bytes().all(|b| b.is_ascii_digit()) => code,
+        _ => return None,
+    };
+    Some(code.to_owned())
 }
 
 fn format_datetime(value: String) -> String {
@@ -1668,6 +1682,21 @@ mod tests {
         assert!(company_type(Some(12)).is_err());
         assert_eq!(manager_position(Some("1"), 2).unwrap(), "5");
         assert!(manager_position(Some("unknown"), 2).is_err());
+    }
+
+    #[test]
+    fn bank_names_use_xinleda_twelve_digit_codes() {
+        assert_eq!(
+            bank_code(Some("中国工商银行")).as_deref(),
+            Some("102100099996")
+        );
+        assert_eq!(bank_code(Some("浦发银行")).as_deref(), Some("310290000013"));
+        assert_eq!(
+            bank_code(Some("313301099999")).as_deref(),
+            Some("313301099999")
+        );
+        assert_eq!(bank_code(Some("其他")), None);
+        assert_eq!(bank_code(None), None);
     }
 
     #[test]
