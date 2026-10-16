@@ -93,6 +93,7 @@ import {
   buildXinledaConfig,
   buildYongxinV2Config,
   createNingboHousingConfigForm,
+  createNingboHousingPlatformForm,
   createXinledaConfigForm,
   isXinledaDefaultProject,
   createYongxinV2ConfigForm,
@@ -673,7 +674,9 @@ function PlatformConfigPanel({ filters, setFilters, tabControls }: { filters: Co
       ? createYongxinV2ConfigForm()
       : platform_type === XINLEDA_PLATFORM_TYPE
         ? createXinledaConfigForm(projects.find((project) => currentProjectId ? project.id === currentProjectId : isXinledaDefaultProject(project.id)))
-        : createNingboHousingConfigForm();
+        : platform_type === NINGBO_HOUSING_PLATFORM_TYPE
+          ? createNingboHousingPlatformForm()
+          : createNingboHousingConfigForm();
     setForm((current) => ({
       ...empty,
       project_id: current.project_id || empty.project_id,

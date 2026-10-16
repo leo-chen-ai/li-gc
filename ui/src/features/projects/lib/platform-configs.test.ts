@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildNingboHousingConfig,
   createNingboHousingConfigForm,
+  createNingboHousingPlatformForm,
   parseNingboHousingConfig,
   validateNingboHousingConfig,
   buildYongxinV2Config,
@@ -270,4 +271,18 @@ test("薪乐达正式凭证默认填入且项目对接码只用于指定项目",
   assert.equal(validateXinledaConfig(target), null);
   assert.equal(createXinledaConfigForm({ id: "other", name: "其他项目" }).project_code, "");
   assert.equal(createXinledaConfigForm({ id: "old-project", name: "2026年高新区雨污管网综合改造工程" }).project_code, "");
+});
+
+
+test("市住建选择后默认填入共享凭证，其他平台不继承", () => {
+  const form = createNingboHousingPlatformForm();
+  assert.equal(form.platform_type, "ningbo_housing");
+  assert.ok(form.app_key.length > 0);
+  assert.ok(form.app_secret.length > 0);
+  assert.equal(form.external_project_id, "");
+  assert.equal(form.project_guid, "");
+  assert.equal(createNingboHousingConfigForm().app_key, "");
+  assert.equal(createYongxinV2ConfigForm().app_key, "");
+  assert.equal(createYongxinV2ConfigForm().app_secret, "");
+  assert.equal(createXinledaConfigForm().app_key, "");
 });

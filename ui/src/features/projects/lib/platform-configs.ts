@@ -3,6 +3,8 @@ import type { ConstructionPlatformConfig, JsonValue } from "@/features/projects/
 export const NINGBO_HOUSING_PLATFORM_NAME = "市住建";
 export const NINGBO_HOUSING_PLATFORM_TYPE = "ningbo_housing";
 export const NINGBO_HOUSING_DEFAULT_BASE_URL = "http://183.136.157.18:7334";
+const NINGBO_HOUSING_DEFAULT_APP_KEY = "300BD57A31B94C72BB3D268A9270FEB9";
+const NINGBO_HOUSING_DEFAULT_APP_SECRET = "188E60FB2C7040BAAE5F0576E87AD357";
 export const YONGXIN_V2_PLATFORM_NAME = "甬薪";
 export const YONGXIN_V2_PLATFORM_TYPE = "yongxin_v2";
 export const YONGXIN_V2_DEFAULT_BASE_URL = "https://apirs.91jtg.com/openapi";
@@ -72,6 +74,16 @@ export function createNingboHousingConfigForm(): NingboHousingConfigForm {
   };
 }
 
+export function createNingboHousingPlatformForm(): NingboHousingConfigForm {
+  return {
+    ...createNingboHousingConfigForm(),
+    platform_type: NINGBO_HOUSING_PLATFORM_TYPE,
+    base_url: NINGBO_HOUSING_DEFAULT_BASE_URL,
+    app_key: NINGBO_HOUSING_DEFAULT_APP_KEY,
+    app_secret: NINGBO_HOUSING_DEFAULT_APP_SECRET,
+  };
+}
+
 export function parseNingboHousingConfig(config: ConstructionPlatformConfig): NingboHousingConfigForm {
   const value = asJsonObject(config.config);
   return {
@@ -79,8 +91,8 @@ export function parseNingboHousingConfig(config: ConstructionPlatformConfig): Ni
     project_id: config.project_id,
     platform_type: NINGBO_HOUSING_PLATFORM_TYPE,
     base_url: readString(value, "base_url", "url", "endpoint", "host") || NINGBO_HOUSING_DEFAULT_BASE_URL,
-    app_key: readString(value, "app_key", "appKey", "AppKey"),
-    app_secret: readString(value, "app_secret", "appSecret", "AppSecret"),
+    app_key: readString(value, "app_key", "appKey", "AppKey") || NINGBO_HOUSING_DEFAULT_APP_KEY,
+    app_secret: readString(value, "app_secret", "appSecret", "AppSecret") || NINGBO_HOUSING_DEFAULT_APP_SECRET,
     project_guid: readString(value, "project_guid", "guid", "projectGuid", "ProjectGuid"),
     external_project_id: readString(value, "project_id", "projectId", "ProjectApartmentId"),
     corp_code: readString(value, "corp_code", "corpCode", "CorpCode", "unified_code"),
