@@ -4139,13 +4139,14 @@ pub async fn repair_worker_reporting(
         .map_err(db_error)?;
     }
 
-    let platform_repairs = sqlx::query_as::<_, (Uuid, Uuid, String, Option<String>)>(
+    let platform_repairs = sqlx::query_as::<_, (Uuid, Uuid, String, Option<String>, Option<String>)>(
         r#"
         SELECT
             worker.id,
             config.id,
             config.platform_type,
-            latest_job.operation
+            latest_job.operation,
+            latest_job.status
         FROM construction_platform_configs config
         JOIN construction_workers worker
           ON worker.project_id = config.project_id
@@ -4176,12 +4177,12 @@ pub async fn repair_worker_reporting(
           AND (
                 latest_job.id IS NULL
                 OR latest_job.status NOT IN (
-                    'success', 'completed', 'delivery_unknown',
+                    'success', 'completed',
                     'pending', 'processing', 'retry', 'awaiting_result',
                     'waiting_dependency', 'waiting_media'
                 )
               )
-        ORDER BY latest_job.updated_at NULLS FIRST, config.created_at, worker.created_at, worker.id
+        ORDER BY COALESCE(latest_job.status = 'delivery_unknown', FALSE), latest_job.updated_at NULLS FIRST, config.created_at, worker.created_at, worker.id
         LIMIT 20
         "#,
     )
@@ -4190,7 +4191,15 @@ pub async fn repair_worker_reporting(
     .await
     .map_err(db_error)?;
 
-    for (worker_id, config_id, platform_type, latest_operation) in &platform_repairs {
+    let (blocked_repairs, platform_repairs): (Vec<_>, Vec<_>) = platform_repairs
+        .into_iter()
+        .partition(|repair| repair.4.as_deref() == Some("delivery_unknown"));
+    if worker_ids.is_empty() && platform_repairs.is_empty() && !blocked_repairs.is_empty() {
+        return Err(invalid_input(
+            "存在请求结果未知的工人上报，已暂停重发以避免重复数据；请先向平台核对是否接收，再处理重试",
+        ));
+    }
+    for (worker_id, config_id, platform_type, latest_operation, _) in &platform_repairs {
         let repair_entry_exit =
             platform_type == "yongxin_v2" && latest_operation.as_deref() == Some("entry_exit.sync");
         crate::feature::integration::outbox_worker::enqueue_worker_platform_repair(

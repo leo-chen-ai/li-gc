@@ -668,13 +668,19 @@ async fn call_api(
                 Some(&message),
             )
             .await;
-            match safety {
-                CallSafety::Read => Err(JobIssue::Retryable(message)),
-                CallSafety::Write => Err(JobIssue::DeliveryUnknown(format!(
-                    "请求结果未知，为避免平台产生重复数据未自动重发：{message}"
-                ))),
-            }
+            Err(transport_issue(safety, error))
         }
+    }
+}
+
+fn transport_issue(safety: CallSafety, error: xinleda::XinledaError) -> JobIssue {
+    let message = error.to_string();
+    if matches!(safety, CallSafety::Read) || matches!(error, xinleda::XinledaError::Connect(_)) {
+        JobIssue::Retryable(message)
+    } else {
+        JobIssue::DeliveryUnknown(format!(
+            "请求结果未知，为避免平台产生重复数据未自动重发：{message}"
+        ))
     }
 }
 
@@ -1206,6 +1212,28 @@ mod tests {
         assert_eq!(native_place_code(Some(0)).unwrap(), 27);
         assert_eq!(nation_code(Some("汉族"), &json!({})), 1);
         assert_eq!(work_type_code(Some(1001)).unwrap(), "900");
+    }
+
+    #[test]
+    fn connection_failures_can_retry_but_unknown_writes_cannot() {
+        assert!(matches!(
+            transport_issue(
+                CallSafety::Write,
+                xinleda::XinledaError::Connect("refused".into())
+            ),
+            JobIssue::Retryable(_)
+        ));
+        assert!(matches!(
+            transport_issue(
+                CallSafety::Write,
+                xinleda::XinledaError::Request("read timeout".into())
+            ),
+            JobIssue::DeliveryUnknown(_)
+        ));
+        assert!(matches!(
+            transport_issue(CallSafety::Read, xinleda::XinledaError::InvalidResponse),
+            JobIssue::Retryable(_)
+        ));
     }
 
     #[test]

@@ -1812,7 +1812,7 @@ async fn xinleda_management_worker_is_reported_instead_of_ignored() {
     .expect("Xinleda manager job");
 
     let (status, body) = get_authed(
-        app,
+        app.clone(),
         &format!("/api/v1/admin/projects/{project_id}/workers"),
         &token,
     )
@@ -1825,6 +1825,41 @@ async fn xinleda_management_worker_is_reported_instead_of_ignored() {
     assert_eq!(body["data"]["reporting_summary"][0]["total_count"], 1);
     assert_eq!(body["data"]["reporting_summary"][0]["success_count"], 1);
     assert_eq!(body["data"]["reporting_summary"][0]["ignored_count"], 0);
+
+    sqlx::query("UPDATE integration_jobs SET status = 'delivery_unknown' WHERE binding_id = $1")
+        .bind(binding_id)
+        .execute(&pool)
+        .await
+        .expect("mark unknown write");
+    let (status, repair) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/workers/reporting/repair"),
+        &token,
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{repair}");
+    assert!(repair.to_string().contains("请求结果未知"), "{repair}");
+    let unknown: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM integration_jobs WHERE binding_id = $1 AND status = 'delivery_unknown'")
+        .bind(binding_id).fetch_one(&pool).await.unwrap();
+    assert_eq!(unknown, 1, "unknown write must not be resent");
+
+    sqlx::query("UPDATE integration_jobs SET status = 'failed' WHERE binding_id = $1")
+        .bind(binding_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, repair) = authed_json(
+        app,
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/workers/reporting/repair"),
+        &token,
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{repair}");
+    assert_eq!(repair["data"]["attempted_count"], 1);
 }
 
 #[tokio::test]

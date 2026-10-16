@@ -41,6 +41,8 @@ pub enum XinledaError {
     InvalidSecretLength,
     #[error("薪乐达 AES-CBC 初始化失败")]
     AesInit,
+    #[error("薪乐达连接失败，请求尚未发送：{0}")]
+    Connect(String),
     #[error("薪乐达请求失败：{0}")]
     Request(String),
     #[error("薪乐达响应超过 1 MiB 限制")]
@@ -259,10 +261,13 @@ async fn send(
     request_body: Value,
 ) -> Result<XinledaResponse, XinledaError> {
     let started = Instant::now();
-    let response = request
-        .send()
-        .await
-        .map_err(|error| XinledaError::Request(error.to_string()))?;
+    let response = request.send().await.map_err(|error| {
+        if error.is_connect() {
+            XinledaError::Connect(format!("{error:#}"))
+        } else {
+            XinledaError::Request(format!("{error:#}"))
+        }
+    })?;
     let status = response.status().as_u16();
     if response
         .content_length()
@@ -328,6 +333,23 @@ fn value_i64(value: &Value) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn refused_connection_is_distinguished_from_an_unknown_write() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/openapi", listener.local_addr().unwrap());
+        drop(listener);
+        let client = Client::builder().no_proxy().build().unwrap();
+        let error = send(
+            client.post(&url).json(&json!({})),
+            url,
+            json!({}),
+            json!({}),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(error, XinledaError::Connect(_)), "{error}");
+    }
 
     fn credentials() -> XinledaCredentials {
         XinledaCredentials::from_config(&json!({
