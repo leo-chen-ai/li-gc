@@ -625,6 +625,15 @@ async fn xinleda_two_accounts_use_independent_bindings_and_cover_required_interf
             if request.body["method"] == "project.import" {
                 assert_eq!(data[0]["construct_cost"], 123.4567);
             }
+            if request.body["method"] == "labourer.import" {
+                assert!(
+                    data[0]["user_photo"]
+                        .as_str()
+                        .unwrap()
+                        .starts_with("https://files.test/"),
+                    "user_photo must be an uploaded URL, not inline Base64"
+                );
+            }
             for row in data.as_array().into_iter().flatten() {
                 if let Some(project_code) = row.get("project_code").and_then(Value::as_str) {
                     app_projects

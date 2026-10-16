@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, FixedOffset, Utc};
 use serde_json::{Value, json};
 use sqlx::{FromRow, PgPool, Postgres, Transaction};
 use tokio::time::sleep;
@@ -423,9 +423,14 @@ async fn execute_worker_sync(
         .map(|value| xinleda::encrypt_sensitive(&credentials.app_secret, &value))
         .transpose()
         .map_err(|error| JobIssue::WaitingData(error.to_string()))?;
+    let user_photo = if let Some(photo) = optional_text(&worker, "avatar") {
+        upload_photo(state, job, credentials, worker_id, &photo, "image/jpeg").await?
+    } else {
+        None
+    };
     let payload = json!([{
         "real_name": required_text(&worker, "name", "人员姓名")?,
-        "user_photo": optional_text(&worker, "avatar"),
+        "user_photo": user_photo,
         "gender": gender,
         "birthday": birthday,
         "id_card_no": encrypted_id,
@@ -585,7 +590,7 @@ async fn execute_attendance_sync(
         ));
     }
     let photo_url = if let Some(photo) = optional_text(&attendance, "photo_data") {
-        upload_attendance_photo(
+        upload_photo(
             state,
             job,
             credentials,
@@ -919,33 +924,39 @@ async fn call_api(
     }
 }
 
-async fn upload_attendance_photo(
+async fn upload_photo(
     state: &AppState,
     job: &ClaimedJob,
     credentials: &xinleda::XinledaCredentials,
-    attendance_id: Uuid,
+    entity_id: Uuid,
     source: &str,
     content_type: &str,
 ) -> Result<Option<String>, JobIssue> {
     if source.starts_with("http://") || source.starts_with("https://") {
         return Ok(Some(source.to_owned()));
     }
+    let content_type = source
+        .strip_prefix("data:")
+        .and_then(|data| data.split_once(";base64,"))
+        .map(|(mime, _)| mime)
+        .filter(|mime| mime.starts_with("image/"))
+        .unwrap_or(content_type);
     let encoded = source
         .split_once(',')
         .map(|(_, data)| data)
         .unwrap_or(source);
     let bytes = BASE64_STANDARD
         .decode(encoded)
-        .map_err(|_| JobIssue::WaitingData("考勤照片 Base64 格式错误".to_owned()))?;
+        .map_err(|_| JobIssue::WaitingData("上传照片 Base64 格式错误".to_owned()))?;
     if bytes.is_empty() || bytes.len() > MAX_UPLOAD_BYTES {
         return Err(JobIssue::WaitingData(
-            "考勤照片为空或超过 10 MiB".to_owned(),
+            "上传照片为空或超过 10 MiB".to_owned(),
         ));
     }
     let response = if credentials.is_dry_run() {
         xinleda::XinledaResponse {
             status: 200,
-            body: json!({"code": 0, "message": "dry-run", "data": [format!("/dry-run/{attendance_id}.jpg")]}),
+            body: json!({"code": 0, "message": "dry-run", "data": [format!("/dry-run/{entity_id}.jpg")]}),
             duration_ms: 0,
             request_url: credentials
                 .endpoint(xinleda::UPLOAD_PATH)
@@ -963,7 +974,7 @@ async fn upload_attendance_photo(
         let result = xinleda::upload_file(
             &client,
             credentials,
-            &format!("{attendance_id}.jpg"),
+            &format!("{entity_id}.jpg"),
             content_type,
             bytes,
         )
@@ -1000,7 +1011,19 @@ async fn upload_attendance_photo(
             .map(ToOwned::to_owned)
             .or_else(|| data.as_array()?.first()?.as_str().map(ToOwned::to_owned))
     });
-    Ok(url)
+    let url = url
+        .filter(|url| !url.trim().is_empty())
+        .ok_or_else(|| JobIssue::Retryable("薪乐达图片上传成功但未返回图片地址".to_owned()))?;
+    let url = credentials
+        .base_url
+        .join(&url)
+        .map_err(|_| JobIssue::WaitingData("薪乐达返回的图片地址无效".to_owned()))?;
+    if !matches!(url.scheme(), "https" | "http") {
+        return Err(JobIssue::WaitingData(
+            "薪乐达返回的图片地址必须使用 HTTP 或 HTTPS".to_owned(),
+        ));
+    }
+    Ok(Some(url.to_string()))
 }
 
 async fn acquire_rate_slot(pool: &PgPool, app_id: &str, method: &str) -> Result<(), JobIssue> {
@@ -1372,7 +1395,10 @@ fn identity_profile(
     id_card: &str,
     gender_value: Option<i64>,
 ) -> Result<(String, &'static str), JobIssue> {
-    if id_card.len() != 18 || !id_card[..17].chars().all(|c| c.is_ascii_digit()) {
+    if id_card.len() != 18
+        || !id_card.is_ascii()
+        || !id_card[..17].chars().all(|c| c.is_ascii_digit())
+    {
         return Err(JobIssue::WaitingData(
             "身份证号码无法提取出生日期".to_owned(),
         ));
@@ -1401,12 +1427,6 @@ fn identity_validity(worker: &Value) -> Result<(Option<String>, Option<String>, 
     let start = optional_text(worker, "validity_period");
     let expiry = optional_text(worker, "validity_period_end");
     let long = expiry.as_deref().is_some_and(|value| value.contains('长'));
-    if start.is_none() {
-        return Err(JobIssue::WaitingData("缺少身份证有效期开始日期".to_owned()));
-    }
-    if expiry.is_none() && !long {
-        return Err(JobIssue::WaitingData("缺少身份证有效期结束日期".to_owned()));
-    }
     Ok((
         start,
         if long { None } else { expiry },
@@ -1614,6 +1634,12 @@ fn bank_code(value: Option<&str>) -> Option<String> {
 }
 
 fn format_datetime(value: String) -> String {
+    if let Ok(timestamp) = DateTime::parse_from_rfc3339(&value) {
+        return timestamp
+            .with_timezone(&FixedOffset::east_opt(8 * 3600).unwrap())
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string();
+    }
     if value.len() >= 19 {
         value[..19].replace('T', " ")
     } else {
@@ -1642,6 +1668,27 @@ mod tests {
         assert!(company_type(Some(12)).is_err());
         assert_eq!(manager_position(Some("1"), 2).unwrap(), "5");
         assert!(manager_position(Some("unknown"), 2).is_err());
+    }
+
+    #[test]
+    fn attendance_time_uses_shanghai_timezone() {
+        assert_eq!(
+            format_datetime("2026-10-16T01:02:03+00:00".to_owned()),
+            "2026-10-16 09:02:03"
+        );
+        assert_eq!(
+            format_datetime("2026-10-16T09:02:03+08:00".to_owned()),
+            "2026-10-16 09:02:03"
+        );
+    }
+
+    #[test]
+    fn identity_validity_dates_are_optional_in_the_protocol() {
+        assert_eq!(identity_validity(&json!({})).unwrap(), (None, None, 0));
+        assert_eq!(
+            identity_validity(&json!({"validity_period_end": "长期"})).unwrap(),
+            (None, None, 1)
+        );
     }
 
     #[test]
