@@ -653,10 +653,6 @@ function PlatformConfigPanel({ filters, setFilters, tabControls }: { filters: Co
   const [form, setForm] = useState(createNingboHousingConfigForm);
   const rows = query.data?.items ?? [];
   const selectedPlatform = BUILT_IN_PLATFORM_OPTIONS.find((option) => option.value === form.platform_type);
-  const selectedProject = projects.find((project) => project.id === form.project_id);
-  const defaultXinledaProjectCode = createXinledaConfigForm(selectedProject).project_code;
-  const showXinledaProjectCode = !isXinledaDefaultProject(form.project_id)
-    || Boolean(editing && form.project_code !== defaultXinledaProjectCode);
   const openCreate = () => { setEditing(null); setForm(createNingboHousingConfigForm()); setDialogOpen(true); };
   const openEdit = (config: ConstructionPlatformConfig) => {
     if (!isNingboHousingConfig(config) && !isYongxinV2Config(config) && !isXinledaConfig(config)) {
@@ -840,9 +836,7 @@ function PlatformConfigPanel({ filters, setFilters, tabControls }: { filters: Co
                     <PlatformCredentialField className="md:col-span-2" label="接口地址" value={form.base_url} onChange={(base_url) => setForm((current) => ({ ...current, base_url }))} placeholder={XINLEDA_DEFAULT_BASE_URL} />
                     <PlatformCredentialField label="AppID" value={form.app_id} onChange={(app_id) => setForm((current) => ({ ...current, app_id }))} autoComplete="off" />
                     <PlatformCredentialField label="AppSecret" value={form.app_secret} onChange={(app_secret) => setForm((current) => ({ ...current, app_secret }))} type="password" autoComplete="new-password" />
-                    {showXinledaProjectCode ? (
-                      <PlatformCredentialField label="项目对接码" value={form.project_code} onChange={(project_code) => setForm((current) => ({ ...current, project_code }))} autoComplete="off" />
-                    ) : null}
+                    <PlatformCredentialField label="项目对接码" value={form.project_code} onChange={(project_code) => setForm((current) => ({ ...current, project_code }))} autoComplete="off" />
                   </div>
                 </section>
               ) : null}
