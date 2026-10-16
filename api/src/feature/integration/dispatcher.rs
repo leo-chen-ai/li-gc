@@ -55,7 +55,7 @@ pub async fn dispatch(
         {
             continue;
         }
-        if !event_enabled(&config.config, event_type) {
+        if !platform_event_enabled(&config.platform_type, &config.config, event_type) {
             continue;
         }
         let binding_id = ensure_binding(pool, &config).await?;
@@ -123,9 +123,15 @@ async fn bootstrap_binding(
 
     let binding_id = ensure_binding(pool, &config).await?;
     let version = config.updated_at.timestamp_millis();
-    let operation = bootstrap_operation(&platform_type);
-    sqlx::query(
-        r#"
+    if platform_type == xinleda::PLATFORM_CODE {
+        // Retire unfinished legacy project/company imports when existing configs refresh.
+        sqlx::query(
+            "UPDATE integration_jobs SET status = 'disabled', last_error = '按业务要求停用薪乐达项目、单位和保证金上报', completed_at = NOW(), locked_by = NULL, locked_until = NULL, updated_at = NOW() WHERE binding_id = $1 AND operation IN ('project.sync', 'unit.sync', 'safeguard.sync') AND status NOT IN ('success', 'completed', 'failed', 'disabled')",
+        ).bind(binding_id).execute(pool).await?;
+    } else {
+        let operation = "project.query";
+        sqlx::query(
+            r#"
         INSERT INTO integration_jobs (
             project_id, binding_id, platform_code, operation, entity_type,
             local_entity_id, idempotency_key, request_payload, status,
@@ -134,18 +140,19 @@ async fn bootstrap_binding(
         VALUES ($1, $2, $3, $4, 'project', $1, $5, $6, 'pending', 0, 5, NOW())
         ON CONFLICT (idempotency_key) DO NOTHING
         "#,
-    )
-    .bind(project_id)
-    .bind(binding_id)
-    .bind(&platform_type)
-    .bind(operation)
-    .bind(format!("{binding_id}:{operation}:{version}"))
-    .bind(json!({
-        "platform_config_id": config.id,
-        "config_version": version,
-    }))
-    .execute(pool)
-    .await?;
+        )
+        .bind(project_id)
+        .bind(binding_id)
+        .bind(&platform_type)
+        .bind(operation)
+        .bind(format!("{binding_id}:{operation}:{version}"))
+        .bind(json!({
+            "platform_config_id": config.id,
+            "config_version": version,
+        }))
+        .execute(pool)
+        .await?;
+    }
 
     enqueue_bootstrap_events(pool, &config).await
 }
@@ -163,7 +170,8 @@ async fn enqueue_bootstrap_events(
         ("construction_teams", "team"),
         ("construction_workers", "worker"),
     ] {
-        if !event_enabled(
+        if !platform_event_enabled(
+            &config.platform_type,
             &config.config,
             &format!("construction.{entity_type}.changed"),
         ) {
@@ -400,10 +408,8 @@ fn operations_for_event<'a>(
     payload: &'a Value,
 ) -> Vec<&'a str> {
     match event_type {
-        "construction.project.changed" if platform_type == xinleda::PLATFORM_CODE => {
-            vec!["project.sync"]
-        }
-        "construction.unit.changed" => vec!["unit.sync"],
+        "construction.project.changed" => vec![],
+        "construction.unit.changed" if platform_type != xinleda::PLATFORM_CODE => vec!["unit.sync"],
         "construction.team.changed" => vec!["team.sync"],
         "construction.worker.changed" => {
             if payload.get("operation").and_then(Value::as_str) == Some("delete") {
@@ -440,27 +446,26 @@ fn event_enabled(config: &Value, event_type: &str) -> bool {
         .unwrap_or(true)
 }
 
+fn platform_event_enabled(platform_type: &str, config: &Value, event_type: &str) -> bool {
+    if event_type == "construction.project.changed"
+        || (platform_type == xinleda::PLATFORM_CODE && event_type == "construction.unit.changed")
+    {
+        return false;
+    }
+    event_enabled(config, event_type)
+}
+
 fn enabled_events(platform_type: &str, config: &Value) -> Vec<String> {
     [
-        ("construction.project.changed", "sync_project"),
-        ("construction.unit.changed", "sync_units"),
-        ("construction.team.changed", "sync_teams"),
-        ("construction.worker.changed", "sync_workers"),
-        ("construction.attendance.created", "sync_attendance"),
+        "construction.project.changed",
+        "construction.unit.changed",
+        "construction.team.changed",
+        "construction.worker.changed",
+        "construction.attendance.created",
     ]
     .into_iter()
-    .filter(|(event, _)| {
-        *event != "construction.project.changed" || platform_type == xinleda::PLATFORM_CODE
-    })
-    .filter(|(_, key)| {
-        config
-            .get("modules")
-            .and_then(|modules| modules.get(*key))
-            .or_else(|| config.get(*key))
-            .and_then(Value::as_bool)
-            .unwrap_or(true)
-    })
-    .map(|(event, _)| event.to_owned())
+    .filter(|event| platform_event_enabled(platform_type, config, event))
+    .map(ToOwned::to_owned)
     .collect()
 }
 
@@ -499,14 +504,6 @@ fn binding_identity(
     )
 }
 
-fn bootstrap_operation(platform_type: &str) -> &'static str {
-    if platform_type == xinleda::PLATFORM_CODE {
-        "project.sync"
-    } else {
-        "project.query"
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -516,6 +513,30 @@ mod tests {
         let config = json!({"modules": {"sync_attendance": false}});
         assert!(event_enabled(&config, "construction.worker.changed"));
         assert!(!event_enabled(&config, "construction.attendance.created"));
+    }
+
+    #[test]
+    fn xinleda_never_dispatches_project_or_company_imports_even_for_legacy_configs() {
+        let config = json!({"modules": {"sync_project": true, "sync_units": true}});
+        for event in ["construction.project.changed", "construction.unit.changed"] {
+            assert!(!platform_event_enabled(
+                xinleda::PLATFORM_CODE,
+                &config,
+                event
+            ));
+            assert!(operations_for_event(xinleda::PLATFORM_CODE, event, &json!({})).is_empty());
+            assert!(!enabled_events(xinleda::PLATFORM_CODE, &config).contains(&event.to_owned()));
+        }
+        assert!(platform_event_enabled(
+            yongxin_v2::PLATFORM_CODE,
+            &config,
+            "construction.unit.changed"
+        ));
+        assert!(platform_event_enabled(
+            xinleda::PLATFORM_CODE,
+            &config,
+            "construction.worker.changed"
+        ));
     }
 
     #[test]

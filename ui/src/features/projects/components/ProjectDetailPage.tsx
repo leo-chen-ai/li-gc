@@ -1157,7 +1157,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const handleRepairUnitReporting = async () => {
     if (
       !window.confirm(
-        "确认修正失败和未传的参建单位上报？系统将重新调用已启用的甬薪或薪乐达单位接口。",
+        "确认修正失败和未传的参建单位上报？系统将重新调用已启用的甬薪单位接口。",
       )
     ) {
       return;
@@ -3032,11 +3032,11 @@ function ModuleFilters({
       <div
         className={cn(
           "grid gap-2",
-          showReportingPlatforms &&
+          showReportingPlatforms && unitReportingSummary.length > 0 &&
             "xl:grid-cols-[minmax(280px,0.8fr)_minmax(0,2.2fr)]",
         )}
       >
-        {showReportingPlatforms ? (
+        {showReportingPlatforms && unitReportingSummary.length > 0 ? (
           <TeamReportingOverview
             summary={unitReportingSummary}
             onRepair={onRepairUnitReporting}

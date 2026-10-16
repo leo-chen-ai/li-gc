@@ -193,6 +193,8 @@ test("薪乐达 V3.8 配置使用 AppID、项目编码且忽略旧保证金数�
     app_secret: "1234567890abcdef",
     project_code: " XLD-PROJECT-1 ",
     mode: "production" as const,
+    sync_project: true,
+    sync_units: true,
     sync_attendance: false,
     company_safeguard_payload: JSON.stringify({
       company_name: "测试企业",
@@ -216,8 +218,8 @@ test("薪乐达 V3.8 配置使用 AppID、项目编码且忽略旧保证金数�
     project_code: "XLD-PROJECT-1",
     mode: "production",
     modules: {
-      sync_project: true,
-      sync_units: true,
+      sync_project: false,
+      sync_units: false,
       sync_teams: true,
       sync_workers: true,
       sync_attendance: false,
@@ -236,7 +238,7 @@ test("薪乐达配置可编辑同平台多账户且兼容 appid 字段", () => {
       appid: "company-b",
       appsecret: "1234567890abcdef",
       projectCode: "XLD-B",
-      modules: { sync_project: false, sync_workers: true },
+      modules: { sync_project: true, sync_units: true, sync_workers: true },
     },
     is_enabled: true,
     remark: null,
@@ -252,6 +254,7 @@ test("薪乐达配置可编辑同平台多账户且兼容 appid 字段", () => {
   assert.equal(form.app_id, "company-b");
   assert.equal(form.project_code, "XLD-B");
   assert.equal(form.sync_project, false);
+  assert.equal(form.sync_units, false);
   assert.equal(form.sync_workers, true);
 });
 

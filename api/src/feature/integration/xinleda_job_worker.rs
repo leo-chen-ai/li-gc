@@ -142,6 +142,21 @@ async fn claim_job(pool: &PgPool, worker_name: &str) -> Result<Option<ClaimedJob
 }
 
 async fn process_job(state: &AppState, job: ClaimedJob) {
+    if matches!(
+        job.operation.as_str(),
+        "project.sync" | "unit.sync" | "safeguard.sync"
+    ) {
+        if let Err(issue) = complete_skipped(
+            state.db.pool(),
+            job.id,
+            "按业务要求停用薪乐达项目、单位和保证金上报",
+        )
+        .await
+        {
+            handle_issue(state.db.pool(), &job, issue).await;
+        }
+        return;
+    }
     let config = match load_binding_config(state.db.pool(), job.binding_id).await {
         Ok(Some(config)) => config,
         Ok(None) => {
@@ -195,175 +210,14 @@ async fn execute_initial(
     config: &Value,
 ) -> Result<(), JobIssue> {
     match job.operation.as_str() {
-        "project.sync" => execute_project_sync(state, job, credentials).await,
-        "unit.sync" => execute_unit_sync(state, job, credentials).await,
         "team.sync" => execute_team_sync(state, job).await,
         "worker.sync" => execute_worker_sync(state, job, credentials, config).await,
         "entry_exit.sync" => execute_entry_exit_sync(state, job, credentials).await,
         "attendance.sync" => execute_attendance_sync(state, job, credentials).await,
-        // V3.8 no longer documents this method; finish legacy queued jobs without sending.
-        "safeguard.sync" => {
-            complete_skipped(
-                state.db.pool(),
-                job.id,
-                "薪乐达 V3.8 已移除企业保证金接口，旧任务跳过",
-            )
-            .await
-        }
         operation => Err(JobIssue::Permanent(format!(
             "薪乐达平台不支持任务操作：{operation}"
         ))),
     }
-}
-
-async fn execute_project_sync(
-    state: &AppState,
-    job: &ClaimedJob,
-    credentials: &xinleda::XinledaCredentials,
-) -> Result<(), JobIssue> {
-    if event_operation(job) != "update"
-        && mapping_external(state.db.pool(), job.binding_id, "project", job.project_id)
-            .await?
-            .is_some()
-    {
-        return complete_skipped(state.db.pool(), job.id, "项目基本信息已同步").await;
-    }
-    let project = load_json_row(
-        state.db.pool(),
-        "SELECT to_jsonb(project) FROM construction_projects project WHERE id = $1 AND is_deleted = FALSE",
-        job.project_id,
-    )
-    .await?
-    .ok_or_else(|| JobIssue::WaitingData("项目不存在或已删除".to_owned()))?;
-    let (province_code, city_code, county_code) = area_codes(
-        optional_text(&project, "address_code")
-            .or_else(|| optional_text(&project, "address_code_list"))
-            .as_deref(),
-    )?;
-    let payload = json!([{
-        "project_code": credentials.project_code,
-        "project_name": required_text(&project, "name", "项目名称")?,
-        "industry_type": value_i64(&project, "industry").unwrap_or(1),
-        "project_type": value_i64(&project, "category").unwrap_or(1),
-        "principal_name": required_text(&project, "manager", "项目经理")?,
-        "principal_phone": required_text(&project, "manager_phone", "项目经理手机号")?,
-        "province_code": province_code,
-        "city_code": city_code,
-        "county_code": county_code,
-        "address": optional_text(&project, "address").or_else(|| optional_text(&project, "street")),
-        "start_time": optional_text(&project, "start_date"),
-        "end_time": optional_text(&project, "finish_date"),
-        "build_properties": value_i64(&project, "build_nature"),
-        "build_area": money_or_number(&project, "acreage"),
-        "construct_cost": required_construct_cost(&project)?,
-        "build_length": money_or_number(&project, "length"),
-        "status": value_i64(&project, "status").unwrap_or(3),
-        "lng": optional_text(&project, "longitude"),
-        "lat": optional_text(&project, "latitude"),
-        "project_size": value_i64(&project, "build_scale"),
-        "project_num": value_i64(&project, "purpose"),
-        "nation_num": optional_text(&project, "nationality"),
-        "investment_nature": value_i64(&project, "investment_nature"),
-        "build_permit_no": optional_text(&project, "work_permit"),
-        "contractor_company_name": required_text(&project, "contractor", "总承包单位名称")?,
-        "contractor_organization_code": required_text(&project, "contractor_credit_code", "总承包单位统一社会信用代码")?,
-        "build_company_name": optional_text(&project, "build_unit"),
-        "build_organization_code": optional_text(&project, "build_unit_credit_code"),
-        "third_party_project_code": job.project_id,
-        "is_join_platform": 1,
-        "project_step_type": value_i64(&project, "progress_type"),
-        "sign_amt": money_or_number(&project, "contract_amount")
-    }]);
-    let response = call_api(
-        state,
-        job,
-        credentials,
-        xinleda::PROJECT_IMPORT,
-        &payload,
-        CallSafety::Write,
-    )
-    .await?;
-    accept_or_complete(
-        state.db.pool(),
-        job,
-        xinleda::PROJECT_IMPORT,
-        &response,
-        Some(("project", job.project_id, &credentials.project_code)),
-    )
-    .await
-}
-
-async fn execute_unit_sync(
-    state: &AppState,
-    job: &ClaimedJob,
-    credentials: &xinleda::XinledaCredentials,
-) -> Result<(), JobIssue> {
-    let unit_id = local_id(job)?;
-    if event_operation(job) == "delete" {
-        return complete_skipped(state.db.pool(), job.id, "薪乐达文档未提供企业删除接口").await;
-    }
-    if event_operation(job) != "update"
-        && mapping_external(state.db.pool(), job.binding_id, "unit", unit_id)
-            .await?
-            .is_some()
-    {
-        return complete_skipped(state.db.pool(), job.id, "企业基础信息已同步").await;
-    }
-    let unit = load_json_row(
-        state.db.pool(),
-        "SELECT to_jsonb(unit) FROM construction_units unit WHERE id = $1 AND is_deleted = FALSE",
-        unit_id,
-    )
-    .await?
-    .ok_or_else(|| JobIssue::WaitingData("参建单位不存在或已删除".to_owned()))?;
-    let (province_code, city_code, county_code) = area_codes(
-        optional_text(&unit, "register_area")
-            .or_else(|| optional_text(&unit, "register_area_list"))
-            .as_deref(),
-    )?;
-    let company_code = required_text(&unit, "company_credit_code", "统一社会信用代码")?;
-    let payload = json!([{
-        "organization_code": company_code,
-        "company_name": required_text(&unit, "company_name", "企业名称")?,
-        "company_type": company_type(value_i64(&unit, "company_type"))?,
-        "register_time": optional_text(&unit, "register_date"),
-        "province_code": province_code,
-        "city_code": city_code,
-        "county_code": county_code,
-        "address": optional_text(&unit, "company_address"),
-        "manage_province_code": province_code,
-        "manage_city_code": city_code,
-        "manage_county_code": county_code,
-        "manage_address": optional_text(&unit, "company_address"),
-        "owner": optional_text(&unit, "legal_person_name")
-            .or_else(|| optional_text(&unit, "manager_name"))
-            .ok_or_else(|| JobIssue::WaitingData("缺少企业法定代表人".to_owned()))?,
-        "owner_certificate_type": 1,
-        "owner_cardid": optional_text(&unit, "legal_person_id_card")
-            .map(|value| xinleda::encrypt_sensitive(&credentials.app_secret, &value))
-            .transpose().map_err(|error| JobIssue::WaitingData(error.to_string()))?,
-        "owner_phone": optional_text(&unit, "manager_phone"),
-        "contact": optional_text(&unit, "manager_name"),
-        "contact_phone": optional_text(&unit, "manager_phone"),
-        "company_phone": optional_text(&unit, "company_phone")
-    }]);
-    let response = call_api(
-        state,
-        job,
-        credentials,
-        xinleda::COMPANY_IMPORT,
-        &payload,
-        CallSafety::Write,
-    )
-    .await?;
-    accept_or_complete(
-        state.db.pool(),
-        job,
-        xinleda::COMPANY_IMPORT,
-        &response,
-        Some(("unit", unit_id, &company_code)),
-    )
-    .await
 }
 
 async fn execute_team_sync(state: &AppState, job: &ClaimedJob) -> Result<(), JobIssue> {
@@ -757,28 +611,6 @@ async fn handle_async_success(
 ) -> Result<(), JobIssue> {
     let local_id = local_id(job)?;
     match job.operation.as_str() {
-        "project.sync" => {
-            let external = sqlx::query_scalar::<_, String>(
-                "SELECT external_project_id FROM integration_project_bindings WHERE id = $1",
-            )
-            .bind(job.binding_id)
-            .fetch_optional(pool)
-            .await
-            .map_err(|error| JobIssue::Retryable(error.to_string()))?
-            .unwrap_or_else(|| job.project_id.to_string());
-            upsert_mapping(pool, job, "project", local_id, &external, response).await?;
-        }
-        "unit.sync" => {
-            let external = load_json_row(
-                pool,
-                "SELECT to_jsonb(unit) FROM construction_units unit WHERE id = $1",
-                local_id,
-            )
-            .await?
-            .and_then(|unit| optional_text(&unit, "company_credit_code"))
-            .unwrap_or_else(|| local_id.to_string());
-            upsert_mapping(pool, job, "unit", local_id, &external, response).await?;
-        }
         "worker.sync" => {
             upsert_mapping(
                 pool,
@@ -1356,41 +1188,6 @@ fn required_uuid(value: &Value, key: &str, label: &str) -> Result<Uuid, JobIssue
         .map_err(|_| JobIssue::WaitingData(format!("{label}格式错误")))
 }
 
-fn money_or_number(value: &Value, key: &str) -> Option<f64> {
-    value
-        .get(key)
-        .and_then(|item| item.as_f64().or_else(|| item.as_str()?.parse().ok()))
-}
-
-fn required_construct_cost(project: &Value) -> Result<f64, JobIssue> {
-    money_or_number(project, "invest_total")
-        .filter(|cost| cost.is_finite() && *cost > 0.0)
-        .ok_or_else(|| {
-            JobIssue::WaitingData(
-                "薪乐达 V3.8 要求项目总投资（万元）必填且大于 0，请完善项目总投资".to_owned(),
-            )
-        })
-}
-
-fn area_codes(raw: Option<&str>) -> Result<(String, String, String), JobIssue> {
-    let digits = raw
-        .unwrap_or_default()
-        .chars()
-        .filter(char::is_ascii_digit)
-        .collect::<String>();
-    if digits.len() < 6 {
-        return Err(JobIssue::WaitingData(
-            "项目/企业地区缺少 6 位行政区划代码".to_owned(),
-        ));
-    }
-    let county = digits[digits.len() - 6..].to_owned();
-    Ok((
-        format!("{}0000", &county[..2]),
-        format!("{}00", &county[..4]),
-        county,
-    ))
-}
-
 fn identity_profile(
     id_card: &str,
     gender_value: Option<i64>,
@@ -1717,35 +1514,6 @@ mod tests {
         assert_eq!(
             identity_validity(&json!({"validity_period_end": "长期"})).unwrap(),
             (None, None, 1)
-        );
-    }
-
-    #[test]
-    fn construct_cost_is_required_positive_and_stays_in_ten_thousand_yuan() {
-        for project in [
-            json!({}),
-            json!({"invest_total": null}),
-            json!({"invest_total": 0}),
-            json!({"invest_total": -1}),
-            json!({"invest_total": "invalid"}),
-            json!({"invest_total": "NaN"}),
-            json!({"invest_total": "inf"}),
-        ] {
-            assert!(
-                matches!(
-                    required_construct_cost(&project),
-                    Err(JobIssue::WaitingData(_))
-                ),
-                "{project}"
-            );
-        }
-        assert_eq!(
-            required_construct_cost(&json!({"invest_total": 123.4567})).unwrap(),
-            123.4567
-        );
-        assert_eq!(
-            required_construct_cost(&json!({"invest_total": "0.0001"})).unwrap(),
-            0.0001
         );
     }
 

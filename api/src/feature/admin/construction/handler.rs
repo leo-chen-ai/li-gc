@@ -2928,7 +2928,7 @@ pub async fn repair_unit_reporting(
             WHERE project_id = $1
               AND is_deleted = FALSE
               AND is_enabled = TRUE
-              AND platform_type IN ('yongxin_v2', 'xinleda')
+              AND platform_type = 'yongxin_v2'
         )
         "#,
     )
@@ -2948,7 +2948,7 @@ pub async fn repair_unit_reporting(
           ON config.project_id = unit.project_id
          AND config.is_deleted = FALSE
          AND config.is_enabled = TRUE
-         AND config.platform_type IN ('yongxin_v2', 'xinleda')
+         AND config.platform_type = 'yongxin_v2'
         LEFT JOIN LATERAL (
             SELECT job.id, job.status
             FROM integration_jobs job
@@ -14591,7 +14591,7 @@ async fn list_unit_rows_page(
                     WHERE config.project_id = r.project_id
                       AND config.is_deleted = FALSE
                       AND config.is_enabled = TRUE
-                      AND config.platform_type IN ('yongxin_v2', 'xinleda')
+                      AND config.platform_type = 'yongxin_v2'
                 ), '[]'::jsonb) AS reporting_platforms
             FROM construction_units r
             WHERE r.is_deleted = FALSE
@@ -14658,7 +14658,7 @@ async fn unit_reporting_summary(pool: &sqlx::PgPool, project_id: Uuid) -> Result
             WHERE config.project_id = $1
               AND config.is_deleted = FALSE
               AND config.is_enabled = TRUE
-              AND config.platform_type IN ('yongxin_v2', 'xinleda')
+              AND config.platform_type = 'yongxin_v2'
         ), platform_summary AS (
             SELECT
                 platform_config_id,

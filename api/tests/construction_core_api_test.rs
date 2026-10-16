@@ -1721,6 +1721,25 @@ async fn xinleda_management_worker_is_reported_instead_of_ignored() {
     assert_eq!(status, StatusCode::CREATED, "{body}");
     let unit_id = body["data"]["id"].as_str().expect("unit id");
 
+    let (status, units) = get_authed(
+        app.clone(),
+        &format!("/api/v1/admin/projects/{project_id}/units"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{units}");
+    assert_eq!(units["data"]["items"][0]["reporting_platforms"], json!([]));
+    assert_eq!(units["data"]["reporting_summary"], json!([]));
+    let (status, repair) = authed_json(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/admin/projects/{project_id}/units/reporting/repair"),
+        &token,
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{repair}");
+
     let (status, body) = authed_json(
         app.clone(),
         "POST",

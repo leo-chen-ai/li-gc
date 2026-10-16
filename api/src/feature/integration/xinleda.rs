@@ -24,8 +24,6 @@ pub const UPLOAD_PATH: &str = "upfiles";
 pub const VERSION: &str = "1.0";
 
 pub const LOG_GET: &str = "unifiedlog.get";
-pub const COMPANY_IMPORT: &str = "company.import";
-pub const PROJECT_IMPORT: &str = "project.import";
 pub const LABOURER_ENTRY: &str = "project.labourer.entry";
 pub const ATTENDANCE_IMPORT: &str = "project.labourer.attendance";
 pub const MANAGER_ENTRY: &str = "project.manager.entry";
@@ -33,8 +31,6 @@ pub const LABOURER_IMPORT: &str = "labourer.import";
 
 pub const ALL_METHODS: &[&str] = &[
     LOG_GET,
-    COMPANY_IMPORT,
-    PROJECT_IMPORT,
     LABOURER_ENTRY,
     ATTENDANCE_IMPORT,
     MANAGER_ENTRY,
@@ -284,15 +280,12 @@ pub async fn upload_file(
     .await
 }
 
-pub fn async_token(method: &str, body: &Value) -> Option<String> {
-    if method == PROJECT_IMPORT {
-        body.get("token").and_then(value_string)
-    } else {
-        body.get("data").and_then(value_string)
-    }
-    .map(str::trim)
-    .filter(|value| !value.is_empty())
-    .map(ToOwned::to_owned)
+pub fn async_token(_method: &str, body: &Value) -> Option<String> {
+    body.get("data")
+        .and_then(value_string)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 pub fn log_status(body: &Value) -> Option<i64> {
@@ -423,8 +416,10 @@ mod tests {
     }
 
     #[test]
-    fn every_documented_openapi_method_is_registered() {
-        assert_eq!(ALL_METHODS.len(), 7);
+    fn enabled_methods_only_cover_outbound_personnel_and_attendance() {
+        assert_eq!(ALL_METHODS.len(), 5);
+        assert!(!ALL_METHODS.contains(&"company.import"));
+        assert!(!ALL_METHODS.contains(&"project.import"));
         assert!(!ALL_METHODS.contains(&"company.safeguard"));
         assert!(ALL_METHODS.contains(&MANAGER_ENTRY));
     }

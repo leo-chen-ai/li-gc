@@ -117,6 +117,8 @@ export function createXinledaConfigForm(project?: { id: string; name?: string | 
     project_code: isXinledaDefaultProject(project?.id) ? XINLEDA_DEFAULT_PROJECT_CODE : "",
     // The remote test environment still needs real HTTP requests.
     mode: "production",
+    sync_project: false,
+    sync_units: false,
   };
 }
 
@@ -161,8 +163,8 @@ export function parseXinledaConfig(config: ConstructionPlatformConfig): NingboHo
     app_secret: readString(value, "app_secret", "appsecret", "appSecret"),
     project_code: readString(value, "project_code", "projectCode"),
     mode: readString(value, "mode") === "production" ? "production" : "test",
-    sync_project: readBoolean(modules, true, "sync_project"),
-    sync_units: readBoolean(modules, true, "sync_units"),
+    sync_project: false,
+    sync_units: false,
     sync_teams: readBoolean(modules, true, "sync_teams"),
     sync_workers: readBoolean(modules, true, "sync_workers"),
     sync_attendance: readBoolean(modules, true, "sync_attendance"),
@@ -180,8 +182,8 @@ export function buildXinledaConfig(form: NingboHousingConfigForm): JsonValue {
     project_code: form.project_code.trim(),
     mode: form.mode,
     modules: {
-      sync_project: form.sync_project,
-      sync_units: form.sync_units,
+      sync_project: false,
+      sync_units: false,
       sync_teams: form.sync_teams,
       sync_workers: form.sync_workers,
       sync_attendance: form.sync_attendance,
@@ -200,7 +202,7 @@ export function validateXinledaConfig(form: NingboHousingConfigForm): string | n
     return "AppSecret 必须是 16、24 或 32 个 ASCII 字节，才能按接口文档进行 AES-CBC 加密";
   }
   if (!form.project_code.trim()) return "请填写薪乐达项目编码";
-  if (!form.sync_project && !form.sync_units && !form.sync_teams && !form.sync_workers && !form.sync_attendance) {
+  if (!form.sync_teams && !form.sync_workers && !form.sync_attendance) {
     return "请至少启用一个同步模块";
   }
   return null;
