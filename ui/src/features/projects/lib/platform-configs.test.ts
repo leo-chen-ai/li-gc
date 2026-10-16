@@ -212,7 +212,7 @@ test("薪乐达 V3.8 配置使用 AppID、项目编码且忽略旧保证金数�
 
   assert.equal(validateXinledaConfig(form), null);
   assert.deepEqual(buildXinledaConfig(form), {
-    base_url: "https://test.hwxld.com:8093",
+    base_url: "https://openapi.hwxld.com",
     app_id: "xinleda-app",
     app_secret: "1234567890abcdef",
     project_code: "XLD-PROJECT-1",
@@ -259,13 +259,13 @@ test("薪乐达配置可编辑同平台多账户且兼容 appid 字段", () => {
 });
 
 
-test("薪乐达测试凭证默认填入且项目对接码只用于指定项目", () => {
-  const target = createXinledaConfigForm({ id: XINLEDA_DEFAULT_PROJECT_ID, name: "测试薪乐达" });
-  assert.equal(target.base_url, "https://test.hwxld.com:8093");
+test("薪乐达正式凭证默认填入且项目对接码只用于指定项目", () => {
+  const target = createXinledaConfigForm({ id: XINLEDA_DEFAULT_PROJECT_ID, name: "2026年高新区雨污管网综合改造工程I标段" });
+  assert.equal(target.base_url, "https://openapi.hwxld.com");
   assert.equal(target.app_id, "8210");
   assert.equal(target.app_secret.length, 32);
   assert.equal(target.project_id, XINLEDA_DEFAULT_PROJECT_ID);
-  assert.equal(target.project_code, "110102P726240726348001");
+  assert.equal(target.project_code, "330254R916888097677445914630");
   assert.equal(target.mode, "production");
   assert.equal(validateXinledaConfig(target), null);
   assert.equal(createXinledaConfigForm({ id: "other", name: "其他项目" }).project_code, "");

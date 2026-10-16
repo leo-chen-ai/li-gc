@@ -8,12 +8,12 @@ export const YONGXIN_V2_PLATFORM_TYPE = "yongxin_v2";
 export const YONGXIN_V2_DEFAULT_BASE_URL = "https://apirs.91jtg.com/openapi";
 export const XINLEDA_PLATFORM_NAME = "薪乐达";
 export const XINLEDA_PLATFORM_TYPE = "xinleda";
-export const XINLEDA_DEFAULT_BASE_URL = "https://test.hwxld.com:8093";
+export const XINLEDA_DEFAULT_BASE_URL = "https://openapi.hwxld.com";
 const XINLEDA_DEFAULT_APP_ID = "8210";
 const XINLEDA_DEFAULT_APP_SECRET = "97f5c069d3de43829fd9e65467ec5033";
-const XINLEDA_DEFAULT_PROJECT_CODE = "110102P726240726348001";
+const XINLEDA_DEFAULT_PROJECT_CODE = "330254R916888097677445914630";
 
-export const XINLEDA_DEFAULT_PROJECT_ID = "8c229337-e6c0-4763-aefb-fd3dde8986e0";
+export const XINLEDA_DEFAULT_PROJECT_ID = "8c7a861f-3fe5-413d-bea2-d708105a53b0";
 
 export function isXinledaDefaultProject(projectId: string | null | undefined): boolean {
   return projectId === XINLEDA_DEFAULT_PROJECT_ID;
@@ -115,7 +115,7 @@ export function createXinledaConfigForm(project?: { id: string; name?: string | 
     app_secret: XINLEDA_DEFAULT_APP_SECRET,
     project_id: project?.id ?? "",
     project_code: isXinledaDefaultProject(project?.id) ? XINLEDA_DEFAULT_PROJECT_CODE : "",
-    // The remote test environment still needs real HTTP requests.
+    // 正式对接使用真实 HTTP 请求。
     mode: "production",
     sync_project: false,
     sync_units: false,

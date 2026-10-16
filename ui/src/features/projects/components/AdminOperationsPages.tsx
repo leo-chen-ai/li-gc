@@ -837,7 +837,7 @@ function PlatformConfigPanel({ filters, setFilters, tabControls }: { filters: Co
               {form.platform_type === XINLEDA_PLATFORM_TYPE ? (
                 <section className="rounded-lg border p-4">
                   <div className="grid gap-4 md:grid-cols-2">
-                    <PlatformCredentialField className="md:col-span-2" label="测试环境地址" value={form.base_url} onChange={(base_url) => setForm((current) => ({ ...current, base_url }))} placeholder={XINLEDA_DEFAULT_BASE_URL} />
+                    <PlatformCredentialField className="md:col-span-2" label="接口地址" value={form.base_url} onChange={(base_url) => setForm((current) => ({ ...current, base_url }))} placeholder={XINLEDA_DEFAULT_BASE_URL} />
                     <PlatformCredentialField label="AppID" value={form.app_id} onChange={(app_id) => setForm((current) => ({ ...current, app_id }))} autoComplete="off" />
                     <PlatformCredentialField label="AppSecret" value={form.app_secret} onChange={(app_secret) => setForm((current) => ({ ...current, app_secret }))} type="password" autoComplete="new-password" />
                     {showXinledaProjectCode ? (
