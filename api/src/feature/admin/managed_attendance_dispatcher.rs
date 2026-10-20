@@ -9,7 +9,9 @@ use crate::state::AppState;
 
 const DEFAULT_PHOTO_ENDPOINT: &str = "https://gd.aibims.com/api.php/Aiot/V1/uploadAiotLogs";
 const WORKER_INTERVAL_SECONDS: u64 = 10;
-const CLAIM_LIMIT: i64 = 20;
+// Claim only the job being sent: two sequential 30s requests fit within the 2min lease.
+const CLAIM_LIMIT: i64 = 1;
+const PHOTO_PLATFORMS: [&str; 2] = ["danGong", "shanHuaiZhu"];
 
 #[derive(Debug, FromRow)]
 struct DispatchJob {
@@ -91,10 +93,76 @@ async fn dispatch_due_jobs(
 ) -> Result<(), sqlx::Error> {
     let jobs = claim_due_jobs(pool, worker_instance).await?;
     for job in jobs {
-        match send_attendance_photo(client, endpoint, &job).await {
-            Ok(attempt) => mark_success(pool, &job, attempt).await?,
-            Err(error) => mark_failure(pool, &job, &error).await?,
+        let attempts = send_to_platforms(client, endpoint, &job).await;
+        let mut tx = pool.begin().await?;
+        for (platform, attempt) in &attempts {
+            let (event_type, message, request, response) = match attempt {
+                Ok(attempt) => (
+                    "attendance_photo_pushed",
+                    format!("弹厂家考勤照片接口接收成功(platform={platform})"),
+                    Some(&attempt.request_payload),
+                    Some(&attempt.response_payload),
+                ),
+                Err(error) => (
+                    "attendance_photo_push_failed",
+                    format!("platform={platform}: {}", error.message),
+                    error.request_payload.as_ref(),
+                    error.response_payload.as_ref(),
+                ),
+            };
+            sqlx::query(
+                "INSERT INTO device_dispatch_events (job_id, event_type, message, payload, response_payload) VALUES ($1, $2, $3, $4, $5)",
+            )
+            .bind(job.id)
+            .bind(event_type)
+            .bind(message)
+            .bind(request)
+            .bind(response)
+            .execute(&mut *tx)
+            .await?;
         }
+        if any_platform_succeeded(&attempts) {
+            let results: serde_json::Map<String, Value> = attempts
+                .iter()
+                .map(|(platform, attempt)| {
+                    let result = match attempt {
+                        Ok(attempt) => attempt.result.clone(),
+                        Err(error) => {
+                            serde_json::json!({"success": false, "message": error.message})
+                        }
+                    };
+                    (platform.to_string(), result)
+                })
+                .collect();
+            mark_success(
+                &mut tx,
+                &job,
+                serde_json::json!({"success": true, "platforms": results}),
+            )
+            .await?;
+        } else {
+            let message = attempts
+                .iter()
+                .filter_map(|(platform, attempt)| {
+                    attempt
+                        .as_ref()
+                        .err()
+                        .map(|error| format!("{platform}: {}", error.message))
+                })
+                .collect::<Vec<_>>()
+                .join("; ");
+            mark_failure(
+                &mut tx,
+                &job,
+                &DispatchAttemptError {
+                    message,
+                    request_payload: None,
+                    response_payload: None,
+                },
+            )
+            .await?;
+        }
+        tx.commit().await?;
     }
     Ok(())
 }
@@ -160,14 +228,41 @@ async fn claim_due_jobs(
     .await
 }
 
+async fn send_to_platforms(
+    client: &Client,
+    endpoint: &str,
+    job: &DispatchJob,
+) -> Vec<(
+    &'static str,
+    Result<DispatchAttemptSuccess, DispatchAttemptError>,
+)> {
+    let mut attempts = Vec::with_capacity(PHOTO_PLATFORMS.len());
+    // Always send both, even when the first request fails or succeeds.
+    for platform in PHOTO_PLATFORMS {
+        attempts.push((
+            platform,
+            send_attendance_photo(client, endpoint, job, platform).await,
+        ));
+    }
+    attempts
+}
+
+fn any_platform_succeeded(
+    attempts: &[(&str, Result<DispatchAttemptSuccess, DispatchAttemptError>)],
+) -> bool {
+    attempts.iter().any(|(_, attempt)| attempt.is_ok())
+}
+
 async fn send_attendance_photo(
     client: &Client,
     endpoint: &str,
     job: &DispatchJob,
+    platform: &'static str,
 ) -> Result<DispatchAttemptSuccess, DispatchAttemptError> {
-    let request = build_request(job);
+    let request = build_request(job, platform);
     let request_body = serde_json::to_value(&request).unwrap_or(Value::Null);
     let request_payload = serde_json::json!({
+        "sent_at": chrono::Utc::now(),
         "method": "POST",
         "url": endpoint,
         "headers": {"content-type": "application/json"},
@@ -194,6 +289,7 @@ async fn send_attendance_photo(
             response_payload: Some(serde_json::json!({"http_status": status.as_u16()})),
         })?;
     let response_payload = serde_json::json!({
+        "received_at": chrono::Utc::now(),
         "http_status": status.as_u16(),
         "body": body,
     });
@@ -250,25 +346,24 @@ fn parse_attendance_photo_response(body: &str) -> Result<AttendancePhotoResponse
     })
 }
 
-fn build_request(job: &DispatchJob) -> AttendancePhotoRequest {
+fn build_request(job: &DispatchJob, platform: &'static str) -> AttendancePhotoRequest {
     AttendancePhotoRequest {
         param_type: "check_port",
         device_id: job.device_id.clone(),
         worker_id: job.worker_id.to_string(),
         name: job.worker_name.clone(),
         photo: job.photo_url.clone(),
-        platform: "danGong",
+        platform,
         dev_id: job.device_id.clone(),
         dir: if job.direction == 0 { "in" } else { "out" },
     }
 }
 
 async fn mark_success(
-    pool: &PgPool,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     job: &DispatchJob,
-    attempt: DispatchAttemptSuccess,
+    result: Value,
 ) -> Result<(), sqlx::Error> {
-    let mut tx = pool.begin().await?;
     sqlx::query(
         r#"
         UPDATE device_dispatch_jobs
@@ -281,29 +376,20 @@ async fn mark_success(
         "#,
     )
     .bind(job.id)
-    .bind(attempt.result.clone())
-    .execute(&mut *tx)
+    .bind(result)
+    .execute(&mut **tx)
     .await?;
-    sqlx::query(
-        "INSERT INTO device_dispatch_events (job_id, event_type, message, payload, response_payload) VALUES ($1, 'attendance_photo_pushed', '弹厂家考勤照片接口接收成功', $2, $3)",
-    )
-    .bind(job.id)
-    .bind(attempt.request_payload)
-    .bind(attempt.response_payload)
-    .execute(&mut *tx)
-    .await?;
-    refresh_record_status(&mut tx, job.managed_attendance_record_id).await?;
-    tx.commit().await
+    refresh_record_status(tx, job.managed_attendance_record_id).await?;
+    Ok(())
 }
 
 async fn mark_failure(
-    pool: &PgPool,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     job: &DispatchJob,
     error: &DispatchAttemptError,
 ) -> Result<(), sqlx::Error> {
     let exhausted = job.attempt_count >= job.max_attempts;
     let retry_seconds = 30_i64 * 2_i64.pow(job.attempt_count.saturating_sub(1).min(6) as u32);
-    let mut tx = pool.begin().await?;
     sqlx::query(
         r#"
         UPDATE device_dispatch_jobs
@@ -319,19 +405,10 @@ async fn mark_failure(
     .bind(exhausted)
     .bind(&error.message)
     .bind(retry_seconds)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await?;
-    sqlx::query(
-        "INSERT INTO device_dispatch_events (job_id, event_type, message, payload, response_payload) VALUES ($1, 'attendance_photo_push_failed', $2, $3, $4)",
-    )
-    .bind(job.id)
-    .bind(&error.message)
-    .bind(&error.request_payload)
-    .bind(&error.response_payload)
-    .execute(&mut *tx)
-    .await?;
-    refresh_record_status(&mut tx, job.managed_attendance_record_id).await?;
-    tx.commit().await
+    refresh_record_status(tx, job.managed_attendance_record_id).await?;
+    Ok(())
 }
 
 async fn refresh_record_status(
@@ -387,7 +464,7 @@ mod tests {
             attempt_count: 1,
             max_attempts: 5,
         };
-        let value = serde_json::to_value(build_request(&job)).unwrap();
+        let value = serde_json::to_value(build_request(&job, "danGong")).unwrap();
         assert_eq!(value["paramType"], "check_port");
         assert_eq!(value["platform"], "danGong");
         assert_eq!(value["device_id"], "DEVICE-B-001");
@@ -398,6 +475,69 @@ mod tests {
         assert_eq!(value["dir"], "out");
         assert!(value.get("base64").is_none());
         assert!(value.get("time").is_none());
+    }
+
+    #[tokio::test]
+    async fn sends_both_platforms_and_accepts_either_success() {
+        use axum::{Json, Router, routing::post};
+        use std::sync::{Arc, Mutex};
+
+        // Cover success/failure in either order, both successes and both failures.
+        for outcomes in [[true, false], [false, true], [true, true], [false, false]] {
+            let received = Arc::new(Mutex::new(Vec::<Value>::new()));
+            let captured = received.clone();
+            let app = Router::new().route(
+                "/",
+                post(move |Json(body): Json<Value>| {
+                    let captured = captured.clone();
+                    async move {
+                        let index = if body["platform"] == "danGong" { 0 } else { 1 };
+                        captured.lock().unwrap().push(body);
+                        Json(serde_json::json!({
+                            "success": outcomes[index],
+                            "code": if outcomes[index] { 0 } else { 1 },
+                            "message": "test response",
+                            "data": [],
+                        }))
+                    }
+                }),
+            );
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let endpoint = format!("http://{}/", listener.local_addr().unwrap());
+            let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            let job = DispatchJob {
+                id: Uuid::new_v4(),
+                managed_attendance_record_id: Uuid::new_v4(),
+                worker_id: Uuid::new_v4(),
+                worker_name: "测试人员".to_owned(),
+                device_id: "DEVICE-B-001".to_owned(),
+                direction: 0,
+                photo_url: "https://example.test/photo.jpg".to_owned(),
+                attempt_count: 1,
+                max_attempts: 5,
+            };
+            let client = Client::builder()
+                .no_proxy()
+                .timeout(Duration::from_secs(2))
+                .build()
+                .unwrap();
+            let attempts = send_to_platforms(&client, &endpoint, &job).await;
+            assert_eq!(attempts.len(), 2);
+            assert_eq!(attempts[0].1.is_ok(), outcomes[0]);
+            assert_eq!(attempts[1].1.is_ok(), outcomes[1]);
+            assert_eq!(
+                any_platform_succeeded(&attempts),
+                outcomes[0] || outcomes[1]
+            );
+            let bodies = received.lock().unwrap();
+            assert_eq!(bodies.len(), 2);
+            assert_eq!(bodies[0]["platform"], "danGong");
+            assert_eq!(bodies[1]["platform"], "shanHuaiZhu");
+            let mut first = bodies[0].clone();
+            first["platform"] = serde_json::json!("shanHuaiZhu");
+            assert_eq!(first, bodies[1]);
+            server.abort();
+        }
     }
 
     #[test]
