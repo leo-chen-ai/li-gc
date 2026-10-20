@@ -34,6 +34,8 @@ struct AttendancePhotoRequest {
     worker_id: String,
     name: String,
     photo: String,
+    // The vendor contract intentionally spells this field `platfrom`.
+    #[serde(rename = "platfrom")]
     platform: &'static str,
     dev_id: String,
     dir: &'static str,
@@ -99,13 +101,13 @@ async fn dispatch_due_jobs(
             let (event_type, message, request, response) = match attempt {
                 Ok(attempt) => (
                     "attendance_photo_pushed",
-                    format!("弹厂家考勤照片接口接收成功(platform={platform})"),
+                    format!("弹厂家考勤照片接口接收成功(platfrom={platform})"),
                     Some(&attempt.request_payload),
                     Some(&attempt.response_payload),
                 ),
                 Err(error) => (
                     "attendance_photo_push_failed",
-                    format!("platform={platform}: {}", error.message),
+                    format!("platfrom={platform}: {}", error.message),
                     error.request_payload.as_ref(),
                     error.response_payload.as_ref(),
                 ),
@@ -466,7 +468,8 @@ mod tests {
         };
         let value = serde_json::to_value(build_request(&job, "danGong")).unwrap();
         assert_eq!(value["paramType"], "check_port");
-        assert_eq!(value["platform"], "danGong");
+        assert_eq!(value["platfrom"], "danGong");
+        assert!(value.get("platform").is_none());
         assert_eq!(value["device_id"], "DEVICE-B-001");
         assert_eq!(value["dev_id"], "DEVICE-B-001");
         assert!(value.get("projectId").is_none());
@@ -491,7 +494,7 @@ mod tests {
                 post(move |Json(body): Json<Value>| {
                     let captured = captured.clone();
                     async move {
-                        let index = if body["platform"] == "danGong" { 0 } else { 1 };
+                        let index = if body["platfrom"] == "danGong" { 0 } else { 1 };
                         captured.lock().unwrap().push(body);
                         Json(serde_json::json!({
                             "success": outcomes[index],
@@ -531,10 +534,11 @@ mod tests {
             );
             let bodies = received.lock().unwrap();
             assert_eq!(bodies.len(), 2);
-            assert_eq!(bodies[0]["platform"], "danGong");
-            assert_eq!(bodies[1]["platform"], "shanHuaiZhu");
+            assert!(bodies.iter().all(|body| body.get("platform").is_none()));
+            assert_eq!(bodies[0]["platfrom"], "danGong");
+            assert_eq!(bodies[1]["platfrom"], "shanHuaiZhu");
             let mut first = bodies[0].clone();
-            first["platform"] = serde_json::json!("shanHuaiZhu");
+            first["platfrom"] = serde_json::json!("shanHuaiZhu");
             assert_eq!(first, bodies[1]);
             server.abort();
         }
